@@ -49,4 +49,40 @@ export async function listSkills(root) {
   return skills.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+export async function loadSkill(root, id) {
+  const dir = join(root, 'src', 'skills', id);
+  const skillText = await readFile(join(dir, 'SKILL.md'), 'utf8');
+  const meta = parseFrontMatter(skillText);
+  const body = skillText.replace(/^---[\s\S]*?\n---\s*/, '').trim();
+  const prompt = await readFile(join(dir, 'prompt.md'), 'utf8').catch(() => '');
+  const checklist = await readFile(join(dir, 'checklist.md'), 'utf8').catch(() => '');
+  return {
+    id: String(meta.id || id),
+    name: String(meta.name || id),
+    description: String(meta.description || ''),
+    triggers: Array.isArray(meta.triggers) ? meta.triggers : [],
+    tools: Array.isArray(meta.tools) ? meta.tools : [],
+    writes: meta.writes === true,
+    version: Number(meta.version || 1),
+    body,
+    prompt,
+    checklist
+  };
+}
+
+// 按触发词选择技能：最长匹配优先，避免"简历"抢走"改简历"。
+export async function selectSkill(root, message) {
+  const text = String(message || '');
+  if (!text.trim()) return null;
+  const skills = await listSkills(root);
+  let best = null, bestLength = 0;
+  for (const skill of skills) {
+    for (const trigger of skill.triggers) {
+      if (!trigger) continue;
+      if (text.includes(trigger) && trigger.length > bestLength) { best = skill; bestLength = trigger.length; }
+    }
+  }
+  return best ? loadSkill(root, best.id) : null;
+}
+
 export {parseFrontMatter};

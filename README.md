@@ -1,7 +1,7 @@
 # 职向 v3 · 大学生线下求职智能体
 
-> **当前状态：M8 已完成（三层记忆 + 记忆面板），下一步 M7 技能包。**
-> 进度与回退：[CHANGELOG](docs/plan/CHANGELOG.md) · [工具与能力清单](docs/plan/08-工具与能力清单.md) · [v3 重构方案](docs/plan/01-v3重构方案.md) · [文档索引](docs/README.md)
+> **当前状态：工具注册表、三层记忆、四个技能包已完成（M6→M8→M7）；下一步回到采集框架 M2。**
+> 进度与回退：[CHANGELOG](docs/plan/CHANGELOG.md) · [工具与能力](docs/plan/08-工具与能力清单.md) · [技能清单](docs/plan/09-技能清单.md) · [v3 方案](docs/plan/01-v3重构方案.md)
 > 数据目录：`%LOCALAPPDATA%\ZhiXiang`（首次启动会自动迁移旧 `.data`）
 
 > 从高校就业网采集真实的宣讲会 / 双选会 → 整理成可导入手机日历的行程表 → 结合岗位改简历、做面试准备。

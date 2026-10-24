@@ -121,6 +121,7 @@ export async function recordTask(dir, task) {
     steps: Array.isArray(task.steps) ? task.steps.slice(0, 5).map(s => String(s).slice(0, 80)) : [],
     tools: Array.isArray(task.tools) ? [...new Set(task.tools)].slice(0, 12) : [],
     artifact: task.artifact ? String(task.artifact).slice(0, 80) : '',
+    skill: task.skill ? String(task.skill).slice(0, 40) : '',
     durationMs: Number(task.durationMs) || 0,
     error: task.error ? String(task.error).slice(0, 160) : ''
   };

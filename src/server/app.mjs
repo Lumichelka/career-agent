@@ -15,7 +15,7 @@ import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
 import {prepareDataDir} from '../config/paths.mjs';
 import {listTools} from '../tools/registry.mjs';
-import {listSkills} from '../skills/index.mjs';
+import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -265,6 +265,7 @@ http.createServer(async (req, res) => {
           const modelConfig = models.snapshot();
           if (modelConfig.mode === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
           const profile = (await loadProfile(dir)).facts;
+          const skill = await selectSkill(root, text).catch(() => null);
           const result = await runAgent({
             root,
             modelCall: options => modelConfig.mode === 'codex'
@@ -274,10 +275,11 @@ http.createServer(async (req, res) => {
             message: text || '请阅读附件并询问我希望完成什么任务。',
             attachments,
             profile,
+            skill,
             onEvent: emit,
             signal: controller.signal
           });
-          s.messages.push({role: 'user', content: text, attachments}, {role: 'assistant', backend: backendLabel(modelConfig), content: result.reply, sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
+          s.messages.push({role: 'user', content: text, attachments}, {role: 'assistant', backend: backendLabel(modelConfig), content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
           s.memory = result.memory.slice(0, 5000);
           s.lastTask = {...s.lastTask, status: 'complete', quality: result.quality, durationMs: result.durationMs, finishedAt: new Date().toISOString()};
           if (result.artifact.content.trim()) s.artifacts.push({id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()});
@@ -289,6 +291,7 @@ http.createServer(async (req, res) => {
             steps: result.plan?.steps || [],
             tools: (result.trace || []).map(t => t.label || t.type).filter(Boolean),
             artifact: result.artifact?.title || '',
+            skill: result.skill?.name || '',
             durationMs: result.durationMs
           }).catch(() => {});
           emit({type: 'done', session: s});

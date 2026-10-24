@@ -3,6 +3,19 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.0.0-m7 · 2026-10-24
+
+**M7：四个技能包 + 技能路由**
+
+- 新增 `src/skills/{schedule-planner,company-research,resume-tailoring,interview-prep}/`
+- 每个技能含 `SKILL.md`（元信息/步骤/边界）、`prompt.md`（模型约束）、`checklist.md`（验收）
+- 新增 `loadSkill` 与 `selectSkill`：按最长触发词确定性选择，聊天状态显示「使用技能：xxx」
+- 技能限定工具白名单：模型只能看到该技能允许的工具
+- 技能说明进入系统提示词；任务记录写入 `skill` 字段
+- 新增 `tests/skills.test.mjs`（6 项：清单、加载、路由、提示词、工具限定、完整链路）
+- 验证：58 项测试通过；实测「这周成都有什么宣讲会」→ 行程规划；面板显示 6 工具 / 4 技能
+- 回退：`git reset --hard v3.0.0-m8`
+
 ## v3.0.0-m8 · 2026-10-24
 
 **M8：三层记忆 + 记忆面板**

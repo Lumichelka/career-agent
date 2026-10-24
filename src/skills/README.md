@@ -24,4 +24,4 @@ version: 1
 ---
 ```
 
-能力面板会自动读取并展示这些技能；M7 阶段会把四个技能补齐。
+能力面板会自动读取并展示这些技能；当前已内置四个：`schedule-planner`、`company-research`、`resume-tailoring`、`interview-prep`。
