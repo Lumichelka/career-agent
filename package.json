@@ -1,16 +1,17 @@
 {
   "name": "career-agent",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node server.mjs",
-    "start:lan": "node launch.mjs --lan",
-    "test": "node --test test.mjs api-model.test.mjs isolation.test.mjs recruit.test.mjs",
-    "collect": "node recruit/cli.mjs collect",
-    "schedule": "node recruit/cli.mjs list",
-    "export": "node recruit/cli.mjs export --format ics",
-    "diag": "node diag-cli.mjs"
+    "start": "node src/server/index.mjs",
+    "start:lan": "node scripts/launch.mjs --lan",
+    "test": "node --test tests/core.test.mjs tests/api-model.test.mjs tests/isolation.test.mjs tests/recruit.test.mjs tests/paths.test.mjs",
+    "check": "node scripts/check.mjs",
+    "collect": "node src/recruit/cli.mjs collect",
+    "schedule": "node src/recruit/cli.mjs list",
+    "export": "node src/recruit/cli.mjs export --format ics",
+    "diag": "node scripts/diag.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

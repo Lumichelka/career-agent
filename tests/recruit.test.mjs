@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {SOURCES, sourceById, normalizeCity, parseTimeRange, parseDateText} from './recruit/sources.mjs';
-import {eventId, htmlToText} from './recruit/collect.mjs';
-import {RecruitStore} from './recruit/store.mjs';
-import {buildSchedule, toICS, toCSV, toMarkdown} from './recruit/schedule.mjs';
+import {SOURCES, sourceById, normalizeCity, parseTimeRange, parseDateText} from '../src/recruit/sources.mjs';
+import {eventId, htmlToText} from '../src/recruit/collect.mjs';
+import {RecruitStore} from '../src/recruit/store.mjs';
+import {buildSchedule, toICS, toCSV, toMarkdown} from '../src/recruit/schedule.mjs';
 
 const scuEmploy = `<ul>
 <li>
@@ -128,7 +128,7 @@ test('智能体工具能读取本机招聘数据库', async () => {
       startAt: '2026-11-02T14:00:00+08:00', endAt: '2026-11-02T16:00:00+08:00', venue: '望江校区', fetchedAt: new Date().toISOString(), confidence: 0.8
     });
     store.close();
-    const {callCareerTool} = await import('./api-model.mjs');
+    const {callCareerTool} = await import('../src/model/api-model.mjs');
     const out = await callCareerTool('career_recruit_events', {days: 30}, {config: {recruitDir: dir}});
     assert.equal(out.count, 1);
     assert.match(out.markdown, /工具测试宣讲/);
@@ -137,7 +137,7 @@ test('智能体工具能读取本机招聘数据库', async () => {
 });
 
 test('工具参数校验拒绝多余字段', async () => {
-  const {validateToolArguments} = await import('./tool-policy.mjs');
+  const {validateToolArguments} = await import('../src/tools/tool-policy.mjs');
   assert.throws(() => validateToolArguments('career_recruit_events', {days: 30, evil: 1}), /未声明参数/);
   assert.throws(() => validateToolArguments('career_recruit_events', {days: 999}), /1到90/);
   assert.deepEqual(validateToolArguments('career_company_research', {company: ' 某公司 ', city: '成都'}), {company: '某公司', city: '成都'});

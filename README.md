@@ -12,11 +12,11 @@
 
 1. 安装 **Node.js 23+**（内置 SQLite）。
 2. 双击 **`开始使用.cmd`**。
-3. 用 `.data\首次登录.txt` 里的账号登录 → 左侧「模型与接口设置」→ 选预设、填 API Key → **一键体检** → 保存。
+3. 用 `%LOCALAPPDATA%\ZhiXiang\首次登录.txt` 里的账号登录 → 左侧「模型与接口设置」→ 选预设、填 API Key → **一键体检** → 保存。
 
 想要手机也能用：双击 **`开始使用-局域网.cmd`**，用控制台打印的 `http://192.168.x.x:4189` 访问。
 
-> 详细图文步骤见 [操作手册](docs/04-操作手册.md)。
+> 详细图文步骤见 [操作手册](docs/archive/v2/04-操作手册.md)。
 
 ---
 
@@ -93,13 +93,13 @@ docs/                  审计、方案、部署、手册、答辩
 
 ```bash
 npm start                 # 启动（等同双击 开始使用.cmd）
-npm test                  # 32 项自动化测试
-node diag-cli.mjs         # 命令行接口体检
-node recruit/cli.mjs sources
-node recruit/cli.mjs collect --limit 20
-node recruit/cli.mjs list --days 30
-node recruit/cli.mjs export --format ics --out schedule.ics
-node recruit/cli.mjs verify
+npm test                  # 自动化测试（全部通过）
+npm run check             # 环境 + 数据 + 测试 一键自检
+node src/recruit/cli.mjs sources
+node src/recruit/cli.mjs collect --limit 20
+node src/recruit/cli.mjs list --days 30
+node src/recruit/cli.mjs export --format ics --out schedule.ics
+node src/recruit/cli.mjs verify
 ```
 
 ---
@@ -108,11 +108,11 @@ node recruit/cli.mjs verify
 
 | 文档 | 内容 |
 | --- | --- |
-| [01 现状审计与重构判定](docs/01-现状审计与重构判定.md) | 原项目问题清单、证据、保留/改造/重写判定 |
-| [02 v2 总体方案](docs/02-v2总体方案.md) | 每个环节的 3–6 种实现路径与取舍 |
-| [03 接口连接与多设备](docs/03-接口连接与多设备.md) | API 连不上的根因、5 种接口方案、5 种多端方案 |
-| [04 操作手册](docs/04-操作手册.md) | 零基础上手、截图、报错对照 |
-| [05 答辩要点](docs/05-答辩要点.md) | 逐条对应作业要求、演示脚本、问答准备 |
+| [01 现状审计与重构判定](docs/archive/v2/01-现状审计与重构判定.md) | 原项目问题清单、证据、保留/改造/重写判定 |
+| [02 v2 总体方案](docs/archive/v2/02-v2总体方案.md) | 每个环节的 3–6 种实现路径与取舍 |
+| [03 接口连接与多设备](docs/archive/v2/03-接口连接与多设备.md) | API 连不上的根因、5 种接口方案、5 种多端方案 |
+| [04 操作手册](docs/archive/v2/04-操作手册.md) | 零基础上手、截图、报错对照 |
+| [05 答辩要点](docs/archive/v2/05-答辩要点.md) | 逐条对应作业要求、演示脚本、问答准备 |
 
 ---
 

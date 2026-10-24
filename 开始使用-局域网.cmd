@@ -17,5 +17,5 @@ if not exist "node_modules\pdfjs-dist\legacy\build\pdf.mjs" (
     exit /b 1
   )
 )
-node launch.mjs --lan
+node scripts\launch.mjs --lan
 if errorlevel 1 pause

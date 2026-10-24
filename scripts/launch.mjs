@@ -1,10 +1,12 @@
 import {spawn} from 'node:child_process';
 import {mkdirSync, openSync, writeFileSync, existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
+import {resolveDataDir} from '../src/config/paths.mjs';
 import {join} from 'node:path';
 import os from 'node:os';
 
-const root = fileURLToPath(new URL('.', import.meta.url));
+const root = fileURLToPath(new URL('..', import.meta.url));
+const dataDir = resolveDataDir();
 const port = Number(process.env.PORT || 4189);
 const lan = process.argv.includes('--lan') || process.env.CAREER_HOST === '0.0.0.0';
 const noOpen = process.argv.includes('--no-open') || process.env.CAREER_NO_OPEN === '1';
@@ -40,20 +42,20 @@ async function main() {
       return;
     }
   } else {
-    mkdirSync(join(root, '.data'), {recursive: true});
+    mkdirSync(dataDir, {recursive: true});
     const env = {...process.env, CAREER_HOST: host};
-    const child = spawn(process.execPath, [join(root, 'server.mjs')], {
+    const child = spawn(process.execPath, [join(root, 'src', 'server', 'index.mjs')], {
       cwd: root,
       detached: true,
       windowsHide: true,
       env,
-      stdio: ['ignore', openSync(join(root, '.data', 'server.log'), 'a'), openSync(join(root, '.data', 'server-error.log'), 'a')]
+      stdio: ['ignore', openSync(join(dataDir, 'server.log'), 'a'), openSync(join(dataDir, 'server-error.log'), 'a')]
     });
     child.unref();
-    writeFileSync(join(root, '.data', 'server.pid'), String(child.pid));
+    writeFileSync(join(dataDir, 'server.pid'), String(child.pid));
     for (let i = 0; i < 60 && !await ready(); i++) await new Promise(r => setTimeout(r, 250));
     if (!await ready()) {
-      console.log('启动失败，请查看 .data/server-error.log');
+      console.log('启动失败，请查看 ' + join(dataDir, 'server-error.log'));
       process.exitCode = 1;
       return;
     }
@@ -68,8 +70,8 @@ async function main() {
     console.log('\n注意：局域网模式是 HTTP 明文，仅建议在可信网络（家里 / 宿舍）使用；');
     console.log('跨网络访问请用 Tailscale 等私有组网，或部署到有 HTTPS 的服务器，不要把端口直接暴露到公网。');
   }
-  if (existsSync(join(root, '.data', '首次登录.txt'))) {
-    console.log('\n首次登录账号与密码见：.data\\首次登录.txt');
+  if (existsSync(join(dataDir, '首次登录.txt'))) {
+    console.log('\n首次登录账号与密码见：' + join(dataDir, '首次登录.txt'));
   }
   console.log('关闭这个窗口不会停止服务；需要停止时在任务管理器结束本项目的 node 进程。');
 

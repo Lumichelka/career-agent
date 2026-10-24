@@ -14,6 +14,7 @@ import {runCollection, collectSource} from './collect.mjs';
 import {RecruitStore} from './store.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
+import {resolveDataDir} from '../config/paths.mjs';
 
 const argv = process.argv.slice(2);
 const command = argv[0] || 'help';
@@ -21,15 +22,15 @@ const flag = name => { const i = argv.indexOf('--' + name); return i >= 0 ? argv
 const many = name => argv.reduce((acc, v, i) => (v === '--' + name && argv[i + 1] ? [...acc, argv[i + 1]] : acc), []);
 // 默认写到网页里 owner 账号的数据目录，这样命令行采集的结果网页也能看到。
 function defaultDataDir() {
-  if (process.env.CAREER_DATA_DIR) return resolve(process.env.CAREER_DATA_DIR);
+  const base = resolveDataDir();
   try {
-    const accounts = JSON.parse(readFileSync('.data/accounts.json', 'utf8'));
+    const accounts = JSON.parse(readFileSync(join(base, 'accounts.json'), 'utf8'));
     if (accounts.length === 1) {
-      const dir = join('.data', 'users', accounts[0].id, '.data');
-      if (existsSync(dir)) return resolve(dir);
+      const dir = join(base, 'users', accounts[0].id, '.data');
+      if (existsSync(dir)) return dir;
     }
   } catch { /* 还没初始化过账号 */ }
-  return resolve('.data');
+  return base;
 }
 
 const days = Number(flag('days') || 30);

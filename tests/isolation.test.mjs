@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm, readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {Accounts} from './accounts.mjs';
-import {KeyVault} from './keyvault.mjs';
+import {Accounts} from '../src/server/accounts.mjs';
+import {KeyVault} from '../src/model/keyvault.mjs';
 
 test('账号注册、登录与会话', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'zx-accounts-'));

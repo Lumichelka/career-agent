@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {startMockOpenAI} from './test-mock-openai.mjs';
-import {runApiModel, parseJsonLoose, cleanJsonText} from './api-model.mjs';
-import {runAgent} from './agent.mjs';
-import {runDiagnostics} from './diag.mjs';
+import {startMockOpenAI} from './mock-openai.mjs';
+import {runApiModel, parseJsonLoose, cleanJsonText} from '../src/model/api-model.mjs';
+import {runAgent} from '../src/agent/agent.mjs';
+import {runDiagnostics} from '../src/model/diag.mjs';
 
-const root = fileURLToPath(new URL('.', import.meta.url));
+const root = fileURLToPath(new URL('..', import.meta.url));
 
 test('流式接口能聚合成完整 JSON', async () => {
   const mock = await startMockOpenAI();

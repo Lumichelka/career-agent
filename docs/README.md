@@ -6,7 +6,7 @@
 
 1. [v3 重构方案](plan/01-v3重构方案.md) —— 目标、架构、阶段
 2. [文件地图](plan/00-文件地图.md) —— 每个文件干什么、为什么乱
-3. [操作手册](04-操作手册.md) —— 怎么启动、怎么配模型
+3. [操作手册](archive/v2/04-操作手册.md) —— 怎么启动、怎么配模型（v2 版，Phase 0 后的路径见 README）
 
 ## 我想参与决策
 
@@ -23,8 +23,9 @@
 ## 我要交作业 / 答辩
 
 - [v3 重构方案](plan/01-v3重构方案.md) 第 3 节：需求逐条对应
-- [答辩要点](05-答辩要点.md)（v2 版，Phase 4 会更新）
-- 示例导出：[ICS](示例-招聘行程.ics) · [CSV](示例-招聘行程.csv) · [Markdown](示例-招聘行程.md)（Phase 0 会移入 `examples/`）
+- [答辩要点](archive/v2/05-答辩要点.md)（v2 版，Phase 4 会更新）
+- 示例导出：[ICS](examples/示例-招聘行程.ics) · [CSV](examples/示例-招聘行程.csv) · [Markdown](examples/示例-招聘行程.md)
+- 旧版说明：[共同测试说明](archive/v2/共同测试说明.md)
 
 ---
 
@@ -40,4 +41,4 @@ docs/
 └─ examples/        示例导出（ics/csv/md）
 ```
 
-> 现在 v2 文档还在 `docs/` 根目录；Phase 0 会按上面的结构归档，届时本索引同步更新。
+> Phase 0 已执行：v2 文档归档到 `archive/v2/`，示例在 `examples/`，截图在 `assets/`。

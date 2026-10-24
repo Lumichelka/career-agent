@@ -1,22 +1,22 @@
 import {Accounts} from './accounts.mjs';
-import {ModelSettings, validateModelSettings, backendLabel} from './model-settings.mjs';
-import {presetOptions, decorateChatError} from './providers.mjs';
-import {runApiModel, probeApi} from './api-model.mjs';
-import {runDiagnostics} from './diag.mjs';
-import {KeyVault} from './keyvault.mjs';
-import {PlatformBrowser} from './platforms.mjs';
-import {handleRecruit} from './recruit/api.mjs';
+import {ModelSettings, validateModelSettings, backendLabel} from '../model/model-settings.mjs';
+import {presetOptions, decorateChatError} from '../model/providers.mjs';
+import {runApiModel, probeApi} from '../model/api-model.mjs';
+import {runDiagnostics} from '../model/diag.mjs';
+import {KeyVault} from '../model/keyvault.mjs';
+import {PlatformBrowser} from '../platform/platforms.mjs';
+import {handleRecruit} from '../recruit/api.mjs';
 import http from 'node:http';
 import os from 'node:os';
 import {readFile, mkdir, writeFile, readdir, copyFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
-import {runAgent, runModel} from './agent.mjs';
+import {runAgent, runModel} from '../agent/agent.mjs';
+import {prepareDataDir} from '../config/paths.mjs';
 
-const root = fileURLToPath(new URL('.', import.meta.url));
-const dataDir = process.env.CAREER_DATA_DIR || join(root, '.data');
-await mkdir(dataDir, {recursive: true});
+const root = fileURLToPath(new URL('../..', import.meta.url));
+const dataDir = await prepareDataDir({root, log: message => console.log(message)});
 const tokenFile = join(dataDir, 'local-session-token');
 let token = await readFile(tokenFile, 'utf8').catch(() => '');
 if (!/^[a-f0-9]{48}$/.test(token)) { token = randomBytes(24).toString('hex'); await writeFile(tokenFile, token, 'utf8'); }
@@ -90,19 +90,19 @@ http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/health') return send(res, {app: 'career-agent', status: 'ready', host, port});
 
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-      const html = (await readFile(join(root, 'index.html'), 'utf8')).replace('SESSION_TOKEN', token);
+      const html = (await readFile(join(root, 'src', 'web', 'index.html'), 'utf8')).replace('SESSION_TOKEN', token);
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src 'self' https://esm.sh; worker-src blob: https://esm.sh; img-src 'self' data:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff'});
       return res.end(html);
     }
 
     if (req.method === 'GET' && url.pathname === '/recruit') {
-      const html = (await readFile(join(root, 'recruit', 'page.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
+      const html = (await readFile(join(root, 'src', 'web', 'recruit.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
       return res.end(html);
     }
 
     if (req.method === 'GET' && ['/ui-model.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'ui-model.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -291,5 +291,5 @@ http.createServer(async (req, res) => {
   const lan = host === '0.0.0.0' ? Object.values(os.networkInterfaces()).flat().filter(n => n && n.family === 'IPv4' && !n.internal).map(n => 'http://' + n.address + ':' + port) : [];
   console.log('职向智能体：http://127.0.0.1:' + port);
   if (lan.length) console.log('局域网访问（同一 Wi-Fi 的其它设备）：' + lan.join(' '));
-  console.log('只保存本机数据；不会收集招聘平台密码。首次进入请用 .data/首次登录.txt 里的账号登录。');
+  console.log('只保存本机数据；不会收集招聘平台密码。首次进入请用 ' + join(dataDir, '首次登录.txt') + ' 里的账号登录。');
 });

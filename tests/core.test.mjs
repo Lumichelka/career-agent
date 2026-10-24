@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm, readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {normalizeBaseUrl, endpointFor, isPrivateHostname, validateProxy, explainError, detectPreset, decorateChatError} from './providers.mjs';
-import {KeyVault} from './keyvault.mjs';
-import {ModelSettings, validateModelSettings} from './model-settings.mjs';
-import {buildSchedule, estimateTravel, toICS, toCSV, toMarkdown} from './recruit/schedule.mjs';
+import {normalizeBaseUrl, endpointFor, isPrivateHostname, validateProxy, explainError, detectPreset, decorateChatError} from '../src/model/providers.mjs';
+import {KeyVault} from '../src/model/keyvault.mjs';
+import {ModelSettings, validateModelSettings} from '../src/model/model-settings.mjs';
+import {buildSchedule, estimateTravel, toICS, toCSV, toMarkdown} from '../src/recruit/schedule.mjs';
 
 test('接口地址规范化：去掉重复协议路径', () => {
   assert.equal(normalizeBaseUrl(' https://api.deepseek.com/chat/completions '), 'https://api.deepseek.com');

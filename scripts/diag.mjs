@@ -4,20 +4,22 @@
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {readFile} from 'node:fs/promises';
-import {runDiagnostics} from './diag.mjs';
-import {KeyVault} from './keyvault.mjs';
-import {ModelSettings} from './model-settings.mjs';
-import {PRESETS} from './providers.mjs';
+import {runDiagnostics} from '../src/model/diag.mjs';
+import {KeyVault} from '../src/model/keyvault.mjs';
+import {ModelSettings} from '../src/model/model-settings.mjs';
+import {PRESETS} from '../src/model/providers.mjs';
+import {resolveDataDir} from '../src/config/paths.mjs';
 
-const root = fileURLToPath(new URL('.', import.meta.url));
+const root = fileURLToPath(new URL('..', import.meta.url));
+const dataDir = resolveDataDir();
 const arg = name => { const i = process.argv.indexOf('--' + name); return i >= 0 ? process.argv[i + 1] : ''; };
 
 let config = null;
 try {
-  const accounts = JSON.parse(await readFile(join(root, '.data', 'accounts.json'), 'utf8'));
+  const accounts = JSON.parse(await readFile(join(dataDir, 'accounts.json'), 'utf8'));
   const id = accounts[0]?.id;
   if (id) {
-    const home = join(root, '.data', 'users', id);
+    const home = join(dataDir, 'users', id);
     const vault = await new KeyVault(join(home, '.data')).init();
     const models = await new ModelSettings(home, vault).load();
     config = models.snapshot();
