@@ -1,19 +1,11 @@
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {createToolPolicy} from '../tools/tool-policy.mjs';
+import {toolsForModel} from '../tools/registry.mjs';
+import {createToolExecutor, callTool} from '../tools/execute.mjs';
 import {endpointFor, explainError} from './providers.mjs';
 import {makeFetch} from './proxy-fetch.mjs';
 
-const platform = {type: 'string', enum: ['boss', 'xiaohongshu']};
-
-export const API_TOOLS = [
-  {name: 'career_platform_status', description: '检查BOSS和小红书连接状态，不把已打开当已登录。', parameters: {type: 'object', properties: {}, additionalProperties: false}},
-  {name: 'career_platform_search', description: '搜索本人按需连接的平台岗位或笔记。未连接会在聊天提示登录并等待选择，不自行登录，不发消息。搜索词不含个人联系方式或完整简历。', parameters: {type: 'object', properties: {platform, query: {type: 'string', maxLength: 120}}, required: ['platform', 'query'], additionalProperties: false}},
-  {name: 'career_platform_read', description: '读取专用浏览器当前的岗位/笔记/搜索页面，不读私信、设置或登录凭据。', parameters: {type: 'object', properties: {platform}, required: ['platform'], additionalProperties: false}},
-  {name: 'career_public_search', description: '通过用户配置的搜索服务查询公开网络，返回实际搜索摘要和链接；未配置时明确不可用，不能编造结果。', parameters: {type: 'object', properties: {query: {type: 'string', maxLength: 120}}, required: ['query'], additionalProperties: false}},
-  {name: 'career_company_research', description: '调研一家用人单位：查询公开信息（行业、规模、口碑、校招动态），返回搜索摘要与链接。未配置搜索服务时如实说明，不得编造公司评价或待遇。', parameters: {type: 'object', properties: {company: {type: 'string', maxLength: 60}, city: {type: 'string', maxLength: 20}}, required: ['company'], additionalProperties: false}},
-  {name: 'career_recruit_events', description: '读取本机已采集的线下招聘活动（宣讲会/双选会/就业指导），按时间排序并给出冲突与通勤提示。用于排行程；没有数据时如实说明需要先采集。', parameters: {type: 'object', properties: {days: {type: 'number', minimum: 1, maximum: 90}, school: {type: 'string', maxLength: 30}, kind: {type: 'string', enum: ['宣讲会', '双选会', '就业指导', '招聘信息', '其他']}}, additionalProperties: false}}
-];
+export const API_TOOLS = toolsForModel();
 
 // 兼容旧调用点：外部可能仍在使用 apiEndpoint
 export function apiEndpoint(base, protocol) { return endpointFor(base, protocol); }
@@ -37,88 +29,9 @@ export function parseJsonLoose(raw) {
   return JSON.parse(body);
 }
 
-function publicUrl(raw) {
-  try {
-    const u = new URL(raw);
-    return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password;
-  } catch { return false; }
-}
-
-export async function callCareerTool(name, args, {taskId, config, signal, fetchImpl = fetch} = {}) {
-  if (name === 'career_recruit_events') {
-    if (!config.recruitDir) return {status: 'unavailable', message: '当前任务没有关联招聘数据库，请让用户先在“招聘日历”里采集。', events: []};
-    const days = Math.min(90, Math.max(1, Number(args.days) || 30));
-    const {RecruitStore} = await import('../recruit/store.mjs');
-    const {buildSchedule, toMarkdown} = await import('../recruit/schedule.mjs');
-    const store = RecruitStore.open(join(config.recruitDir, 'recruit.db'));
-    try {
-      const from = new Date().toISOString().slice(0, 10) + 'T00:00:00+08:00';
-      const to = new Date(Date.now() + days * 86400000).toISOString();
-      const events = store.listEvents({from, to, limit: 300, school: args.school || undefined, kind: args.kind || undefined});
-      const schedule = buildSchedule(events);
-      return {
-        status: events.length ? 'readable' : 'empty',
-        notice: '数据来自本机已采集的高校就业网页面；未复核的条目请点来源链接确认，通勤为估算值。',
-        count: events.length,
-        stats: schedule.stats,
-        markdown: events.length ? toMarkdown(schedule, {title: `未来 ${days} 天线下招聘安排`}) : '',
-        events: events.slice(0, 60).map(e => ({school: e.school, title: e.title, company: e.company, kind: e.kind, startAt: e.startAt, endAt: e.endAt, venue: e.venue, sourceUrl: e.sourceUrl, verified: e.verified}))
-      };
-    } finally { store.close(); }
-  }
-  if (name === 'career_company_research') {
-    if (!config.searchUrl) return {status: 'unavailable', message: '当前接口未配置通用搜索服务，无法做公司调研。可在“模型与接口 → 高级选项”里填写 SearXNG 地址，或改为读取已连接平台的公开页面。', sources: []};
-    const company = String(args.company || '').trim();
-    if (!company || company.length > 60) throw new Error('公司名无效');
-    const city = String(args.city || '').trim().slice(0, 20);
-    const queries = [company + ' 公司 介绍 行业', company + (city ? ' ' + city : '') + ' 校园招聘 待遇 口碑'];
-    const sources = [];
-    for (const query of queries) {
-      const u = new URL(config.searchUrl);
-      u.searchParams.set('q', query);
-      u.searchParams.set('format', 'json');
-      const r = await fetchImpl(u, {signal, redirect: 'error'});
-      if (!r.ok) throw new Error('搜索服务响应 HTTP ' + r.status);
-      const d = await r.json();
-      for (const x of (d.results || []).filter(x => publicUrl(x.url)).slice(0, 5)) {
-        if (sources.some(s => s.url === x.url)) continue;
-        sources.push({title: String(x.title || ''), url: x.url, snippet: String(x.content || '').slice(0, 1200), query});
-      }
-    }
-    return {
-      status: sources.length ? 'readable' : 'empty',
-      company,
-      notice: '以下是公开搜索摘要，不等于公司官方口径；待遇与评价请以来源原文为准，不要据此推断录用概率。',
-      sources: sources.slice(0, 8)
-    };
-  }
-  if (name === 'career_public_search') {
-    if (!config.searchUrl) return {status: 'unavailable', message: '当前接口未配置通用搜索服务。可使用已连接的平台工具，不能声称已联网搜索。', sources: []};
-    if (typeof args.query !== 'string' || args.query.length > 120 || !args.query.trim()) throw new Error('搜索词无效');
-    const u = new URL(config.searchUrl);
-    u.searchParams.set('q', args.query);
-    u.searchParams.set('format', 'json');
-    const r = await fetchImpl(u, {signal, redirect: 'error'});
-    if (!r.ok) throw new Error('搜索服务响应 HTTP ' + r.status);
-    const d = await r.json();
-    return {
-      status: 'readable',
-      notice: '以下为搜索引擎返回的摘要，不代表已读取网页正文。',
-      sources: (d.results || []).filter(x => publicUrl(x.url)).slice(0, 8).map(x => ({title: String(x.title || ''), url: x.url, snippet: String(x.content || '').slice(0, 2000)}))
-    };
-  }
-  const action = {career_platform_status: 'status', career_platform_search: 'search', career_platform_read: 'read'}[name];
-  if (!action) throw new Error('模型请求了未开放的工具');
-  const base = process.env.CAREER_BRIDGE_URL, token = config?.bridgeToken || process.env.CAREER_BRIDGE_TOKEN;
-  if (!base || !token) throw new Error('本机平台桥接未就绪');
-  const r = await fetchImpl(base + '/api/platform/' + action, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json', 'x-career-token': token},
-    body: JSON.stringify({...args, taskId}),
-    signal
-  });
-  if (!r.ok) throw new Error('本机工具响应 HTTP ' + r.status);
-  return r.json();
+// 兼容旧调用：工具实现已迁到 src/tools/，这里保留同名导出。
+export async function callCareerTool(name, args, ctx = {}) {
+  return callTool(name, args, ctx);
 }
 
 function headersFor(config) {
@@ -293,7 +206,7 @@ async function runOnce({root, prompt, schema, search, onEvent, signal, taskId, c
   const available = search ? API_TOOLS : [];
   const protocol = config.protocol;
   const trace = [], toolEvidence = [];
-  const executeTool = createToolPolicy();
+  const executeTool = createToolExecutor(toolCaller ? {runner: (tool, args, ctx) => toolCaller(tool.name, args, ctx)} : {});
   const doFetch = fetchImpl || makeFetch(config.proxy);
   let messages = protocol === 'chat' ? [{role: 'system', content: system}, {role: 'user', content: prompt}] : [{role: 'user', content: prompt}];
   let input = [{role: 'user', content: prompt}];
@@ -322,7 +235,7 @@ async function runOnce({root, prompt, schema, search, onEvent, signal, taskId, c
       let args;
       try { args = typeof t.args === 'string' ? JSON.parse(t.args) : (t.args || {}); } catch { args = null; }
       onEvent?.({type: 'tool', toolType: 'mcp_tool_call', text: t.name === 'career_public_search' ? '正在检索公开信息' : '正在调用平台工具'});
-      const value = await executeTool(t.name, args, validated => toolCaller(t.name, validated, {taskId, config, signal, fetchImpl: doFetch}));
+      const value = await executeTool(t.name, args, {taskId, config, fetchImpl: doFetch, signal});
       const content = JSON.stringify(value).slice(0, 24000);
       trace.push({type: 'mcp_tool_call', label: t.name});
       toolEvidence.push(JSON.stringify({tool: t.name, result: value}).slice(0, 10000));
@@ -335,7 +248,7 @@ async function runOnce({root, prompt, schema, search, onEvent, signal, taskId, c
   throw new Error('模型工具循环超过上限，未交付替代回复。');
 }
 
-export async function runApiModel({root, prompt, schema = 'response.schema.json', search = true, onEvent = () => {}, signal, taskId, config, fetchImpl = null, toolCaller = callCareerTool}) {
+export async function runApiModel({root, prompt, schema = 'response.schema.json', search = true, onEvent = () => {}, signal, taskId, config, fetchImpl = null, toolCaller = null}) {
   try {
     return await runOnce({root, prompt, schema, search, onEvent, signal, taskId, config, fetchImpl, toolCaller});
   } catch (e) {

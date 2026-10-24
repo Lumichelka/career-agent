@@ -63,8 +63,8 @@ export async function startMockOpenAI({port = 0} = {}) {  const state = {request
 }
 
 
-// 直接运行时作为独立服务，方便手工联调：node test-mock-openai.mjs 18080
-if (process.argv[1] && process.argv[1].endsWith('test-mock-openai.mjs')) {
+// 直接运行时作为独立服务，方便手工联调：node tests/mock-openai.mjs 18080
+if (process.argv[1] && /mock-openai\.mjs$/.test(process.argv[1])) {
   const port = Number(process.argv[2] || 18080);
   const mock = await startMockOpenAI({port});
   console.log('mock OpenAI listening at ' + mock.url);

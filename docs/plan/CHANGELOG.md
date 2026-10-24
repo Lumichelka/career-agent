@@ -3,6 +3,21 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.0.0-m6 · 2026-10-24
+
+**M6：统一工具注册表 + 能力面板**
+
+- 新增 `src/tools/registry.mjs`：6 个工具的唯一定义来源（schema / 权限 / 超时 / handler）
+- 新增 `src/tools/policy.mjs`：参数校验从 schema 推导，不再维护第二份字段表
+- 新增 `src/tools/execute.mjs`：去重、权限、超时、错误归一
+- 新增 `src/tools/handlers/*`：招聘查询、搜索、公司调研、平台工具的实现迁出模型层
+- 删除 `tool-policy.mjs`（三处重复之一），`platform-mcp.mjs` 改为从注册表生成
+- 新增 `GET /api/capabilities` 与左侧「⚙ 能力与记忆」面板
+- 新增 `npm run tools` 命令行清单
+- 新增 `tests/tools.test.mjs`（注册表一致性、校验、执行器、技能扫描）
+- 验证：45 项测试通过；能力面板显示 6 工具 / 3 层记忆；聊天链路（模拟接口）正常
+- 回退：`git reset --hard v3.0.0-phase0`
+
 ## v3.0.0-phase0 · 2026-10-24
 
 **Phase 0：整理与地基**

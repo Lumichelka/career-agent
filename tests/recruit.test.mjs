@@ -137,8 +137,8 @@ test('智能体工具能读取本机招聘数据库', async () => {
 });
 
 test('工具参数校验拒绝多余字段', async () => {
-  const {validateToolArguments} = await import('../src/tools/tool-policy.mjs');
+  const {validateToolArguments} = await import('../src/tools/policy.mjs');
   assert.throws(() => validateToolArguments('career_recruit_events', {days: 30, evil: 1}), /未声明参数/);
-  assert.throws(() => validateToolArguments('career_recruit_events', {days: 999}), /1到90/);
+  assert.throws(() => validateToolArguments('career_recruit_events', {days: 999}), /不能大于 90/);
   assert.deepEqual(validateToolArguments('career_company_research', {company: ' 某公司 ', city: '成都'}), {company: '某公司', city: '成都'});
 });

@@ -14,6 +14,9 @@ import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
 import {prepareDataDir} from '../config/paths.mjs';
+import {listTools} from '../tools/registry.mjs';
+import {listSkills} from '../skills/index.mjs';
+import {memoryOutline} from '../agent/memory.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const dataDir = await prepareDataDir({root, log: message => console.log(message)});
@@ -101,8 +104,8 @@ http.createServer(async (req, res) => {
       return res.end(html);
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -145,6 +148,7 @@ http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/model') return send(res, models.public());
     if (req.method === 'GET' && url.pathname === '/api/model/presets') return send(res, {presets: presetOptions()});
+    if (req.method === 'GET' && url.pathname === '/api/capabilities') return send(res, {tools: listTools(), skills: await listSkills(root), memory: memoryOutline()});
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const items = [];

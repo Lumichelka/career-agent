@@ -6,8 +6,9 @@
   "scripts": {
     "start": "node src/server/index.mjs",
     "start:lan": "node scripts/launch.mjs --lan",
-    "test": "node --test tests/core.test.mjs tests/api-model.test.mjs tests/isolation.test.mjs tests/recruit.test.mjs tests/paths.test.mjs",
+    "test": "node --test tests/core.test.mjs tests/api-model.test.mjs tests/isolation.test.mjs tests/recruit.test.mjs tests/paths.test.mjs tests/tools.test.mjs",
     "check": "node scripts/check.mjs",
+    "tools": "node scripts/list-tools.mjs",
     "collect": "node src/recruit/cli.mjs collect",
     "schedule": "node src/recruit/cli.mjs list",
     "export": "node src/recruit/cli.mjs export --format ics",
