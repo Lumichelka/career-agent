@@ -181,9 +181,17 @@
   $('#model-settings').onclick = () => window.showModelSettings().catch(e => ZX.showError?.(e.message));
   if ($('#mobile-model')) $('#mobile-model').onclick = () => window.showModelSettings().catch(e => ZX.showError?.(e.message));
 
-  // 侧栏加一个招聘日历入口
+  // 侧栏加入口：工作台 / 招聘日历
   try {
     const anchor = $('#platforms');
+    if (anchor && !$('#today-entry')) {
+      const t = document.createElement('button');
+      t.id = 'today-entry';
+      t.className = 'new platform-launch';
+      t.textContent = '▦ 今天 / 工作台';
+      t.onclick = () => { location.href = '/'; };
+      anchor.before(t);
+    }
     if (anchor && !$('#recruit-entry')) {
       const b = document.createElement('button');
       b.id = 'recruit-entry';
