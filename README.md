@@ -1,7 +1,8 @@
 # 职向 v3 · 大学生线下求职智能体
 
-> **当前状态：简历 Word 导出已完成（3.1 收尾）；剩余高校源适配与语音模拟面试。**
-> 进度与回退：[CHANGELOG](docs/plan/CHANGELOG.md) · [需求对照与演示](docs/plan/15-需求对照与演示.md) · [简历与投递](docs/plan/13-简历与投递.md) · [v3 方案](docs/plan/01-v3重构方案.md)
+> **当前状态：`v3.0.0` 最终验收完成；需求对照、文件地图、最终交付清单均已更新。**
+> 先看：[最终交付清单](docs/plan/18-最终交付清单.md) · [需求对照与演示](docs/plan/15-需求对照与演示.md) · [文件地图](docs/plan/00-文件地图.md) · [CHANGELOG](docs/plan/CHANGELOG.md)
+> 数据目录：`%LOCALAPPDATA%\ZhiXiang`（首次启动会自动迁移旧 `.data`）
 > 数据目录：`%LOCALAPPDATA%\ZhiXiang`（首次启动会自动迁移旧 `.data`）
 
 > 从高校就业网采集真实的宣讲会 / 双选会 → 整理成可导入手机日历的行程表 → 结合岗位改简历、做面试准备。
