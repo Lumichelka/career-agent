@@ -63,7 +63,7 @@ if (major >= 23) {
 // 5. 自动化测试
 if (!args.includes('--no-test')) {
   console.log('\n运行自动化测试…');
-  const files = ['tests/core.test.mjs', 'tests/api-model.test.mjs', 'tests/isolation.test.mjs', 'tests/recruit.test.mjs', 'tests/paths.test.mjs', 'tests/tools.test.mjs'];
+  const files = ['tests/core.test.mjs', 'tests/api-model.test.mjs', 'tests/isolation.test.mjs', 'tests/recruit.test.mjs', 'tests/paths.test.mjs', 'tests/tools.test.mjs', 'tests/memory.test.mjs'];
   const run = spawnSync(process.execPath, ['--test', ...files], {cwd: root, stdio: 'inherit'});
   record('自动化测试', run.status === 0, run.status === 0 ? '全部通过' : '存在失败，见上方输出');
 } else {

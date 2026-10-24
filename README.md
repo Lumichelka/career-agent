@@ -1,6 +1,6 @@
 # 职向 v3 · 大学生线下求职智能体
 
-> **当前状态：M6 已完成（统一工具注册表 + 能力面板），下一步 M8 三层记忆。**
+> **当前状态：M8 已完成（三层记忆 + 记忆面板），下一步 M7 技能包。**
 > 进度与回退：[CHANGELOG](docs/plan/CHANGELOG.md) · [工具与能力清单](docs/plan/08-工具与能力清单.md) · [v3 重构方案](docs/plan/01-v3重构方案.md) · [文档索引](docs/README.md)
 > 数据目录：`%LOCALAPPDATA%\ZhiXiang`（首次启动会自动迁移旧 `.data`）
 

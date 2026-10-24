@@ -16,7 +16,7 @@ import {runAgent, runModel} from '../agent/agent.mjs';
 import {prepareDataDir} from '../config/paths.mjs';
 import {listTools} from '../tools/registry.mjs';
 import {listSkills} from '../skills/index.mjs';
-import {memoryOutline} from '../agent/memory.mjs';
+import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const dataDir = await prepareDataDir({root, log: message => console.log(message)});
@@ -104,8 +104,8 @@ http.createServer(async (req, res) => {
       return res.end(html);
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -148,7 +148,13 @@ http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/model') return send(res, models.public());
     if (req.method === 'GET' && url.pathname === '/api/model/presets') return send(res, {presets: presetOptions()});
-    if (req.method === 'GET' && url.pathname === '/api/capabilities') return send(res, {tools: listTools(), skills: await listSkills(root), memory: memoryOutline()});
+    if (req.method === 'GET' && url.pathname === '/api/memory') {
+      const sessionId = url.searchParams.get('session') || '';
+      let session = null;
+      if (sessionId) { try { session = await load(dir, sessionId); } catch { session = null; } }
+      return send(res, await buildMemoryPayload(dir, session));
+    }
+    if (req.method === 'GET' && url.pathname === '/api/capabilities') return send(res, {tools: listTools(), skills: await listSkills(root), memory: await memorySummary(dir)});
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const items = [];
@@ -184,6 +190,14 @@ http.createServer(async (req, res) => {
         return send(res, out.json, out.status || 200);
       }
 
+      if (url.pathname === '/api/memory/profile') return send(res, {facts: await addFact(dir, body)});
+      if (url.pathname === '/api/memory/profile/import') {
+        const target = await load(dir, body.sessionId);
+        return send(res, {facts: await importSessionMemory(dir, {sessionMemory: target.memory, sessionId: target.id})});
+      }
+      if (url.pathname === '/api/memory/profile/delete') return send(res, {facts: await deleteFact(dir, body.id)});
+      if (url.pathname === '/api/memory/profile/clear') return send(res, {facts: await clearProfile(dir)});
+      if (url.pathname === '/api/memory/tasks/clear') { await clearTasks(dir); return send(res, {ok: true}); }
       if (url.pathname === '/api/model/save') {
         if (body.mode === 'codex' && user.name !== 'owner') throw Error('共同测试请配置自己的 API 或本地模型');
         return send(res, await models.save(body));
@@ -250,6 +264,7 @@ http.createServer(async (req, res) => {
         try {
           const modelConfig = models.snapshot();
           if (modelConfig.mode === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
+          const profile = (await loadProfile(dir)).facts;
           const result = await runAgent({
             root,
             modelCall: options => modelConfig.mode === 'codex'
@@ -258,6 +273,7 @@ http.createServer(async (req, res) => {
             session: s,
             message: text || '请阅读附件并询问我希望完成什么任务。',
             attachments,
+            profile,
             onEvent: emit,
             signal: controller.signal
           });
@@ -268,11 +284,19 @@ http.createServer(async (req, res) => {
           if (s.title === '新的求职对话') s.title = (text || attachments[0]?.name || '求职对话').slice(0, 25);
           s.updatedAt = new Date().toISOString();
           await save(dir, s);
+          await recordTask(dir, {
+            sessionId: s.id, title: s.title, status: 'complete',
+            steps: result.plan?.steps || [],
+            tools: (result.trace || []).map(t => t.label || t.type).filter(Boolean),
+            artifact: result.artifact?.title || '',
+            durationMs: result.durationMs
+          }).catch(() => {});
           emit({type: 'done', session: s});
         } catch (e) {
           const friendly = decorateChatError(e.message, !!models.snapshot().apiKey);
           s.lastTask = {...s.lastTask, status: controller.signal.aborted ? 'stopped' : 'failed', error: friendly};
           await save(dir, s);
+          await recordTask(dir, {sessionId: s.id, title: s.title, status: 'failed', error: friendly}).catch(() => {});
           emit({type: 'error', text: friendly});
         } finally {
           clearInterval(tick);

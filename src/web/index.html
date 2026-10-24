@@ -51,4 +51,4 @@ async function signIn(register=false){try{await api('auth/'+(register?'register'
 el('#account-form').onsubmit=e=>{e.preventDefault();signIn()};el('#account-register').onclick=()=>signIn(true);
 el('#account-logout').onclick=async()=>{if(busy){showError('请先停止当前任务再退出');return}await api('auth/logout',{});location.reload()};
 startAccount().catch(()=>{});
-window.__zx={api,el,escape,refreshModelLabel,showError};</script><script type="module" src="/ui-model.js"></script><script type="module" src="/capabilities.js"></script></html>
+window.__zx={api,el,escape,refreshModelLabel,showError,currentSession:()=>current};</script><script type="module" src="/ui-model.js"></script><script type="module" src="/capabilities.js"></script><script type="module" src="/memory.js"></script></html>

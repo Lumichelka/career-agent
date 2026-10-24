@@ -3,6 +3,19 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.0.0-m8 · 2026-10-24
+
+**M8：三层记忆 + 记忆面板**
+
+- 长期画像：`memory/profile.json`，支持增删改查、同 key 更新、最多 50 条
+- 任务记录：`memory/tasks.json`，自动记录计划/工具/产出/耗时，保留最近 100 条
+- 画像注入系统提示词：`buildPrompt` → `context.profile`，下一轮对话直接生效
+- 接口：`GET /api/memory`、`POST /api/memory/profile|profile/import|profile/delete|profile/clear|tasks/clear`
+- 左侧「记忆与画像」面板：查看会话记忆、手动添加/导入/删除画像、查看任务、清空
+- 新增 `tests/memory.test.mjs`（7 项：校验、上限、去重、导入、任务、上下文）
+- 验证：52 项测试通过；接口实测增删查；画像正确进入提示词；面板无报错
+- 回退：`git reset --hard v3.0.0-m6`
+
 ## v3.0.0-m6 · 2026-10-24
 
 **M6：统一工具注册表 + 能力面板**
