@@ -1,6 +1,8 @@
 // 工具注册表：全系统唯一的工具定义来源。
 // 模型拿到的 schema、能力面板展示、MCP 暴露、参数校验都从这里生成。
-const platform = {type: 'string', enum: ['boss', 'xiaohongshu']};
+import {PLATFORM_IDS, PLATFORM_SITES} from '../platform/sites.mjs';
+
+const platform = {type: 'string', enum: PLATFORM_IDS, description: '登录型网站：' + PLATFORM_IDS.map(id => PLATFORM_SITES[id].name).join('、')};
 
 export const TOOLS = [
   {
@@ -123,7 +125,7 @@ export const TOOLS = [
   {
     name: 'career_platform_status',
     title: '平台连接状态',
-    description: '检查BOSS和小红书连接状态，不把已打开当已登录。',
+    description: '检查登录型网站（BOSS、小红书、实习僧、牛客、智联、51job、猎聘）的连接状态，不把已打开当已登录。',
     permission: 'read',
     handler: 'platform.status',
     timeoutMs: 8000,
@@ -132,7 +134,7 @@ export const TOOLS = [
   {
     name: 'career_platform_search',
     title: '平台搜索',
-    description: '搜索本人按需连接的平台岗位或笔记。未连接会在聊天提示登录并等待选择，不自行登录，不发消息。搜索词不含个人联系方式或完整简历。',
+    description: '搜索本人按需连接的登录型网站（岗位/实习/笔记）。未连接会在聊天提示登录并等待选择，不自行登录，不发消息。搜索词不含个人联系方式或完整简历。',
     permission: 'read',
     handler: 'platform.search',
     timeoutMs: 120000,
@@ -149,7 +151,7 @@ export const TOOLS = [
   {
     name: 'career_platform_read',
     title: '读取平台页面',
-    description: '读取专用浏览器当前的岗位/笔记/搜索页面，不读私信、设置或登录凭据。',
+    description: '读取专用浏览器当前的岗位/实习/笔记/搜索页面；DOM 读取失败时会尝试截图 OCR，不读私信、设置或登录凭据。',
     permission: 'read',
     handler: 'platform.read',
     timeoutMs: 60000,

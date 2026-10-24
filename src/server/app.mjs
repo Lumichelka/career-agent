@@ -5,6 +5,7 @@ import {runApiModel, probeApi} from '../model/api-model.mjs';
 import {runDiagnostics} from '../model/diag.mjs';
 import {KeyVault} from '../model/keyvault.mjs';
 import {PlatformBrowser} from '../platform/platforms.mjs';
+import {PLATFORM_SITES} from '../platform/sites.mjs';
 import {handleRecruit} from '../recruit/api.mjs';
 import {handleResume} from '../resume/api.mjs';
 import {handleCompany} from '../company/api.mjs';
@@ -72,7 +73,7 @@ async function platformReadForTask(platforms, action, body) {
   const emit = taskEvents.get(body.taskId), controller = running.get(body.taskId), key = body.taskId + ':' + body.platform;
   if (!emit || !controller || !['needs_connection', 'needs_login', 'needs_user', 'needs_verification', 'unconfirmed', 'load_failed'].includes(result.status) || loginPrompted.has(key)) return result;
   loginPrompted.add(key);
-  emit({type: 'platform_required', platform: body.platform, reason: result.message, taskId: body.taskId});
+  emit({type: 'platform_required', platform: body.platform, platformName: PLATFORM_SITES[body.platform]?.name || body.platform, reason: result.message, taskId: body.taskId});
   const choice = await new Promise(resolve => {
     let settled = false;
     const finish = value => { if (settled) return; settled = true; clearTimeout(timer); controller.signal.removeEventListener('abort', abort); loginWaiters.delete(body.taskId); resolve(value); };
@@ -160,6 +161,16 @@ http.createServer(async (req, res) => {
     const {dir, models, platforms} = await tenant(user);
 
     if (url.pathname === '/api/auth/me') return send(res, {user: {name: user.name, id: user.id}});
+    if (req.method === 'GET' && url.pathname.startsWith('/api/platform/screenshot/')) {
+      const id = url.pathname.split('/').pop();
+      try {
+        const image = await readFile(platforms.screenshotPath(id));
+        res.writeHead(200, {'Content-Type': 'image/png', 'Cache-Control': 'no-store'});
+        return res.end(image);
+      } catch {
+        return send(res, {error: '还没有该网站的截图'}, 404);
+      }
+    }
     if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
       accounts.logout(req.headers.cookie);
       res.setHeader('Set-Cookie', 'career_auth=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
@@ -261,6 +272,8 @@ http.createServer(async (req, res) => {
         if (action === 'status') return send(res, {platforms: await platforms.statuses()});
         if (action === 'open') return send(res, await platforms.open(body.platform));
         if (action === 'close') return send(res, await platforms.close(body.platform));
+        if (action === 'ocr') return send(res, await platforms.ocr(body.platform));
+        if (action === 'external') return send(res, await platforms.openExternal(body.platform));
         if (action === 'resume' || action === 'skip') {
           await load(dir, body.id);
           const pending = loginWaiters.get(body.id);
