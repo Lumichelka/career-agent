@@ -69,7 +69,7 @@ async function load(dir, id) { if (!validId(id)) throw new Error('无效会话')
 async function save(dir, s) { await writeFile(file(dir, s.id), JSON.stringify(s, null, 2), 'utf8'); }
 
 async function platformReadForTask(platforms, action, body) {
-  const execute = () => action === 'search' ? platforms.search(body.platform, body.query) : platforms.read(body.platform);
+  const execute = () => action === 'search' ? platforms.search(body.platform, body.query) : action === 'open-result' ? platforms.openResult(body.platform) : platforms.read(body.platform);
   const result = await execute();
   const emit = taskEvents.get(body.taskId), controller = running.get(body.taskId), key = body.taskId + ':' + body.platform;
   if (!emit || !controller || !['needs_connection', 'needs_login', 'needs_user', 'needs_verification', 'unconfirmed', 'load_failed'].includes(result.status) || loginPrompted.has(key)) return result;
@@ -290,6 +290,8 @@ http.createServer(async (req, res) => {
         if (action === 'open') return send(res, await platforms.open(body.platform));
         if (action === 'close') return send(res, await platforms.close(body.platform));
         if (action === 'ocr') return send(res, await platforms.ocr(body.platform));
+        if (action === 'probe') return send(res, await platforms.probe());
+        if (action === 'open-result') return send(res, await platformReadForTask(platforms, 'open-result', body));
         if (action === 'external') return send(res, await platforms.openExternal(body.platform));
         if (action === 'resume' || action === 'skip') {
           await load(dir, body.id);

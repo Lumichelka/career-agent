@@ -302,6 +302,42 @@ export class PlatformBrowser {
     });
   }
 
+  // 元素点击：在当前搜索结果里点开第一条详情，再读取详情页。
+  async openResult(id) {
+    return this.serial(id, async () => {
+      const site = validatePlatform(id);
+      const s = this.states.get(id);
+      if (!s || !s.page || s.page.isClosed()) return {platform: id, name: site.name, status: 'needs_connection', message: '请先连接网站并本人登录。', sources: []};
+      const link = s.page.locator(site.searchWait).first();
+      let count = 0;
+      try { count = await link.count(); } catch { count = 0; }
+      if (!count) return this.#fallback(id, site, s, '当前页面没有识别到可点击的结果链接', {title: '', text: '', sources: []});
+      try {
+        await link.click({timeout: 8000, noWaitAfter: true});
+      } catch {
+        return this.#fallback(id, site, s, '结果链接点击失败（可能被登录/验证遮挡）', {title: '', text: '', sources: []});
+      }
+      await s.page.waitForTimeout(1200).catch(() => {});
+      const domainPage = s.context.pages().find(p => allowedPlatformUrl(id, p.url()) && readablePath(id, p.url()));
+      if (domainPage) s.page = domainPage;
+      return this.#readPage(id);
+    });
+  }
+
+  async probe() {
+    const results = await Promise.all(PLATFORM_IDS.map(async id => {
+      const site = siteById(id);
+      const started = Date.now();
+      try {
+        const res = await fetch(site.home, {redirect: 'follow', signal: AbortSignal.timeout(12000), headers: {'user-agent': 'Mozilla/5.0 Chrome/125'}});
+        return {id, name: site.name, ok: res.ok, status: res.status, url: res.url, ms: Date.now() - started};
+      } catch (e) {
+        return {id, name: site.name, ok: false, status: 0, reason: e.name || e.message, ms: Date.now() - started};
+      }
+    }));
+    return {message: `${results.filter(r => r.ok).length}/${results.length} 个网站首页可访问；登录态需逐个打开确认。`, results};
+  }
+
   async close(id) {
     validatePlatform(id);
     return this.serial(id, async () => {

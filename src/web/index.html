@@ -31,9 +31,9 @@ async function showPlatforms(){
 const data=await api('platform/status',{});
 const cards=data.platforms.map(p=>{
   const state=p.state==='closed'?'尚未打开专用浏览器':(p.blank?'页面停在 about:blank':'浏览器已打开 · 登录状态需本人确认');
-  return '<section class="platform-card"><h3>'+escape(p.name)+'</h3><p class="state">'+escape(state)+'</p><p>'+escape(p.message)+'</p><div class="platform-actions"><button data-platform-action="open" data-platform="'+p.id+'">打开官方登录窗口</button><button data-platform-action="external" data-platform="'+p.id+'">系统浏览器打开</button><button data-platform-action="read" data-platform="'+p.id+'">读取页面</button><button data-platform-action="ocr" data-platform="'+p.id+'">截图识别兜底</button><button data-platform-action="import" data-platform="'+p.id+'">带入对话</button><button data-platform-action="close" data-platform="'+p.id+'">关闭</button></div></section>';
+  return '<section class="platform-card"><h3>'+escape(p.name)+'</h3><p class="state">'+escape(state)+'</p><p>'+escape(p.message)+'</p><div class="platform-actions"><button data-platform-action="open" data-platform="'+p.id+'">打开官方登录窗口</button><button data-platform-action="external" data-platform="'+p.id+'">系统浏览器打开</button><button data-platform-action="read" data-platform="'+p.id+'">读取页面</button><button data-platform-action="open-result" data-platform="'+p.id+'">打开第一条结果</button><button data-platform-action="ocr" data-platform="'+p.id+'">截图识别兜底</button><button data-platform-action="import" data-platform="'+p.id+'">带入对话</button><button data-platform-action="close" data-platform="'+p.id+'">关闭</button></div></section>';
 }).join('');
-el('#dialog-content').innerHTML='<h2>登录型网站</h2><p class="platform-note">统一管理需要本人登录的网站：BOSS直聘、小红书、实习僧、牛客、智联招聘、前程无忧、猎聘。打开后由你扫码/短信登录；智能体只读岗位、实习、笔记页面，不投递、不发消息。DOM 读取不到时可用“截图识别兜底”。</p>'+cards+'<div id="platform-feedback" role="status"></div><p class="platform-note">若页面停在 about:blank，先点“打开官方登录窗口”重试；仍失败就用“系统浏览器打开”，在普通 Edge 里登录查看，再用“手动导入”记录。智能体不会读取系统浏览器。</p>';
+el('#dialog-content').innerHTML='<h2>登录型网站</h2><p class="platform-note">统一管理需要本人登录的网站：BOSS直聘、小红书、实习僧、牛客、智联招聘、前程无忧、猎聘。打开后由你扫码/短信登录；智能体只读岗位、实习、笔记页面，不投递、不发消息。DOM 读取不到时可用“截图识别兜底”。</p>'+cards+'<div class="row" style="margin:10px 0"><button data-platform-action="probe">检查 7 站连通性</button></div><div id="platform-feedback" role="status"></div><p class="platform-note">若页面停在 about:blank，先点“打开官方登录窗口”重试；仍失败就用“系统浏览器打开”，在普通 Edge 里登录查看，再用“手动导入”记录。智能体不会读取系统浏览器。</p>';
 if(!el('#dialog').open)el('#dialog').showModal();
 }
 el('#platforms').onclick=()=>showPlatforms().catch(e=>showError(e.message));el('#mobile-platforms').onclick=()=>showPlatforms().catch(e=>showError(e.message));
@@ -45,6 +45,7 @@ feedback.textContent=action==='open'?'正在打开官方窗口…':action==='ocr
 const show=(text,url)=>{feedback.textContent=text;if(url){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.textContent=' 查看截图 ↗';feedback.append(' ',a);}};
 try{
   const result=await api('platform/'+(action==='import'?'read':action),{platform});
+  if(action==='probe'){feedback.textContent=(result.results||[]).map(x=>(x.ok?'✔':'✘')+' '+x.name+' '+x.status+(x.reason?' '+x.reason:'')).join('\n')+'\n'+result.message;return;}
   if(action==='open'||action==='close'){await showPlatforms();el('#platform-feedback').textContent=result.message;}
   else if(action==='import'){
     if(!['readable','unconfirmed','ocr_readable'].includes(result.status)||!result.text)throw new Error(result.message);
