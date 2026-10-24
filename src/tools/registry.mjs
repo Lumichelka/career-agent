@@ -4,6 +4,31 @@ const platform = {type: 'string', enum: ['boss', 'xiaohongshu']};
 
 export const TOOLS = [
   {
+    name: 'company_list',
+    title: '公司档案列表',
+    description: '列出本机保存的公司档案（行业/城市/更新时间）。',
+    permission: 'read',
+    handler: 'company.list',
+    timeoutMs: 5000,
+    parameters: {type: 'object', properties: {}, additionalProperties: false}
+  },
+  {
+    name: 'company_read',
+    title: '读取公司档案',
+    description: '按 id 或公司名读取一份公司档案（介绍/前景/评价/待遇/文化/来源）。',
+    permission: 'read',
+    handler: 'company.read',
+    timeoutMs: 5000,
+    parameters: {
+      type: 'object',
+      properties: {
+        id: {type: 'string', maxLength: 36, description: '档案 id，可选'},
+        name: {type: 'string', maxLength: 80, description: '公司名称，可选'}
+      },
+      additionalProperties: false
+    }
+  },
+  {
     name: 'interview_list',
     title: '面试准备列表',
     description: '列出本机保存的面试准备（公司/岗位/题目数/已答数）。',

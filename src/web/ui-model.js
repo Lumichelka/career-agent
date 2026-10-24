@@ -209,5 +209,14 @@
       r.onclick = () => { location.href = '/resume'; };
       recruit.after(r);
     }
+    const resumeBtn = $('#resume-entry');
+    if (resumeBtn && !$('#company-entry')) {
+      const c = document.createElement('button');
+      c.id = 'company-entry';
+      c.className = 'new platform-launch';
+      c.textContent = '▦ 公司档案';
+      c.onclick = () => { location.href = '/companies'; };
+      resumeBtn.after(c);
+    }
   } catch { /* 侧栏结构变化时忽略 */ }
 })();

@@ -220,7 +220,7 @@ function renderSchedule(schedule){
         <div>
           <p class="title">${esc(event.title)}</p>
           <div class="meta">
-            ${event.company?`<b>${esc(event.company)}</b> · `:''}${esc(event.school)} · ${esc(event.kind)}
+            ${event.company?`<b><a href="/companies?name=${encodeURIComponent(event.company)}">${esc(event.company)}</a></b> · `:''}${esc(event.school)} · ${esc(event.kind)}
             ${event.venue?`<br>地点：${esc(event.venue)}`:''}
             ${travel?`<br>通勤：${esc(travel.minutes)} 分钟（${esc(travel.basis)}）`:''}
             <br>置信度 ${conf}% · ${event.verified?'<span class="flag ok">已复核</span>':'待复核'}

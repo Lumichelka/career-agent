@@ -6,6 +6,7 @@ import * as search from './handlers/search.mjs';
 import * as platform from './handlers/platform.mjs';
 import * as resume from './handlers/resume.mjs';
 import * as interview from './handlers/interview.mjs';
+import * as company from './handlers/company.mjs';
 
 export const HANDLERS = {
   'recruit.events': recruit.events,
@@ -17,7 +18,9 @@ export const HANDLERS = {
   'resume.list': resume.list,
   'resume.read': resume.read,
   'interview.list': interview.list,
-  'interview.read': interview.read
+  'interview.read': interview.read,
+  'company.list': company.list,
+  'company.read': company.read
 };
 
 export function createToolExecutor({runner = null} = {}) {

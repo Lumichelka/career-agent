@@ -1,13 +1,14 @@
-// 对话生成的文稿可以一键保存：简历版本 / 面试准备（用户点击即确认）。
+// 对话生成的文稿可以一键保存：简历版本 / 面试准备 / 公司档案（用户点击即确认）。
 (function () {
   const ZX = window.__zx || {};
   const ACTIONS = {
     'save-resume': {path: 'resumes/from-session', redirect: '/resume'},
-    'save-interview': {path: 'interviews/from-session', redirect: '/resume#interviews'}
+    'save-interview': {path: 'interviews/from-session', redirect: '/resume#interviews'},
+    'save-company': {path: 'companies/from-session', redirect: '/companies'}
   };
 
   document.addEventListener('click', async event => {
-    const button = event.target.closest('#save-resume, #save-interview');
+    const button = event.target.closest('#save-resume, #save-interview, #save-company');
     if (!button) return;
     const action = ACTIONS[button.id];
     if (!action) return;
