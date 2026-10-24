@@ -1,0 +1,15 @@
+services:
+  zhixiang:
+    build: .
+    image: zhixiang:3
+    container_name: zhixiang
+    ports:
+      - "4189:4189"
+    environment:
+      CAREER_DATA_DIR: /data
+      CAREER_HOST: 0.0.0.0
+      # 用域名或 Tailscale 访问时，把域名加进来（逗号分隔）
+      CAREER_ALLOWED_HOSTS: localhost,127.0.0.1
+    volumes:
+      - ./data-docker:/data
+    restart: unless-stopped

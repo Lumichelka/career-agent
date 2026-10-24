@@ -4,6 +4,11 @@ node_modules/
 # 运行时数据：简历、账号、平台登录态、API Key、采集库
 .data/
 data/
+backups/
+data-docker/
+
+# 构建产物
+dist/
 
 # 日志与进程
 *.log

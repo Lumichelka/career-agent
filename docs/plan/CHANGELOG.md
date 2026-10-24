@@ -3,6 +3,20 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.0.0-m12 · 2026-10-24
+
+**M12 第一版：多端、Docker 与备份**
+
+- 新增 `scripts/backup.mjs`：整目录备份、清单、保留最近 N 份、目录保护
+- 新增 `Dockerfile` / `docker-compose.yml` / `.dockerignore`（数据卷 `/data`）
+- 新增 `backup` npm script；`.gitignore` 排除 `backups/`、`data-docker/`、`dist/`
+- 新增部署文档 `14-部署与备份.md`：同 Wi-Fi / Tailscale / Docker / 恢复 / 安全
+- 新增 `tests/backup.test.mjs`（2 项），共 82 项测试
+- 新增 `15-需求对照与演示.md`：逐条需求、证据、5 分钟答辩脚本
+- 实测备份：1062 个文件 / 104.4 MB，清单写入成功
+- 说明：本机无 Docker，镜像未实测；成都理工（WAF 412）与电子科大（需登录接口）暂不接入
+- 回退：`git reset --hard v3.0.0-m11b`
+
 ## v3.0.0-m11b · 2026-10-24
 
 **M11 下半：面试准备落库**

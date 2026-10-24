@@ -1,0 +1,12 @@
+node_modules
+.git
+.gitignore
+.data
+backups
+data-docker
+dist
+*.log
+.env
+secrets.enc.json
+vault.key
+docs/assets
