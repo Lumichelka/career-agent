@@ -1,0 +1,24 @@
+{
+  "name": "career-agent",
+  "version": "2.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "start:lan": "node launch.mjs --lan",
+    "test": "node --test test.mjs api-model.test.mjs isolation.test.mjs recruit.test.mjs",
+    "collect": "node recruit/cli.mjs collect",
+    "schedule": "node recruit/cli.mjs list",
+    "export": "node recruit/cli.mjs export --format ics",
+    "diag": "node diag-cli.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "mammoth": "1.9.0",
+    "pdfjs-dist": "4.10.38",
+    "playwright": "1.64.1"
+  },
+  "engines": {
+    "node": ">=23"
+  }
+}

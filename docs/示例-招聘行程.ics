@@ -1,0 +1,735 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ZhiXiang//Campus Recruit//CN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:职向 · 线下招聘行程
+X-WR-TIMEZONE:Asia/Shanghai
+BEGIN:VTIMEZONE
+TZID:Asia/Shanghai
+BEGIN:STANDARD
+DTSTART:19700101T000000
+TZOFFSETFROM:+0800
+TZOFFSETTO:+0800
+TZNAME:CST
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:853137c868066250058b8c0d@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T090000
+DTEND;TZID=Asia/Shanghai:20261023T103000
+SUMMARY:[四川大学] “相约在高新 乐业在滨江”杭州高新区（滨江）2027届毕业生全国巡回校园招聘--四川大学站【组团】
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfn5uK0dCXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfn5uK0dCXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:f7d50c6ca6b49d47e51caadc@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T140000
+DTEND;TZID=Asia/Shanghai:20261023T160000
+SUMMARY:[上海财经大学] 浙江省交通投资集团有限公司 2027届校园招聘公告——交融天下 通达致远宣讲会
+LOCATION:武东校区大学生活动中心三楼
+DESCRIPTION:单位：浙江交投科教集团有限公司\n类型：宣讲会\n行业：教育\n来源：https://career.sufe.edu.cn
+ /career/xjhxx/view/238677599105191936\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/238677599105191936
+END:VEVENT
+BEGIN:VEVENT
+UID:a9b5cfe155090f9509cf7c7a@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T140000
+DTEND;TZID=Asia/Shanghai:20261023T160000
+SUMMARY:[上海财经大学] 中国电建集团华东勘测设计研究院有限公司财务专业招聘校园宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：中国电建集团华东勘测设计研究院有限公司\n类型：宣讲会\n行业：建筑业\n来源：https://career.suf
+ e.edu.cn/career/xjhxx/view/242945779109597184\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/242945779109597184
+END:VEVENT
+BEGIN:VEVENT
+UID:712b4f7cc258af08f55a2cde@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T140000
+DTEND;TZID=Asia/Shanghai:20261023T153000
+SUMMARY:[四川大学] 周五职通车—江安校区综合场（二）
+LOCATION:四川大学江安校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfiN2KuLKXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfiN2KuLKXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:8c6a35de389fe15de314e599@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T143000
+DTEND;TZID=Asia/Shanghai:20261023T160000
+SUMMARY:[四川大学] 2026年天津市“组团式”招才引智暨高校校园招聘活动（四川大学站）【组团】
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfn5qKz7KXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfn5qKz7KXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:989d7e6b5d5eabffcade1794@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T150000
+DTEND;TZID=Asia/Shanghai:20261023T170000
+SUMMARY:[上海财经大学] 中国光大银行上海分行2027年 秋季校园招聘宣讲会
+LOCATION:武东路校区大学生活动中心A208
+DESCRIPTION:单位：中国光大银行股份有限公司上海分行\n类型：宣讲会\n行业：金融业\n来源：https://career.sufe.e
+ du.cn/career/xjhxx/view/249908153662181376\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/249908153662181376
+END:VEVENT
+BEGIN:VEVENT
+UID:51f4dc08a3ba70dd6913c8cb@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T150000
+DTEND;TZID=Asia/Shanghai:20261023T163000
+SUMMARY:[四川大学] 执笔为剑，卫国擎天丨 2027年空军文职人员招考公开宣介活动 解锁空天新赛道
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfntyKuLKXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfntyKuLKXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:b4aeb96c6a58767a05237a48@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T180000
+DTEND;TZID=Asia/Shanghai:20261023T200000
+SUMMARY:[上海财经大学] 山东京博控股集团有限公司校园宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：山东京博控股集团有限公司\n类型：宣讲会\n行业：制造业\n来源：https://career.sufe.edu.c
+ n/career/xjhxx/view/243042977436536832\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/243042977436536832
+END:VEVENT
+BEGIN:VEVENT
+UID:195c067675ad71eb67b2e084@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261023T183000
+DTEND;TZID=Asia/Shanghai:20261023T200000
+SUMMARY:[上海财经大学] 山西证券股份有限公司固收业务校园宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：山西证券股份有限公司\n类型：宣讲会\n行业：金融业\n来源：https://career.sufe.edu.cn/
+ career/xjhxx/view/253146244749332480\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/253146244749332480
+END:VEVENT
+BEGIN:VEVENT
+UID:112c59868305c18f5c04ae74@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261025T140000
+DTEND;TZID=Asia/Shanghai:20261025T160000
+SUMMARY:[上海财经大学] 信息集团2026年秋季校园招聘宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：厦门信息集团有限公司\n类型：宣讲会\n行业：信息传输、软件和信息技术服务业\n来源：https://career.
+ sufe.edu.cn/career/xjhxx/view/233535830172504064\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/233535830172504064
+END:VEVENT
+BEGIN:VEVENT
+UID:d450f9638f216dbcd8a281af@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T090000
+DTEND;TZID=Asia/Shanghai:20261026T103000
+SUMMARY:[中山大学] 山东高校2026年“校长之约”引才活动-大湾区站
+LOCATION:
+DESCRIPTION:单位：山东高校\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/view/i
+ d/175263\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175263
+END:VEVENT
+BEGIN:VEVENT
+UID:c4222353526c58e5d92b0ff8@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T092000
+DTEND;TZID=Asia/Shanghai:20261026T112000
+SUMMARY:[四川大学] 中国石化集团胜利石油管理局有限公司
+LOCATION:望江校区就业指导中心221室
+DESCRIPTION:单位：中国石化集团胜利石油管理局有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/
+ index/employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJaKu9SyyGH
+ Rp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJaKu9SyyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:417f7ccb1a8773305fc7fcf7@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T092000
+DTEND;TZID=Asia/Shanghai:20261026T112000
+SUMMARY:[四川大学] 广州市昊志机电股份有限公司
+LOCATION:望江校区就业指导中心303室
+DESCRIPTION:单位：广州市昊志机电股份有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/inde
+ x/employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJaKzrbOyGHRp7u
+ gzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJaKzrbOyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:79cbc5c13b6c35bc8f81ff24@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T140000
+DTEND;TZID=Asia/Shanghai:20261026T160000
+SUMMARY:[上海财经大学] 临安农商银行2027秋季校园招聘宣讲会
+LOCATION:武东路100号学生中心一楼
+DESCRIPTION:单位：浙江临安农村商业银行股份有限公司\n类型：宣讲会\n行业：金融业\n来源：https://career.sufe.e
+ du.cn/career/xjhxx/view/250000443852328960\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/250000443852328960
+END:VEVENT
+BEGIN:VEVENT
+UID:76e9274a0a9776dbec2cec7b@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T143000
+DTEND;TZID=Asia/Shanghai:20261026T163000
+SUMMARY:[上海财经大学] 中兴通讯股份有限公司校园宣讲会
+LOCATION:武东校区大学生活动中心三楼
+DESCRIPTION:单位：中兴通讯股份有限公司\n类型：宣讲会\n行业：信息传输、软件和信息技术服务业\n来源：https://career.
+ sufe.edu.cn/career/xjhxx/view/248550799515455488\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/248550799515455488
+END:VEVENT
+BEGIN:VEVENT
+UID:602ad2ccc397bc8dfcd9b722@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T150000
+DTEND;TZID=Asia/Shanghai:20261026T170000
+SUMMARY:[上海财经大学] 信息集团2026年秋季校园招聘宣讲会
+LOCATION:武东路校区大学生活动中心A208
+DESCRIPTION:单位：厦门信息集团有限公司\n类型：宣讲会\n行业：信息传输、软件和信息技术服务业\n来源：https://career.
+ sufe.edu.cn/career/xjhxx/view/238611149208293376\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/238611149208293376
+END:VEVENT
+BEGIN:VEVENT
+UID:3add2519e482d409da12d5dd@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T152000
+DTEND;TZID=Asia/Shanghai:20261026T172000
+SUMMARY:[四川大学] 福建南孚市场营销有限公司
+LOCATION:望江校区就业指导中心221室
+DESCRIPTION:单位：福建南孚市场营销有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/index
+ /employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJWKutSqyGHRp7ug
+ zc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJWKutSqyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:19ae853ab9c3019158294b8d@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T152000
+DTEND;TZID=Asia/Shanghai:20261026T172000
+SUMMARY:[四川大学] 重庆大学2026年专职辅导员招聘宣讲
+LOCATION:望江校区就业指导中心303室
+DESCRIPTION:单位：重庆大学\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/index/employd
+ etail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJaKz7ayyGHRp7ugzc-GnZ2s
+ kMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJaKz7ayyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:7f1a2fd86a96b680261d4624@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T180000
+DTEND;TZID=Asia/Shanghai:20261026T200000
+SUMMARY:[上海财经大学] 花旗银行2027菁英直通车项目校园宣讲会（2028届学生实习转全职管培）
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：花旗银行（中国）有限公司\n类型：宣讲会\n行业：金融业\n来源：https://career.sufe.edu.c
+ n/career/xjhxx/view/235790168324444160\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/235790168324444160
+END:VEVENT
+BEGIN:VEVENT
+UID:a2ce81114b4fbe77c613ba90@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T182000
+DTEND;TZID=Asia/Shanghai:20261026T202000
+SUMMARY:[四川大学] 北京东方雨虹防水技术股份有限公司
+LOCATION:望江校区就业指导中心303室
+DESCRIPTION:单位：北京东方雨虹防水技术股份有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/i
+ ndex/employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eNyK0dTOyGHR
+ p7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eNyK0dTOyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:84ac8a85d06930d950862b29@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T182000
+DTEND;TZID=Asia/Shanghai:20261026T202000
+SUMMARY:[四川大学] 2027届药明生物精英计划招聘
+LOCATION:望江校区就业指导中心308室
+DESCRIPTION:类型：宣讲会\n来源：https://jy.scu.edu.cn/index/index/employdetail.htm
+ l?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eN6KutS6yGHRp7ugzc-GnZ2skMx9ZMN4g
+ tKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 80%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eN6KutS6yGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:9fdb9d1a460d9ac1f8c7f354@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T182000
+DTEND;TZID=Asia/Shanghai:20261026T202000
+SUMMARY:[四川大学] 广州凯乐石运动科技有限公司
+LOCATION:望江校区就业指导中心221室
+DESCRIPTION:单位：广州凯乐石运动科技有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/inde
+ x/employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eN-K0dTWyGHRp7u
+ gzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eN-K0dTWyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:82c61eea0582f2058cc6759a@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T182000
+DTEND;TZID=Asia/Shanghai:20261026T202000
+SUMMARY:[四川大学] 重庆宗申动力机械股份有限公司
+LOCATION:望江校区就业指导中心402室
+DESCRIPTION:单位：重庆宗申动力机械股份有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/ind
+ ex/employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJWKlLa2yGHRp7
+ ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJWKlLa2yGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:d061fc93998b4e7794f39784@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T182000
+DTEND;TZID=Asia/Shanghai:20261026T202000
+SUMMARY:[四川大学] 中国一重集团有限公司 2027届校园招聘
+LOCATION:望江校区就业指导中心212室
+DESCRIPTION:单位：中国一重集团有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/index/e
+ mploydetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJaKutS-yGHRp7ugzc
+ -GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJaKutS-yGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:83494f7a14aa0a5db99e15d6@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261026T183000
+DTEND;TZID=Asia/Shanghai:20261026T203000
+SUMMARY:[四川大学] 科伦集团2027届秋季校园招聘
+LOCATION:华西校区药科楼一楼康弘报告厅
+DESCRIPTION:单位：科伦集团\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/index/employd
+ etail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eN6Kk7bSyGHRp7ugzc-GnZ2s
+ kMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eN6Kk7bSyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:e10ed107d1a1de20beef2a84@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T090000
+DTEND;TZID=Asia/Shanghai:20261027T103000
+SUMMARY:[中山大学] 中山台光电子材料2027秋招宣讲会
+LOCATION:
+DESCRIPTION:单位：中山台光电子材料\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/vi
+ ew/id/175230\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175230
+END:VEVENT
+BEGIN:VEVENT
+UID:766905d8a2ee1453a8eaac12@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T090000
+DTEND;TZID=Asia/Shanghai:20261027T103000
+SUMMARY:[中山大学] 云南白药集团2027校园招聘（面试场地）
+LOCATION:
+DESCRIPTION:单位：云南白药集团\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/view
+ /id/175132\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175132
+END:VEVENT
+BEGIN:VEVENT
+UID:82eb1c7e01115dafb9dcdb5a@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T090000
+DTEND;TZID=Asia/Shanghai:20261027T103000
+SUMMARY:[中山大学] 东莞海昌领航者计划2027届校园招聘宣讲会
+LOCATION:
+DESCRIPTION:单位：东莞海昌领航者计划\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/v
+ iew/id/175246\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175246
+END:VEVENT
+BEGIN:VEVENT
+UID:2b0a2f06a80998e39b9d03c5@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T090000
+DTEND;TZID=Asia/Shanghai:20261027T103000
+SUMMARY:[中山大学] 复星健康集团2027年校园招聘宣讲会
+LOCATION:
+DESCRIPTION:单位：复星健康集团\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/view
+ /id/175219\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175219
+END:VEVENT
+BEGIN:VEVENT
+UID:44b8f87fa32ec0b1cbb404ee@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T090000
+DTEND;TZID=Asia/Shanghai:20261027T103000
+SUMMARY:[中山大学] 宁波银行2027校园招聘宣讲会
+LOCATION:
+DESCRIPTION:单位：宁波银行\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/view/i
+ d/175204\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175204
+END:VEVENT
+BEGIN:VEVENT
+UID:02c09ebe8355ec7edf806be6@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T090000
+DTEND;TZID=Asia/Shanghai:20261027T103000
+SUMMARY:[中山大学] 中智管理咨询有限公司2027届秋招宣讲会
+LOCATION:
+DESCRIPTION:单位：中智管理咨询有限公司\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/
+ view/id/175229\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175229
+END:VEVENT
+BEGIN:VEVENT
+UID:3da5b62f22fc6994b766e00c@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T090000
+DTEND;TZID=Asia/Shanghai:20261027T103000
+SUMMARY:[中山大学] 爱尔眼科2027年校园招聘宣讲会
+LOCATION:
+DESCRIPTION:单位：爱尔眼科\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/view/i
+ d/175161\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175161
+END:VEVENT
+BEGIN:VEVENT
+UID:70227ccd5d53593bb73ea8c0@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T090000
+DTEND;TZID=Asia/Shanghai:20261027T103000
+SUMMARY:[中山大学] 中微公司2027校园招聘宣讲会
+LOCATION:
+DESCRIPTION:单位：中微公司\n类型：宣讲会\n来源：https://career.sysu.edu.cn/teachin/view/i
+ d/175154\n信息核对：待复核（置信度 60%）
+URL:https://career.sysu.edu.cn/teachin/view/id/175154
+END:VEVENT
+BEGIN:VEVENT
+UID:b686d0b56665f2fdfc1c17b8@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T092000
+DTEND;TZID=Asia/Shanghai:20261027T112000
+SUMMARY:[四川大学] 中国能建中南电力设计院有限公司2027年校园招聘宣讲会
+LOCATION:望江校区就业指导中心215室
+DESCRIPTION:单位：中国能建中南电力设计院有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/in
+ dex/employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJWK0NTWyGHRp
+ 7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJWK0NTWyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:da66910fe7412ae83e7a9a77@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T092000
+DTEND;TZID=Asia/Shanghai:20261027T112000
+SUMMARY:[四川大学] 柳州铁一中学
+LOCATION:望江校区就业指导中心305室
+DESCRIPTION:单位：柳州铁一中学\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/index/emplo
+ ydetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJaKu9TWyGHRp7ugzc-GnZ
+ 2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJaKu9TWyGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:ea183797c50e6769221c2b65@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T152000
+DTEND;TZID=Asia/Shanghai:20261027T172000
+SUMMARY:[四川大学] 广东邦普循环科技有限公司
+LOCATION:望江校区就业指导中心212室
+DESCRIPTION:单位：广东邦普循环科技有限公司\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/index
+ /employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eN6Kk7a-yGHRp7ug
+ zc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eN6Kk7a-yGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:ad0589bb7fe19e6994598b04@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T152000
+DTEND;TZID=Asia/Shanghai:20261027T172000
+SUMMARY:[四川大学] "华彩人生，胜券在握" 华西证券2027校园招聘正在进行！
+LOCATION:望江校区就业指导中心221室
+DESCRIPTION:单位："华彩人生，胜券在握" 华西证券\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index/i
+ ndex/employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJWKzra6yGHR
+ p7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJWKzra6yGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:76a48c6fbe3e35e495ce378e@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T152000
+DTEND;TZID=Asia/Shanghai:20261027T172000
+SUMMARY:[四川大学] 安徽叉车集团有限责任公司（合力叉车） 2027届全球校园招聘
+LOCATION:望江校区就业指导中心303室
+DESCRIPTION:单位：安徽叉车集团有限责任公司（合力叉车）\n类型：宣讲会\n来源：https://jy.scu.edu.cn/index
+ /index/employdetail.html?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtLh5eJaKuba6yG
+ HRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0gqJv\n信息核对：待复核（置信度 85%）
+URL:https://jy.scu.edu.cn/index/index/employdetail.html?data=MDAwMDAwMDAw
+ MJG6n3_Ed6imi4qQtLh5eJaKuba6yGHRp7ugzc-GnZ2skMx9ZMN4gtKLipCwxKF0lZC5sq-0
+ gqJv
+END:VEVENT
+BEGIN:VEVENT
+UID:8b470012c3d052b7104bf90c@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261027T160000
+DTEND;TZID=Asia/Shanghai:20261027T173000
+SUMMARY:[四川大学] 中国核工业集团有限公司 2027届秋季校园招聘【组团】
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfntyKutCXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfntyKutCXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:fb6be569f6228837d693bfab@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261028T140000
+DTEND;TZID=Asia/Shanghai:20261028T160000
+SUMMARY:[上海财经大学] 申能保险2027届上财校园宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：申能财产保险股份有限公司\n类型：宣讲会\n行业：金融业\n来源：https://career.sufe.edu.c
+ n/career/xjhxx/view/249849923024064512\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/249849923024064512
+END:VEVENT
+BEGIN:VEVENT
+UID:de543854b7a9224eccb4aea3@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261028T140000
+DTEND;TZID=Asia/Shanghai:20261028T160000
+SUMMARY:[上海财经大学] 保利物业华东区域宣讲会
+LOCATION:武东校区大学生活动中心三楼
+DESCRIPTION:单位：保利物业服务股份有限公司上海分公司\n类型：宣讲会\n行业：房地产业\n来源：https://career.sufe
+ .edu.cn/career/xjhxx/view/248459274827730944\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/248459274827730944
+END:VEVENT
+BEGIN:VEVENT
+UID:9d8b2ec7517675e79ec180dc@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261028T183000
+DTEND;TZID=Asia/Shanghai:20261028T203000
+SUMMARY:[上海财经大学] 中国东方航空2027全球校园招聘宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：中国东方航空股份有限公司\n类型：宣讲会\n行业：交通运输、仓储和邮政业\n来源：https://career.su
+ fe.edu.cn/career/xjhxx/view/252479583104929792\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/252479583104929792
+END:VEVENT
+BEGIN:VEVENT
+UID:262954031bc4c507c6545983@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261029T090000
+DTEND;TZID=Asia/Shanghai:20261029T103000
+SUMMARY:[南开大学] 南开大学商学院2026年秋季实习就业双选会（线上线下）
+LOCATION:南开大学商学院一楼大厅（天津市南开区白堤路221号）
+DESCRIPTION:类型：双选会\n来源：https://career.nankai.edu.cn/recruitment/content/t
+ ype/1/id/388.html\n信息核对：待复核（置信度 80%）
+URL:https://career.nankai.edu.cn/recruitment/content/type/1/id/388.html
+END:VEVENT
+BEGIN:VEVENT
+UID:6fc66ea3441bff4dc631d824@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261029T140000
+DTEND;TZID=Asia/Shanghai:20261029T153000
+SUMMARY:[四川大学] 云南省省属企业2026年博士招引 暨高层次人才招聘公告【组团】
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfntyKubKXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfntyKubKXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:f073cd259aff4f33dbb6d310@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261029T140000
+DTEND;TZID=Asia/Shanghai:20261029T160000
+SUMMARY:[上海财经大学] 合肥芯碁微电子装备股份有限公司校园宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：合肥芯碁微电子装备股份有限公司\n类型：宣讲会\n行业：制造业\n来源：https://career.sufe.ed
+ u.cn/career/xjhxx/view/253096228492021760\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/253096228492021760
+END:VEVENT
+BEGIN:VEVENT
+UID:59bbc7cab0b0b18e7aa32091@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261029T180000
+DTEND;TZID=Asia/Shanghai:20261029T210000
+SUMMARY:[上海财经大学] 广开控股“金粤计划”2027校园招聘宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：广州开发区控股集团有限公司\n类型：宣讲会\n行业：金融业\n来源：https://career.sufe.edu.
+ cn/career/xjhxx/view/245610121965735936\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/245610121965735936
+END:VEVENT
+BEGIN:VEVENT
+UID:d59e25e96b380c43d5d0a4aa@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261030T100000
+DTEND;TZID=Asia/Shanghai:20261030T113000
+SUMMARY:[四川大学] 四川省宜宾市2026年下半年引进人才公告【组团】
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfn5uKlLKXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfn5uKlLKXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:8f19069e6d562e1acd136a94@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261030T140000
+DTEND;TZID=Asia/Shanghai:20261030T153000
+SUMMARY:[四川大学] 周五职通车——经管文史专场
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfiN2KubKXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfiN2KubKXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:9f10dfb6c812a1b734e2cce2@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261103T130000
+DTEND;TZID=Asia/Shanghai:20261103T160000
+SUMMARY:[南开大学] 南开大学化学学院2026年秋季校园双选会
+LOCATION:南开大学八里台校区学生活动中心一楼多功能厅
+DESCRIPTION:类型：双选会\n来源：https://career.nankai.edu.cn/recruitment/content/t
+ ype/1/id/384.html\n信息核对：待复核（置信度 90%）
+URL:https://career.nankai.edu.cn/recruitment/content/type/1/id/384.html
+END:VEVENT
+BEGIN:VEVENT
+UID:2e153d3a5c5580f579aba216@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261105T140000
+DTEND;TZID=Asia/Shanghai:20261105T170000
+SUMMARY:[南开大学] 南开大学人工智能学院2026年秋季就业实习双选会
+LOCATION:人工智能学院北楼一层大厅
+DESCRIPTION:类型：双选会\n来源：https://career.nankai.edu.cn/recruitment/content/t
+ ype/1/id/383.html\n信息核对：待复核（置信度 90%）
+URL:https://career.nankai.edu.cn/recruitment/content/type/1/id/383.html
+END:VEVENT
+BEGIN:VEVENT
+UID:5fdb3fdccf1da9a87dc0fc94@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261105T180000
+DTEND;TZID=Asia/Shanghai:20261105T200000
+SUMMARY:[上海财经大学] 浙江省国贸集团2027校园招聘宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：浙江省国际贸易集团有限公司\n类型：宣讲会\n行业：国际组织\n来源：https://career.sufe.edu
+ .cn/career/xjhxx/view/252813887714496512\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/252813887714496512
+END:VEVENT
+BEGIN:VEVENT
+UID:5f57e3d8d16b857fcdf04b28@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261105T180000
+DTEND;TZID=Asia/Shanghai:20261105T200000
+SUMMARY:[上海财经大学] 天职国际2027届秋季校园招聘宣讲会
+LOCATION:武东路校区大学生活动中心A208
+DESCRIPTION:单位：天职国际会计师事务所（特殊普通合伙）上海分所\n类型：宣讲会\n行业：租赁和商务服务业\n来源：https://ca
+ reer.sufe.edu.cn/career/xjhxx/view/253815972845195264\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/253815972845195264
+END:VEVENT
+BEGIN:VEVENT
+UID:fa8e19c5ddf9da1a6c21e057@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261106T140000
+DTEND;TZID=Asia/Shanghai:20261106T153000
+SUMMARY:[四川大学] 周五职通车——硕博专场
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfiN2KutCXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfiN2KutCXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:66077b2b6b33c609c6426c7e@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261109T182000
+DTEND;TZID=Asia/Shanghai:20261109T195000
+SUMMARY:[四川大学] 国家电投2027年度校园招聘宣讲会【组团】
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfn5uKz7KXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfn5uKz7KXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:efc2ecc7efdcdca02759f024@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261109T183000
+DTEND;TZID=Asia/Shanghai:20261109T203000
+SUMMARY:[上海财经大学] 北京京东世纪贸易有限公司校园宣讲会
+LOCATION:武东校区大学生活动中心三楼
+DESCRIPTION:单位：北京京东世纪贸易有限公司\n类型：宣讲会\n行业：批发和零售业\n来源：https://career.sufe.ed
+ u.cn/career/xjhxx/view/252752379865337856\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/252752379865337856
+END:VEVENT
+BEGIN:VEVENT
+UID:0799939a0f4c17caa7eec9a4@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261110T140000
+DTEND;TZID=Asia/Shanghai:20261110T160000
+SUMMARY:[上海财经大学] 上海上美化妆品销售服务有限公司校园宣讲会
+LOCATION:武东路校区大学生活动中心二楼
+DESCRIPTION:单位：上海上美化妆品销售服务有限公司\n类型：宣讲会\n行业：批发和零售业\n来源：https://career.sufe
+ .edu.cn/career/xjhxx/view/250571366934384640\n信息核对：待复核（置信度 85%）
+URL:https://career.sufe.edu.cn/career/xjhxx/view/250571366934384640
+END:VEVENT
+BEGIN:VEVENT
+UID:9c9e5e1488805e0d9d3b5e2b@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261113T140000
+DTEND;TZID=Asia/Shanghai:20261113T153000
+SUMMARY:[四川大学] 周五职通车—江安校区综合场（三）
+LOCATION:四川大学江安校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfiN2Ku9CXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfiN2Ku9CXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+BEGIN:VEVENT
+UID:aad3321419345fa0cb06c0e7@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261113T140000
+DTEND;TZID=Asia/Shanghai:20261113T170000
+SUMMARY:[南开大学] 南开大学2027届毕业生秋季校园双选会（综合类第三场）用人单位邀请函
+LOCATION:南开大学津南校区大通学生中心一楼
+DESCRIPTION:类型：双选会\n来源：https://career.nankai.edu.cn/recruitment/content/t
+ ype/1/id/387.html\n信息核对：待复核（置信度 90%）
+URL:https://career.nankai.edu.cn/recruitment/content/type/1/id/387.html
+END:VEVENT
+BEGIN:VEVENT
+UID:61aaa0a80e7d3dce7526c6fb@zhixiang.local
+DTSTAMP:20261023T150013Z
+DTSTART;TZID=Asia/Shanghai:20261120T140000
+DTEND;TZID=Asia/Shanghai:20261120T153000
+SUMMARY:[四川大学] 周五职通车——新质生产力专场
+LOCATION:四川大学望江校区
+DESCRIPTION:类型：双选会\n来源：https://jy.scu.edu.cn/index/index/jobfairdetail.ht
+ ml?data=MDAwMDAwMDAwMJG6n3_Ed6imi4qQtMOfiN2KzrKXxoi3i7igr7-BZHxnkLZ9i8WG
+ pNOaaKLSxKCalom6mNs\n信息核对：待复核（置信度 70%）
+URL:https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=MDAwMDAwMDA
+ wMJG6n3_Ed6imi4qQtMOfiN2KzrKXxoi3i7igr7-BZHxnkLZ9i8WGpNOaaKLSxKCalom6mNs
+END:VEVENT
+END:VCALENDAR

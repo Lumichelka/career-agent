@@ -1,0 +1,108 @@
+// 招聘信息 API：列表、采集、核对、导出。挂在主服务的 /api/recruit/ 下。
+// 这里只负责"算出结果"，写响应的细节交给 server.mjs。
+import {join} from 'node:path';
+import {RecruitStore} from './store.mjs';
+import {SOURCES} from './sources.mjs';
+import {runCollection, htmlToText} from './collect.mjs';
+import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
+import {fetchText} from './fetch.mjs';
+
+const MAX_DAYS = 180;
+
+function range(url) {
+  const days = Math.min(MAX_DAYS, Math.max(1, Number(url.searchParams.get('days')) || 30));
+  const from = new Date().toISOString().slice(0, 10) + 'T00:00:00+08:00';
+  const to = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10) + 'T23:59:59+08:00';
+  return {from, to, days};
+}
+
+function withStore(dir, fn) {
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  try { store.syncSources(SOURCES); return fn(store); } finally { store.close(); }
+}
+
+async function concurrent(items, size, fn) {
+  const out = [];
+  let i = 0;
+  await Promise.all(Array.from({length: Math.min(size, items.length)}, async () => {
+    while (i < items.length) { const at = i++; out[at] = await fn(items[at]); }
+  }));
+  return out;
+}
+
+export async function handleRecruit({method, pathname, url, body, dir}) {
+  if (method === 'GET') {
+    if (pathname === 'sources') {
+      const data = withStore(dir, store => ({sources: store.sourceStates(), runs: store.recentRuns(10), stats: store.stats()}));
+      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || ''}]));
+      return {json: {...data, catalog}};
+    }
+    if (pathname === 'events') {
+      const {from, to, days} = range(url);
+      const events = withStore(dir, store => store.listEvents({from, to, limit: 300}));
+      return {json: {events, days, from, to}};
+    }
+    if (pathname === 'schedule') {
+      const {from, to, days} = range(url);
+      const events = withStore(dir, store => store.listEvents({from, to, limit: 300}));
+      const schedule = buildSchedule(events);
+      return {json: {schedule, markdown: toMarkdown(schedule, {title: `线下招聘时间安排表（未来 ${days} 天）`}), days}};
+    }
+    if (pathname === 'stats') return {json: withStore(dir, store => store.stats())};
+    if (pathname === 'runs') return {json: {runs: withStore(dir, store => store.recentRuns(30))}};
+    if (pathname.startsWith('export')) {
+      const {from, to, days} = range(url);
+      const events = withStore(dir, store => store.listEvents({from, to, limit: 500}));
+      const format = (url.searchParams.get('format') || pathname.split('.').pop() || 'ics').toLowerCase();
+      if (format === 'ics') return {file: {body: toICS(events), type: 'text/calendar; charset=utf-8', name: 'zhixiang-schedule.ics'}};
+      if (format === 'csv') return {file: {body: toCSV(events), type: 'text/csv; charset=utf-8', name: 'zhixiang-schedule.csv'}};
+      if (format === 'md') return {file: {body: toMarkdown(buildSchedule(events), {title: `线下招聘时间安排表（未来 ${days} 天）`}), type: 'text/markdown; charset=utf-8', name: 'zhixiang-schedule.md'}};
+      return {status: 400, json: {error: '不支持的导出格式（ics/csv/md）'}};
+    }
+    return null;
+  }
+
+  if (method === 'POST') {
+    if (pathname === 'collect') {
+      const sourceIds = Array.isArray(body?.sourceIds) ? body.sourceIds.filter(id => typeof id === 'string').slice(0, 12) : [];
+      const limit = Math.min(50, Math.max(1, Number(body?.limit) || 20));
+      const logs = [];
+      const run = runCollection({dir, sourceIds, limit, onLog: e => logs.push(e.text)});
+      const timeout = new Promise(resolve => setTimeout(() => resolve({results: [{id: '*', name: '超时', status: 'timeout', message: '采集超过 150 秒，已返回已完成部分'}], totals: {sources: 0, fetched: 0, created: 0, updated: 0, failed: 1}}), 150000));
+      const result = await Promise.race([run, timeout]);
+      return {json: {...result, logs, stats: withStore(dir, store => store.stats())}};
+    }
+
+    if (pathname === 'verify') {
+      const id = String(body?.id || '');
+      if (!/^[a-f0-9]{24}$/.test(id)) return {status: 400, json: {error: '无效记录'}};
+      const event = withStore(dir, store => store.getEvent(id));
+      if (!event) return {status: 404, json: {error: '没有这条记录'}};
+      if (!event.sourceUrl) return {status: 400, json: {error: '这条记录没有来源链接，无法复核'}};
+      const res = await fetchText(event.sourceUrl, {timeout: 20000, retries: 0});
+      if (!res.ok) {
+        withStore(dir, store => store.setVerified(id, 0, '复核失败：' + res.message));
+        return {json: {ok: false, message: '来源链接打不开：' + res.message}};
+      }
+      const text = htmlToText(res.text).replace(/\s+/g, '');
+      const hit = event.title.replace(/\s+/g, '').slice(0, 12);
+      const ok = hit.length >= 4 && text.includes(hit);
+      withStore(dir, store => store.setVerified(id, ok ? 1 : 0, ok ? '来源页面仍包含该活动' : '来源页面已变化，未找到活动标题'));
+      return {json: {ok, message: ok ? '已复核：来源页面仍包含该活动' : '来源页面已变化，请点开链接人工确认'}};
+    }
+
+    if (pathname === 'probe') {
+      const results = await concurrent(SOURCES, 4, async source => {
+        const t = Date.now();
+        const res = await fetchText(source.listUrl, {method: source.request?.method || 'GET', headers: source.request?.headers, body: source.request?.body, timeout: 12000, retries: 0});
+        return {id: source.id, name: source.name, enabled: source.enabled, ok: res.ok, status: res.status, reason: res.reason || '', message: res.message || '', ms: Date.now() - t};
+      });
+      return {json: {results, at: new Date().toISOString()}};
+    }
+
+    return null;
+  }
+
+  return null;
+}
+

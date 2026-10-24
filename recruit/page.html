@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>职向 · 招聘日历</title>
+<style>
+:root{--bg:#f6f8f5;--card:#fff;--ink:#1f3a2e;--muted:#7b8b80;--line:#e2e8e1;--green:#1f6b50;--soft:#e8f1ea;--warn:#b25e22;--danger:#a63a3a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.75 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+a{color:var(--green)}
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 26px;background:#fffdf8cc;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:17px;letter-spacing:1px;font-weight:600}
+header .sub{color:var(--muted);font-size:11px;letter-spacing:2px}
+header .grow{flex:1}
+header a,header button{font-size:12px}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:7px 12px;transition:.15s}
+button:hover{border-color:#b9cdbd;background:#f7fbf7}
+button.primary{background:var(--green);border-color:var(--green);color:#fff}
+button.primary:hover{background:#1a5c44}
+button:disabled{opacity:.5;cursor:not-allowed}
+main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.stat b{display:block;font-size:25px;font-weight:600;color:var(--green)}
+.stat span{font-size:11px;color:var(--muted)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:18px}
+.panel h2{margin:0 0 12px;font-size:13px;letter-spacing:1px;color:var(--muted);font-weight:600}
+.toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.toolbar select{padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:#fff;font:13px inherit}
+.sources{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.source{border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:#fcfdfb}
+.source.on{border-color:#cfe2d4;background:#fbfefb}
+.source h3{margin:0;font-size:13px;font-weight:600;display:flex;gap:7px;align-items:center}
+.source p{margin:6px 0 0;font-size:11px;color:var(--muted);line-height:1.6}
+.badge{display:inline-block;font-size:10px;padding:1px 7px;border-radius:20px;background:var(--soft);color:#3c6b52;border:1px solid #d6e6db}
+.badge.off{background:#f3f1ee;color:#8a8177;border-color:#e6e0d8}
+.badge.err{background:#fdf0ec;color:#9c4a2c;border-color:#f2d8cc}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}
+.day{margin-bottom:8px}
+.day h3{font-size:13px;margin:16px 0 8px;display:flex;gap:9px;align-items:baseline}
+.day h3 span{font-size:11px;color:var(--muted);font-weight:400}
+.ev{display:grid;grid-template-columns:96px 1fr auto;gap:14px;border:1px solid var(--line);border-left:3px solid #b9d6c4;border-radius:12px;padding:12px 14px;background:#fff;margin-bottom:9px}
+.ev.warn{border-left-color:var(--warn)}
+.ev.conflict{border-left-color:var(--danger);background:#fffafa}
+.ev time{font-size:12px;color:var(--green);font-weight:600;line-height:1.5}
+.ev .title{font-size:14px;font-weight:600;margin:0 0 3px}
+.ev .meta{font-size:11.5px;color:var(--muted);line-height:1.7}
+.ev .meta b{color:#4e6558;font-weight:600}
+.ev .side{display:flex;flex-direction:column;gap:5px;align-items:flex-end;min-width:86px}
+.ev .side button{font-size:11px;padding:4px 9px}
+.flag{font-size:10.5px;padding:2px 8px;border-radius:20px;background:#fdf3e8;color:#8f5a20;white-space:nowrap}
+.flag.bad{background:#fbeceb;color:#8f3030}
+.flag.ok{background:#eef6f0;color:#3d6b52}
+.empty{padding:26px;text-align:center;color:var(--muted);font-size:12px;border:1px dashed var(--line);border-radius:12px}
+.log{font:11.5px/1.7 Consolas,monospace;background:#f8faf7;border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-height:150px;overflow:auto;white-space:pre-wrap;color:#4a5c50}
+.runs{width:100%;border-collapse:collapse;font-size:11.5px}
+.runs th,.runs td{text-align:left;padding:6px 8px;border-bottom:1px solid #eef2ed}
+.runs th{color:var(--muted);font-weight:500}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#1f3a2e;color:#fff;padding:10px 18px;border-radius:24px;font-size:12.5px;opacity:0;pointer-events:none;transition:.2s;max-width:80vw;text-align:center}
+.toast.show{opacity:1}
+.note{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.8}
+@media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}.ev{grid-template-columns:1fr}.ev .side{flex-direction:row;align-items:center}.ev time{font-size:12px}main{padding:16px 12px 70px}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>职向 · 招聘日历</h1><div class="sub">CAMPUS RECRUIT CALENDAR</div></div>
+  <div class="grow"></div>
+  <a href="/">← 回到对话</a>
+  <button id="refresh">刷新</button>
+</header>
+<main>
+  <div class="stats" id="stats"></div>
+
+  <section class="panel">
+    <h2>信息源</h2>
+    <div class="toolbar" style="margin-bottom:12px">
+      <button class="primary" id="collect-all">采集全部已接入源</button>
+      <button id="probe">检查各源连通性</button>
+      <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。</span>
+    </div>
+    <div class="sources" id="sources"><div class="empty">正在读取信息源…</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>行程安排</h2>
+    <div class="toolbar" style="margin-bottom:6px">
+      <select id="days">
+        <option value="14">未来 14 天</option>
+        <option value="30" selected>未来 30 天</option>
+        <option value="60">未来 60 天</option>
+        <option value="90">未来 90 天</option>
+      </select>
+      <button data-export="ics">导出日历 .ics</button>
+      <button data-export="csv">导出表格 .csv</button>
+      <button data-export="md">导出安排表 .md</button>
+    </div>
+    <div id="schedule"><div class="empty">还没有数据，先点“采集全部已接入源”。</div></div>
+    <div class="note">时间为北京时间。通勤时长按校区坐标估算，仅用于判断是否赶场，出发前请用地图复核。标“待复核”的记录请点开来源链接确认。</div>
+  </section>
+
+  <section class="panel">
+    <h2>运行记录</h2>
+    <div id="runs" class="empty">暂无记录</div>
+    <div id="log" class="log" hidden></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const TOKEN='SESSION_TOKEN';
+const el=s=>document.querySelector(s);
+let catalog={},sourceState=[];
+function toast(text){const t=el('#toast');t.textContent=text;t.classList.add('show');clearTimeout(t._timer);t._timer=setTimeout(()=>t.classList.remove('show'),3200)}
+async function api(path,body){
+  const r=await fetch('/api/recruit/'+path,{method:body?'POST':'GET',headers:{'x-career-token':TOKEN,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+  if(r.status===401){location.href='/';throw new Error('请先登录')}
+  const d=await r.json().catch(()=>({error:'返回格式异常'}));
+  if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+  return d;
+}
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const days=()=>Number(el('#days').value)||30;
+
+function renderStats(stats,schedule){
+  const conflict=schedule?.stats?.conflicts||0;
+  el('#stats').innerHTML=[
+    ['收录活动',stats?.total??0],['未来活动',stats?.upcoming??0],
+    ['安排天数',schedule?.stats?.days??0],['时间冲突',conflict]
+  ].map(([k,v])=>`<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('');
+}
+
+function renderSources(sources){
+  sourceState=sources;
+  const group={};
+  for(const s of sources)(group[s.category] ||= []).push(s);
+  el('#sources').innerHTML=Object.entries(group).map(([cat,list])=>{
+    const cards=list.map(s=>{
+      const badge=s.enabled?(s.last_status?`<span class="badge ${/ok|created|updated/.test(s.last_status)?'':'off'}">${esc(s.last_status)}</span>`:'<span class="badge">待采集</span>'):'<span class="badge off">未接入</span>';
+      const note=(s.last_error||catalog[s.id]?.note||s.note||'').slice(0,120);
+      return `<div class="source ${s.enabled?'on':''}">
+        <h3>${esc(s.name)} ${badge}</h3>
+        <p>${esc(s.school)} · ${esc(s.channel||'')} · ${esc(s.mode)}</p>
+        ${note?`<p>${esc(note)}</p>`:''}
+        <div class="row">
+          <button data-collect="${esc(s.id)}" ${s.enabled?'':'disabled'}>采集这个源</button>
+          <a href="${esc(s.list_url)}" target="_blank" rel="noopener noreferrer">打开原站 ↗</a>
+        </div>
+      </div>`;
+    }).join('');
+    return `<div style="grid-column:1/-1;font-size:11px;color:#7b8b80;letter-spacing:1px;margin-top:4px">${esc(cat)}</div>${cards}`;
+  }).join('');
+}
+
+function fmtTime(iso){
+  const d=new Date(iso);const p=n=>String(n).padStart(2,'0');
+  return p(d.getHours())+':'+p(d.getMinutes());
+}
+function fmtDate(day){return day}
+
+function renderSchedule(schedule){
+  if(!schedule.days.length){el('#schedule').innerHTML='<div class="empty">这个时间范围内还没有活动。先采集，或换一个更大的时间范围。</div>';return}
+  el('#schedule').innerHTML=schedule.days.map(day=>{
+    const items=day.items.map(({event,conflict,travel,warning})=>{
+      const cls=conflict?'conflict':/小于估算通勤|未公布/.test(warning||'')?'warn':'';
+      const flag=conflict?'<span class="flag bad">时间冲突</span>':/小于估算通勤/.test(warning||'')?`<span class="flag">${esc(warning)}</span>`:'';
+      const conf=Math.round((event.confidence||0)*100);
+      return `<article class="ev ${cls}">
+        <time>${esc(fmtTime(event.startAt))}${event.endAt?'–'+esc(fmtTime(event.endAt)):''}</time>
+        <div>
+          <p class="title">${esc(event.title)}</p>
+          <div class="meta">
+            ${event.company?`<b>${esc(event.company)}</b> · `:''}${esc(event.school)} · ${esc(event.kind)}
+            ${event.venue?`<br>地点：${esc(event.venue)}`:''}
+            ${travel?`<br>通勤：${esc(travel.minutes)} 分钟（${esc(travel.basis)}）`:''}
+            <br>置信度 ${conf}% · ${event.verified?'<span class="flag ok">已复核</span>':'待复核'}
+          </div>
+          <div class="row">
+            ${event.sourceUrl?`<a href="${esc(event.sourceUrl)}" target="_blank" rel="noopener noreferrer">来源 ↗</a>`:''}
+            <button data-verify="${esc(event.id)}">复核来源</button>
+          </div>
+        </div>
+        <div class="side">${flag}</div>
+      </article>`;
+    }).join('');
+    return `<div class="day"><h3>${esc(day.date)} <span>周${esc(day.weekday)} · ${day.items.length} 场</span></h3>${items}</div>`;
+  }).join('');
+}
+
+function renderRuns(runs){
+  if(!runs.length){el('#runs').className='empty';el('#runs').textContent='暂无记录';return}
+  el('#runs').className='';
+  el('#runs').innerHTML='<table class="runs"><thead><tr><th>时间</th><th>信息源</th><th>结果</th><th>新增/更新</th><th>说明</th></tr></thead><tbody>'+
+    runs.map(r=>`<tr><td>${esc(fmtTime(r.started_at))}</td><td>${esc(r.source_id)}</td><td>${esc(r.status)}</td><td>${esc(r.created)}/${esc(r.updated)}</td><td>${esc((r.message||'').slice(0,60))}</td></tr>`).join('')+
+    '</tbody></table>';
+}
+
+async function loadAll(){
+  try{
+    const s=await api('sources');
+    renderSources(s.sources);
+    renderRuns(s.runs);
+    const sch=await api('schedule?days='+days());
+    renderStats(s.stats,sch.schedule);
+    renderSchedule(sch.schedule);
+    window.__stats=s.stats;
+  }catch(e){toast(e.message)}
+}
+
+async function collect(ids,label){
+  const log=el('#log');log.hidden=false;log.textContent='准备采集…';
+  const buttons=[...document.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
+  try{
+    log.textContent='采集进行中，通常 5–30 秒…';
+    const r=await api('collect',{sourceIds:ids,limit:20});
+    log.textContent=(r.logs||[]).join('\n')||'没有日志';
+    toast(`${label}完成：新增 ${r.totals.created}，更新 ${r.totals.updated}`);
+    await loadAll();
+  }catch(e){log.textContent=e.message;toast(e.message)}
+  finally{buttons.forEach(b=>b.disabled=false);await loadAll()}
+}
+
+el('#collect-all').onclick=()=>collect([],'采集');
+el('#refresh').onclick=()=>loadAll();
+el('#days').onchange=()=>loadAll();
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.collect){await collect([b.dataset.collect],'采集 '+b.dataset.collect);return}
+  if(b.dataset.export){const f=b.dataset.export;try{const r=await fetch('/api/recruit/export.'+f+'?days='+days(),{headers:{'x-career-token':TOKEN}});if(!r.ok)throw new Error('导出失败');const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='zhixiang-schedule.'+f;a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);toast('已导出 '+f.toUpperCase())}catch(err){toast(err.message)}return}
+  if(b.dataset.verify){b.disabled=true;try{const r=await api('verify',{id:b.dataset.verify});toast(r.message);await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}
+  if(b.id==='probe'){b.disabled=true;b.textContent='检查中…';try{const r=await api('probe',{});const bad=r.results.filter(x=>!x.ok);el('#log').hidden=false;el('#log').textContent=r.results.map(x=>`${x.ok?'✔':'✘'} ${x.id} ${x.status||''} ${x.reason||''} ${x.message||''}`).join('\n');toast(bad.length?`${bad.length} 个源当前不可达`:'所有源都可访问')}catch(err){toast(err.message)}finally{b.disabled=false;b.textContent='检查各源连通性'}return}
+});
+loadAll();
+</script>
+</body>
+</html>
