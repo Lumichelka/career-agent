@@ -61,6 +61,16 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .toast.show{opacity:1}
 .note{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.8}
 @media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}.ev{grid-template-columns:1fr}.ev .side{flex-direction:row;align-items:center}.ev time{font-size:12px}main{padding:16px 12px 70px}}
+dialog#manual-dialog{border:1px solid var(--line);border-radius:16px;padding:0;width:min(680px,92vw);max-height:88vh;overflow:auto;background:#fff;color:var(--ink);box-shadow:0 24px 70px #1f3a2e33}
+dialog#manual-dialog::backdrop{background:#1f3a2e55}
+#manual-dialog .inner{padding:20px 22px}
+#manual-dialog h2{margin:0 0 4px;font-size:17px}
+#manual-dialog label{display:grid;gap:4px;font-size:12px;color:#4e6558;margin-top:9px}
+#manual-dialog input,#manual-dialog textarea,#manual-dialog select{padding:8px 10px;border:1px solid #d7e1d9;border-radius:8px;font:13px inherit;width:100%;background:#fff}
+#manual-dialog textarea{min-height:100px}
+#manual-dialog .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#manual-dialog .draft{border-top:1px solid var(--line);margin-top:14px;padding-top:8px}
+@media(max-width:560px){#manual-dialog .grid2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -79,6 +89,7 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
     <h2>信息源</h2>
     <div class="toolbar" style="margin-bottom:12px">
       <button class="primary" id="collect-all">采集全部已接入源</button>
+      <button id="manual-open">＋ 公众号 / 手动导入</button>
       <button id="probe">检查各源连通性</button>
       <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。</span>
     </div>
@@ -108,6 +119,38 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
     <div id="log" class="log" hidden></div>
   </section>
 </main>
+<dialog id="manual-dialog">
+  <div class="inner">
+    <h2>公众号 / 手动导入</h2>
+    <div class="note" style="margin:4px 0 8px">粘贴公开文章链接，或直接粘贴正文。只抓你主动提供的内容，不批量抓公众号；保存前请核对字段。</div>
+    <label>文章链接（可选）<input id="m-url" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off"></label>
+    <label>正文（链接打不开时，把推文内容粘贴到这里）<textarea id="m-text" placeholder="时间、地点、单位、岗位要求…"></textarea></label>
+    <label>默认类型
+      <select id="m-kind">
+        <option value="">自动识别</option>
+        <option>宣讲会</option><option>双选会</option><option>就业指导</option><option>招聘信息</option><option>其他</option>
+      </select>
+    </label>
+    <div class="row"><button id="m-parse" class="primary">解析预览</button><button id="m-close">关闭</button></div>
+    <div class="note" id="m-status"></div>
+    <div class="draft" id="m-draft" hidden>
+      <div class="grid2">
+        <label>标题<input id="m-title" maxlength="200"></label>
+        <label>开始时间<input id="m-start" type="datetime-local"></label>
+        <label>地点<input id="m-venue" maxlength="120"></label>
+        <label>城市<input id="m-city" maxlength="30" placeholder="成都"></label>
+        <label>单位<input id="m-company" maxlength="120"></label>
+        <label>学校 / 归属<input id="m-school" maxlength="60" placeholder="手动导入"></label>
+        <label>类型
+          <select id="m-kind2"><option>宣讲会</option><option>双选会</option><option>就业指导</option><option>招聘信息</option><option>其他</option></select>
+        </label>
+        <label>投递方式<input id="m-apply" maxlength="40" placeholder="网申 / 邮箱 / 现场"></label>
+      </div>
+      <label>备注（含识别提示）<textarea id="m-notes" style="min-height:60px"></textarea></label>
+      <div class="row"><button id="m-save" class="primary">保存到招聘库</button><span class="note" style="margin:0">保存后可在行程里看到，并参与冲突检测与导出。</span></div>
+    </div>
+  </div>
+</dialog>
 <div class="toast" id="toast"></div>
 <script>
 const TOKEN='SESSION_TOKEN';
@@ -238,6 +281,43 @@ document.addEventListener('click',async e=>{
   if(b.dataset.verify){b.disabled=true;try{const r=await api('verify',{id:b.dataset.verify});toast(r.message);await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}
   if(b.id==='probe'){b.disabled=true;b.textContent='检查中…';try{const r=await api('probe',{});const bad=r.results.filter(x=>!x.ok);el('#log').hidden=false;el('#log').textContent=r.results.map(x=>`${x.ok?'✔':'✘'} ${x.id} ${x.status||''} ${x.reason||''} ${x.message||''}`).join('\n');toast(bad.length?`${bad.length} 个源当前不可达`:'所有源都可访问')}catch(err){toast(err.message)}finally{b.disabled=false;b.textContent='检查各源连通性'}return}
 });
+const manualDialog=el('#manual-dialog');
+let manualPreview='';
+el('#manual-open').onclick=()=>{el('#m-status').textContent='';el('#m-draft').hidden=true;manualDialog.showModal()};
+el('#m-close').onclick=()=>manualDialog.close();
+el('#m-parse').onclick=async()=>{
+  const status=el('#m-status');status.textContent='解析中…';
+  try{
+    const d=await api('manual/parse',{url:el('#m-url').value.trim(),text:el('#m-text').value,kind:el('#m-kind').value});
+    const draft=d.draft;manualPreview=d.preview||'';
+    el('#m-title').value=draft.title||'';
+    el('#m-start').value=draft.startAt?draft.startAt.slice(0,16):'';
+    el('#m-venue').value=draft.venue||'';
+    el('#m-city').value=draft.city||'';
+    el('#m-company').value=draft.company||'';
+    el('#m-school').value=draft.school||'手动导入';
+    el('#m-kind2').value=draft.kind||'其他';
+    el('#m-apply').value=draft.applyMode||'';
+    el('#m-notes').value=draft.notes||'';
+    el('#m-draft').hidden=false;
+    status.textContent=(d.fetched?'已抓取链接正文，请核对字段':'已解析粘贴正文')+(draft.warnings?.length?'；'+draft.warnings.join('；'):'');
+  }catch(e){status.textContent=e.message}
+};
+el('#m-save').onclick=async()=>{
+  const title=el('#m-title').value.trim(),start=el('#m-start').value;
+  if(!title||!start){toast('标题和开始时间必填');return}
+  try{
+    const startAt=start.length===16?start+':00+08:00':start;
+    await api('manual/save',{
+      title,startAt,venue:el('#m-venue').value.trim(),city:el('#m-city').value.trim(),
+      company:el('#m-company').value.trim(),kind:el('#m-kind2').value,
+      school:el('#m-school').value.trim()||'手动导入',
+      notes:el('#m-notes').value.trim(),applyMode:el('#m-apply').value.trim(),
+      sourceUrl:el('#m-url').value.trim(),rawText:manualPreview
+    });
+    manualDialog.close();toast('已保存到招聘库');await loadAll();
+  }catch(e){toast(e.message)}
+};
 loadAll();
 </script>
 </body>

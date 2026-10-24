@@ -3,7 +3,8 @@
 import {join} from 'node:path';
 import {RecruitStore} from './store.mjs';
 import {SOURCES} from './sources/index.mjs';
-import {runCollection, htmlToText} from './collect.mjs';
+import {runCollection, htmlToText, normalize} from './collect.mjs';
+import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
 
@@ -63,6 +64,27 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   }
 
   if (method === 'POST') {
+    if (pathname === 'manual/parse') {
+      try {
+        const parsed = await parseManualInput(body || {});
+        return parsed.error ? {status: 400, json: parsed} : {json: parsed};
+      } catch (e) {
+        return {status: 500, json: {error: '解析失败：' + e.message}};
+      }
+    }
+
+    if (pathname === 'manual/save') {
+      const b = body || {};
+      const source = {id: 'manual', school: String(b.school || '手动导入').slice(0, 60), city: b.city || '', kind: b.kind || '其他', listUrl: b.sourceUrl || ''};
+      const event = normalize({...b, url: b.sourceUrl}, source);
+      if (!event) return {status: 400, json: {error: '标题和开始时间必填'}};
+      const saved = withStore(dir, store => {
+        store.upsertEvent({...event, confidence: 0.7, notes: [event.notes, '手动确认'].filter(Boolean).join('；')});
+        return store.getEvent(event.id);
+      });
+      return {json: {ok: true, event: saved}};
+    }
+
     if (pathname === 'collect') {
       const sourceIds = Array.isArray(body?.sourceIds) ? body.sourceIds.filter(id => typeof id === 'string').slice(0, 12) : [];
       const limit = Math.min(50, Math.max(1, Number(body?.limit) || 20));

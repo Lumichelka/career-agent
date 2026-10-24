@@ -47,7 +47,7 @@ export function extractInterview(text) {
   return {stage, type};
 }
 
-function normalize(item, source) {
+export function normalize(item, source) {
   const title = String(item.title || '').trim();
   const startAt = String(item.startAt || '').trim();
   if (!title || !startAt) return null;
