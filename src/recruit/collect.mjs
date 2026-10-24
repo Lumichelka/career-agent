@@ -128,7 +128,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
           if (!pageRes.ok) break;
           let json;
           try { json = JSON.parse(pageRes.text); } catch { throw new Error('接口返回的不是 JSON，可能被登录页或验证码拦截'); }
-          if (json.code && json.code !== 200) {
+          if (json.code && json.code !== 200 && !(source.acceptCode || []).map(Number).includes(Number(json.code))) {
             if (p === 1) throw new Error('接口返回 code=' + json.code + ' ' + (json.message || ''));
             break;
           }
