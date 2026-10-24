@@ -4,6 +4,28 @@ const platform = {type: 'string', enum: ['boss', 'xiaohongshu']};
 
 export const TOOLS = [
   {
+    name: 'interview_list',
+    title: '面试准备列表',
+    description: '列出本机保存的面试准备（公司/岗位/题目数/已答数）。',
+    permission: 'read',
+    handler: 'interview.list',
+    timeoutMs: 5000,
+    parameters: {type: 'object', properties: {}, additionalProperties: false}
+  },
+  {
+    name: 'interview_read',
+    title: '读取面试准备',
+    description: '读取一份面试准备的内容与题库（含我的回答）。id 可选，缺省读最近一份。',
+    permission: 'read',
+    handler: 'interview.read',
+    timeoutMs: 5000,
+    parameters: {
+      type: 'object',
+      properties: {id: {type: 'string', maxLength: 36, description: '面试准备 id，可选'}},
+      additionalProperties: false
+    }
+  },
+  {
     name: 'resume_list',
     title: '简历列表',
     description: '列出本机保存的简历与版本数量，用于了解用户有哪些简历版本。',

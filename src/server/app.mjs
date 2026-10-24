@@ -183,7 +183,7 @@ http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/session/')) return send(res, await load(dir, url.pathname.split('/').pop()));
 
-    if (req.method === 'GET' && (url.pathname.startsWith('/api/resumes') || url.pathname.startsWith('/api/applications'))) {
+    if (req.method === 'GET' && (url.pathname.startsWith('/api/resumes') || url.pathname.startsWith('/api/applications') || url.pathname.startsWith('/api/interviews'))) {
       const out = await handleResume({method: 'GET', pathname: url.pathname.slice('/api/'.length), url, dir});
       if (!out) return send(res, {error: '未知的简历接口'}, 404);
       if (out.file) return sendFile(res, out.file.body, out.file.type, out.file.name);
@@ -216,7 +216,7 @@ http.createServer(async (req, res) => {
       if (url.pathname === '/api/memory/profile/delete') return send(res, {facts: await deleteFact(dir, body.id)});
       if (url.pathname === '/api/memory/profile/clear') return send(res, {facts: await clearProfile(dir)});
       if (url.pathname === '/api/memory/tasks/clear') { await clearTasks(dir); return send(res, {ok: true}); }
-      if (url.pathname.startsWith('/api/resumes') || url.pathname.startsWith('/api/applications')) {
+      if (url.pathname.startsWith('/api/resumes') || url.pathname.startsWith('/api/applications') || url.pathname.startsWith('/api/interviews')) {
         const out = await handleResume({method: 'POST', pathname: url.pathname.slice('/api/'.length), url, body, dir});
         if (!out) return send(res, {error: '未知的简历接口'}, 404);
         if (out.file) return sendFile(res, out.file.body, out.file.type, out.file.name);

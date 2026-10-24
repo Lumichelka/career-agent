@@ -19,15 +19,43 @@ export async function handleResume({method, pathname, url, body, dir}) {
       if (pathname === 'resumes') return {json: {resumes: store.listResumes(), stats: store.stats()}};
       if (pathname === 'applications') return {json: {applications: store.listApplications(), stages: STAGES, stats: store.stats()}};
       if (pathname === 'applications/export.csv') return {file: {body: csv(store.listApplications()), type: 'text/csv; charset=utf-8', name: 'zhixiang-applications.csv'}};
+      if (pathname === 'interviews') return {json: {interviews: store.listInterviews(), stats: store.stats()}};
       if (parts[0] === 'resumes' && parts[1] && parts.length === 2) {
         const resume = store.getResume(parts[1]);
         return resume ? {json: {resume}} : {status: 404, json: {error: '简历不存在'}};
+      }
+      if (parts[0] === 'interviews' && parts[1] && parts.length === 2) {
+        const interview = store.getInterview(parts[1]);
+        return interview ? {json: {interview}} : {status: 404, json: {error: '面试准备不存在'}};
       }
       return null;
     }
 
     if (method === 'POST') {
       if (pathname === 'resumes') return {json: {resume: store.createResume(body || {})}};
+
+      if (pathname === 'interviews') return {json: {interview: store.saveInterview(body || {})}};
+
+      if (pathname === 'interviews/from-session') {
+        const sessionId = String(body?.sessionId || '');
+        if (!/^[a-f0-9-]{36}$/.test(sessionId)) return {status: 400, json: {error: '无效的会话'}};
+        let session;
+        try { session = JSON.parse(await readFile(join(dir, sessionId + '.json'), 'utf8')); } catch { return {status: 404, json: {error: '没有这个对话'}}; }
+        const artifact = (session.artifacts || []).at(-1);
+        if (!artifact || !artifact.content?.trim()) return {status: 400, json: {error: '本次对话还没有可保存的文稿'}};
+        const interview = store.saveInterview({
+          company: body.company || '来自对话',
+          role: body.role || artifact.title || '面试准备',
+          content: artifact.content,
+          notes: '来自对话 ' + sessionId.slice(0, 8)
+        });
+        return {json: {interview}};
+      }
+
+      if (parts[0] === 'interviews' && parts[1] && parts[2] === 'delete') {
+        store.deleteInterview(parts[1]);
+        return {json: {ok: true}};
+      }
 
       if (pathname === 'resumes/from-session') {
         const sessionId = String(body?.sessionId || '');

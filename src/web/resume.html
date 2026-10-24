@@ -70,6 +70,7 @@ td select{padding:5px 7px;font-size:11.5px;width:auto}
   <div class="tabs">
     <button data-tab="resume" class="active">简历库</button>
     <button data-tab="apps">投递跟进</button>
+    <button data-tab="interviews">面试准备</button>
   </div>
 
   <section id="tab-resume">
@@ -125,6 +126,33 @@ td select{padding:5px 7px;font-size:11.5px;width:auto}
       <div id="app-list"><div class="empty">还没有投递记录</div></div>
     </div>
   </section>
+
+  <section id="tab-interviews" hidden>
+    <div class="grid">
+      <aside>
+        <div class="panel">
+          <h2>面试准备 <a href="/chat">从对话保存 →</a></h2>
+          <div id="interview-list"><div class="empty">还没有面试准备</div></div>
+        </div>
+        <details class="panel">
+          <summary style="cursor:pointer;font-size:13px">＋ 新建面试准备</summary>
+          <form id="new-interview" class="stack" style="margin-top:10px">
+            <label>公司<input id="ni-company" maxlength="80" placeholder="例如：某银行"></label>
+            <label>岗位<input id="ni-role" maxlength="80" placeholder="例如：数据分析实习"></label>
+            <label>JD（可选）<textarea id="ni-jd" maxlength="20000"></textarea></label>
+            <label>准备内容<textarea id="ni-content" maxlength="50000" placeholder="流程预测、能力画像、准备清单…"></textarea></label>
+            <button type="submit" class="primary">创建</button>
+          </form>
+        </details>
+      </aside>
+      <section>
+        <div class="panel">
+          <h2 id="interview-title">选择左侧面试准备</h2>
+          <div id="interview-detail"><div class="empty">选择一份面试准备查看题库</div></div>
+        </div>
+      </section>
+    </div>
+  </section>
 </main>
 
 <div class="gate" id="gate" hidden>
@@ -143,7 +171,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '
 const toast = t => { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 3200); };
 const fmt = iso => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
 let STAGES = [];
-let state = {resumes: [], current: null, apps: []};
+let state = {resumes: [], current: null, apps: [], interviews: [], currentInterview: null};
 
 async function api(path, body) {
   const r = await fetch('/api/' + path, {method: body ? 'POST' : 'GET', headers: {'x-career-token': TOKEN, 'content-type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
@@ -245,6 +273,93 @@ function renderApps() {
   });
 }
 
+async function loadInterviews() {
+  const d = await api('interviews');
+  state.interviews = d.interviews || [];
+  renderInterviewList();
+  if (state.currentInterview && !state.interviews.some(x => x.id === state.currentInterview.id)) {
+    state.currentInterview = null;
+    $('#interview-detail').innerHTML = '<div class="empty">选择一份面试准备查看题库</div>';
+    $('#interview-title').textContent = '选择左侧面试准备';
+  }
+  if (!state.currentInterview && state.interviews.length) await openInterview(state.interviews[0].id);
+}
+
+function renderInterviewList() {
+  if (!state.interviews.length) { $('#interview-list').innerHTML = '<div class="empty">还没有面试准备。可以新建，或在对话里生成后点「保存为面试准备」。</div>'; return; }
+  $('#interview-list').innerHTML = state.interviews.map(i => `<div class="resume-item ${state.currentInterview?.id === i.id ? 'selected' : ''}" data-interview="${esc(i.id)}">
+    <b>${esc(i.company)}</b><div class="meta">${esc(i.role || '未填岗位')} · ${i.questionCount} 题 / 已答 ${i.answered} · ${esc(fmt(i.updatedAt))}</div></div>`).join('');
+  document.querySelectorAll('[data-interview]').forEach(el => el.onclick = () => openInterview(el.dataset.interview));
+}
+
+async function openInterview(id) {
+  const d = await api('interviews/' + id);
+  state.currentInterview = d.interview;
+  renderInterviewList();
+  renderInterviewDetail();
+}
+
+function renderInterviewDetail() {
+  const it = state.currentInterview;
+  if (!it) return;
+  $('#interview-title').textContent = (it.company || '未命名') + (it.role ? ' · ' + it.role : '');
+  const rows = it.questions.map((q, i) => `<div class="version" data-qrow data-type="${esc(q.type || '')}" data-points="${esc(q.points || '')}">
+    <label>问题 ${i + 1}<input data-q-text value="${esc(q.q)}"></label>
+    <label>我的回答<textarea data-q-answer style="min-height:60px">${esc(q.answer || '')}</textarea></label>
+    ${q.points ? `<div class="hint">要点：${esc(q.points)}</div>` : ''}
+  </div>`).join('');
+
+  $('#interview-detail').innerHTML = `
+    <div class="panel" style="margin:0 0 14px;padding:12px">
+      <h2>准备内容</h2>
+      <textarea id="iv-content" maxlength="50000" style="min-height:260px">${esc(it.content || '')}</textarea>
+    </div>
+    <div class="panel" style="margin:0;padding:12px">
+      <h2>题库 <span class="hint">${it.questions.length} 题</span></h2>
+      <div id="iv-questions">${rows || '<div class="empty">还没有题目，点下面添加</div>'}</div>
+      <div class="row" style="margin-top:8px">
+        <button id="add-question">＋ 添加一题</button>
+        <button id="save-interview" class="primary">保存</button>
+        <button id="delete-interview" class="danger">删除</button>
+      </div>
+    </div>`;
+
+  $('#add-question').onclick = () => {
+    const wrap = $('#iv-questions');
+    if (wrap.querySelector('.empty')) wrap.innerHTML = '';
+    const div = document.createElement('div');
+    div.className = 'version';
+    div.dataset.qrow = '';
+    div.innerHTML = '<label>新问题<input data-q-text></label><label>我的回答<textarea data-q-answer style="min-height:60px"></textarea></label>';
+    wrap.append(div);
+  };
+
+  $('#save-interview').onclick = async () => {
+    const questions = [...document.querySelectorAll('[data-qrow]')]
+      .map(row => ({q: row.querySelector('[data-q-text]').value, answer: row.querySelector('[data-q-answer]').value, type: row.dataset.type, points: row.dataset.points}))
+      .filter(x => x.q.trim());
+    try {
+      const d = await api('interviews', {id: it.id, company: it.company, role: it.role, jdText: it.jdText, content: $('#iv-content').value, questions});
+      state.currentInterview = d.interview;
+      renderInterviewList();
+      renderInterviewDetail();
+      toast('已保存');
+    } catch (e) { toast(e.message); }
+  };
+
+  $('#delete-interview').onclick = async () => {
+    if (!confirm('删除这份面试准备？')) return;
+    try {
+      await api('interviews/' + it.id + '/delete', {});
+      state.currentInterview = null;
+      await loadInterviews();
+      $('#interview-detail').innerHTML = '<div class="empty">已删除</div>';
+      $('#interview-title').textContent = '选择左侧面试准备';
+      toast('已删除');
+    } catch (e) { toast(e.message); }
+  };
+}
+
 async function loadResumes() {
   const d = await api('resumes');
   state.resumes = d.resumes || [];
@@ -266,12 +381,28 @@ function bind() {
     document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('active', x === b));
     $('#tab-resume').hidden = b.dataset.tab !== 'resume';
     $('#tab-apps').hidden = b.dataset.tab !== 'apps';
+    $('#tab-interviews').hidden = b.dataset.tab !== 'interviews';
   });
   $('#new-resume').onsubmit = async e => {
     e.preventDefault();
     try {
       const d = await api('resumes', {name: $('#nr-name').value || '我的简历', content: $('#nr-content').value});
       await loadResumes(); await openResume(d.resume.id); toast('已创建');
+    } catch (err) { toast(err.message); }
+  };
+  $('#new-interview').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const d = await api('interviews', {
+        company: $('#ni-company').value || '未命名',
+        role: $('#ni-role').value,
+        jdText: $('#ni-jd').value,
+        content: $('#ni-content').value
+      });
+      state.currentInterview = d.interview;
+      await loadInterviews();
+      if (state.currentInterview) renderInterviewDetail();
+      toast('已创建');
     } catch (err) { toast(err.message); }
   };
   $('#app-form').onsubmit = async e => {
@@ -301,11 +432,12 @@ function bind() {
 async function boot() {
   try { await api('auth/me'); }
   catch (e) { if (e.needLogin) { $('#gate').hidden = false; $('#main').style.visibility = 'hidden'; return; } toast(e.message); return; }
-  try { await Promise.all([loadResumes(), loadApps()]); }
+  try { await Promise.all([loadResumes(), loadApps(), loadInterviews()]); }
   catch (e) { toast(e.message); }
 }
 
 bind();
+if (location.hash === '#interviews') document.querySelector('[data-tab="interviews"]')?.click();
 boot();
 </script>
 </body>

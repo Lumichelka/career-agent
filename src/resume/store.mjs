@@ -23,8 +23,13 @@ CREATE TABLE IF NOT EXISTS applications(
   stage TEXT, deadline TEXT, next_followup TEXT, resume_version_id TEXT,
   jd_text TEXT, notes TEXT, created_at TEXT, updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS interview_preps(
+  id TEXT PRIMARY KEY, company TEXT, role TEXT, jd_text TEXT, content TEXT,
+  questions_json TEXT, notes TEXT, created_at TEXT, updated_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_versions_resume ON resume_versions(resume_id);
 CREATE INDEX IF NOT EXISTS idx_apps_stage ON applications(stage);
+CREATE INDEX IF NOT EXISTS idx_preps_updated ON interview_preps(updated_at);
 `;
 
 export const STAGES = ['已投递', '笔试', '面试中', 'Offer', '已结束'];
@@ -154,12 +159,49 @@ export class ResumeStore {
     this.db.prepare('DELETE FROM applications WHERE id=?').run(id);
   }
 
+  listInterviews() {
+    return this.db.prepare('SELECT * FROM interview_preps ORDER BY updated_at DESC').all().map(r => {
+      const questions = parseQuestions(r.questions_json);
+      return {
+        id: r.id, company: r.company, role: r.role, updatedAt: r.updated_at,
+        createdAt: r.created_at, questionCount: questions.length,
+        answered: questions.filter(q => q.answer).length
+      };
+    });
+  }
+
+  getInterview(id) {
+    const row = this.db.prepare('SELECT * FROM interview_preps WHERE id=?').get(id);
+    return row ? rowToInterview(row) : null;
+  }
+
+  saveInterview(input) {
+    const now = new Date().toISOString();
+    const data = normalizeInterview(input);
+    if (input.id) {
+      if (!this.getInterview(input.id)) throw new Error('面试准备不存在');
+      this.db.prepare(`UPDATE interview_preps SET company=?,role=?,jd_text=?,content=?,questions_json=?,notes=?,updated_at=? WHERE id=?`)
+        .run(data.company, data.role, data.jdText, data.content, JSON.stringify(data.questions), data.notes, now, input.id);
+      return this.getInterview(input.id);
+    }
+    const id = randomUUID();
+    this.db.prepare(`INSERT INTO interview_preps(id,company,role,jd_text,content,questions_json,notes,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`)
+      .run(id, data.company, data.role, data.jdText, data.content, JSON.stringify(data.questions), data.notes, now, now);
+    return this.getInterview(id);
+  }
+
+  deleteInterview(id) {
+    this.db.prepare('DELETE FROM interview_preps WHERE id=?').run(id);
+  }
+
   stats() {
     const byStage = Object.fromEntries(this.db.prepare('SELECT stage, COUNT(*) c FROM applications GROUP BY stage').all().map(r => [r.stage, r.c]));
     const total = this.db.prepare('SELECT COUNT(*) c FROM applications').get().c;
     const resumes = this.db.prepare('SELECT COUNT(*) c FROM resumes').get().c;
     const versions = this.db.prepare('SELECT COUNT(*) c FROM resume_versions').get().c;
-    return {applications: total, byStage, resumes, versions};
+    const interviews = this.db.prepare('SELECT COUNT(*) c FROM interview_preps').get().c;
+    return {applications: total, byStage, resumes, versions, interviews};
   }
 }
 
@@ -185,6 +227,43 @@ function normalizeApp(input, store) {
 function rowToVersion(r) {
   return {id: r.id, resumeId: r.resume_id, versionNo: r.version_no, title: r.title, content: r.content, jdText: r.jd_text, notes: r.notes, createdAt: r.created_at};
 }
+function normalizeInterview(input) {
+  const company = clean(input.company || '未命名', LIMITS.company, '公司名称');
+  const role = optional(input.role, LIMITS.role, '岗位名称');
+  const jdText = optional(input.jdText, LIMITS.jd, '岗位描述', {multiline: true});
+  const content = optional(input.content, LIMITS.content, '准备内容', {multiline: true});
+  const notes = optional(input.notes, LIMITS.notes, '备注', {multiline: true});
+  const questions = normalizeQuestions(input.questions);
+  if (!content && !questions.length) throw new Error('准备内容和题目至少填一项');
+  return {company, role, jdText, content, notes, questions};
+}
+
+function normalizeQuestions(list) {
+  if (list === undefined || list === null) return [];
+  if (!Array.isArray(list)) throw new Error('题目必须是数组');
+  return list.slice(0, 50).map((item, i) => {
+    const text = clean(String(item?.q || item?.question || ''), 500, '第 ' + (i + 1) + ' 题');
+    return {
+      q: text,
+      type: optional(item.type, 20, '题目类型'),
+      points: optional(item.points, 1000, '回答要点', {multiline: true}),
+      answer: optional(item.answer, 2000, '我的回答', {multiline: true})
+    };
+  });
+}
+
+function parseQuestions(raw) {
+  try { const arr = JSON.parse(raw || '[]'); return Array.isArray(arr) ? arr : []; } catch { return []; }
+}
+
+function rowToInterview(r) {
+  return {
+    id: r.id, company: r.company, role: r.role, jdText: r.jd_text, content: r.content,
+    questions: parseQuestions(r.questions_json), notes: r.notes,
+    createdAt: r.created_at, updatedAt: r.updated_at
+  };
+}
+
 function rowToApp(r) {
   return {
     id: r.id, company: r.company, role: r.role, city: r.city, channel: r.channel, stage: r.stage,
