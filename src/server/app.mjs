@@ -9,6 +9,7 @@ import {PLATFORM_SITES} from '../platform/sites.mjs';
 import {handleRecruit} from '../recruit/api.mjs';
 import {handleResume} from '../resume/api.mjs';
 import {handleCompany} from '../company/api.mjs';
+import {handleWechat} from '../wechat/api.mjs';
 import http from 'node:http';
 import os from 'node:os';
 import {readFile, mkdir, writeFile, readdir, copyFile} from 'node:fs/promises';
@@ -118,6 +119,12 @@ http.createServer(async (req, res) => {
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
       return res.end(html);
     }
+    if (req.method === 'GET' && url.pathname === '/wechat') {
+      const html = (await readFile(join(root, 'src', 'web', 'wechat.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
+      return res.end(html);
+    }
+
     if (req.method === 'GET' && url.pathname === '/companies') {
       const html = (await readFile(join(root, 'src', 'web', 'companies.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
@@ -207,6 +214,11 @@ http.createServer(async (req, res) => {
       if (out.file) return sendFile(res, out.file.body, out.file.type, out.file.name);
       return send(res, out.json, out.status || 200);
     }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/wechat')) {
+      const out = await handleWechat({method: 'GET', pathname: url.pathname.slice('/api/wechat/'.length), url, dir});
+      if (!out) return send(res, {error: '未知的公众号接口'}, 404);
+      return send(res, out.json, out.status || 200);
+    }
     if (req.method === 'GET' && url.pathname.startsWith('/api/companies')) {
       const out = await handleCompany({method: 'GET', pathname: url.pathname.slice('/api/'.length), dir});
       if (!out) return send(res, {error: '未知的公司档案接口'}, 404);
@@ -243,6 +255,11 @@ http.createServer(async (req, res) => {
         const out = await handleResume({method: 'POST', pathname: url.pathname.slice('/api/'.length), url, body, dir});
         if (!out) return send(res, {error: '未知的简历接口'}, 404);
         if (out.file) return sendFile(res, out.file.body, out.file.type, out.file.name);
+        return send(res, out.json, out.status || 200);
+      }
+      if (url.pathname.startsWith('/api/wechat')) {
+        const out = await handleWechat({method: 'POST', pathname: url.pathname.slice('/api/wechat/'.length), body, dir});
+        if (!out) return send(res, {error: '未知的公众号接口'}, 404);
         return send(res, out.json, out.status || 200);
       }
       if (url.pathname.startsWith('/api/companies')) {

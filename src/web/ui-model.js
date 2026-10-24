@@ -218,5 +218,14 @@
       c.onclick = () => { location.href = '/companies'; };
       resumeBtn.after(c);
     }
+    const companyBtn = $('#company-entry');
+    if (companyBtn && !$('#wechat-entry')) {
+      const x = document.createElement('button');
+      x.id = 'wechat-entry';
+      x.className = 'new platform-launch';
+      x.textContent = '✉ 公众号文章';
+      x.onclick = () => { location.href = '/wechat'; };
+      companyBtn.after(x);
+    }
   } catch { /* 侧栏结构变化时忽略 */ }
 })();

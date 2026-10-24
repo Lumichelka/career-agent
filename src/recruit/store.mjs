@@ -8,6 +8,7 @@ try {
 }
 import {dirname} from 'node:path';
 import {mkdirSync} from 'node:fs';
+import {randomUUID} from 'node:crypto';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources(
@@ -29,6 +30,11 @@ CREATE TABLE IF NOT EXISTS events(
 CREATE TABLE IF NOT EXISTS runs(
   id TEXT PRIMARY KEY, source_id TEXT, started_at TEXT, finished_at TEXT,
   status TEXT, fetched INTEGER, created INTEGER, updated INTEGER, message TEXT
+);
+CREATE TABLE IF NOT EXISTS event_projects(
+  id TEXT PRIMARY KEY, event_id TEXT NOT NULL, company TEXT, title TEXT,
+  positions TEXT, requirements TEXT, apply_mode TEXT, apply_url TEXT,
+  source_url TEXT, notes TEXT, created_at TEXT, updated_at TEXT
 );
 CREATE TABLE IF NOT EXISTS raw_pages(
   url TEXT PRIMARY KEY, source_id TEXT, title TEXT, text TEXT, fetched_at TEXT, hash TEXT
@@ -73,6 +79,7 @@ export class RecruitStore {
     this.db.exec('UPDATE events SET last_seen_at=fetched_at WHERE last_seen_at IS NULL');
     this.db.exec("UPDATE events SET cross_sources=source_id WHERE cross_sources IS NULL OR cross_sources=''");
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_projects_event ON event_projects(event_id)');
   }
 
   syncSources(sources) {
@@ -154,7 +161,7 @@ export class RecruitStore {
     this.db.prepare('UPDATE events SET verified=?, notes=? WHERE id=?').run(verified ? 1 : 0, notes, id);
   }
 
-  listEvents({from, to, limit = 200, school, kind, includeCancelled = false} = {}) {
+  listEvents({from, to, limit = 200, school, kind, includeCancelled = false, withProjects = false} = {}) {
     const where = [], args = [];
     if (from) { where.push('start_at >= ?'); args.push(from); }
     if (to) { where.push('start_at <= ?'); args.push(to); }
@@ -162,7 +169,56 @@ export class RecruitStore {
     if (kind) { where.push('kind = ?'); args.push(kind); }
     if (!includeCancelled) where.push("status != 'cancelled'");
     const sql = 'SELECT * FROM events' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY start_at ASC LIMIT ?';
-    return this.db.prepare(sql).all(...args, limit).map(rowToEvent);
+    const events = this.db.prepare(sql).all(...args, limit).map(rowToEvent);
+    if (withProjects && events.length) {
+      const ids = events.map(e => e.id);
+      const rows = this.db.prepare(`SELECT * FROM event_projects WHERE event_id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at ASC`).all(...ids);
+      const byEvent = new Map();
+      for (const row of rows) {
+        if (!byEvent.has(row.event_id)) byEvent.set(row.event_id, []);
+        byEvent.get(row.event_id).push(rowToProject(row));
+      }
+      for (const e of events) e.projects = byEvent.get(e.id) || [];
+    }
+    return events;
+  }
+
+  listProjects(eventId) {
+    return this.db.prepare('SELECT * FROM event_projects WHERE event_id=? ORDER BY created_at ASC').all(eventId).map(rowToProject);
+  }
+
+  upsertProject(input) {
+    const eventId = String(input.eventId || '');
+    if (!eventId || !this.getEvent(eventId)) throw new Error('关联活动不存在');
+    const company = String(input.company || '').trim().slice(0, 120);
+    const title = String(input.title || '').trim().slice(0, 200);
+    if (!company && !title) throw new Error('单位和项目名称至少填一项');
+    const data = {
+      company, title,
+      positions: String(input.positions || '').trim().slice(0, 2000),
+      requirements: String(input.requirements || '').trim().slice(0, 4000),
+      applyMode: String(input.applyMode || '').trim().slice(0, 60),
+      applyUrl: String(input.applyUrl || '').trim().slice(0, 500),
+      sourceUrl: String(input.sourceUrl || '').trim().slice(0, 500),
+      notes: String(input.notes || '').trim().slice(0, 2000)
+    };
+    const now = new Date().toISOString();
+    if (input.id) {
+      const existing = this.db.prepare('SELECT id FROM event_projects WHERE id=?').get(input.id);
+      if (!existing) throw new Error('招聘项目不存在');
+      this.db.prepare(`UPDATE event_projects SET company=?,title=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,notes=?,updated_at=? WHERE id=?`)
+        .run(data.company, data.title, data.positions, data.requirements, data.applyMode, data.applyUrl, data.sourceUrl, data.notes, now, input.id);
+      return rowToProject(this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(input.id));
+    }
+    const id = randomUUID();
+    this.db.prepare(`INSERT INTO event_projects(id,event_id,company,title,positions,requirements,apply_mode,apply_url,source_url,notes,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, eventId, data.company, data.title, data.positions, data.requirements, data.applyMode, data.applyUrl, data.sourceUrl, data.notes, now, now);
+    return rowToProject(this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(id));
+  }
+
+  deleteProject(id) {
+    this.db.prepare('DELETE FROM event_projects WHERE id=?').run(id);
   }
 
   getEvent(id) {
@@ -186,7 +242,8 @@ export class RecruitStore {
     const bySchool = this.db.prepare("SELECT school, COUNT(*) c FROM events WHERE status != 'cancelled' GROUP BY school ORDER BY c DESC").all();
     const byKind = this.db.prepare("SELECT kind, COUNT(*) c FROM events WHERE status != 'cancelled' GROUP BY kind ORDER BY c DESC").all();
     const byStatus = Object.fromEntries(this.db.prepare('SELECT status, COUNT(*) c FROM events GROUP BY status').all().map(r => [r.status, r.c]));
-    return {total, upcoming, bySchool, byKind, byStatus};
+    const projects = this.db.prepare('SELECT COUNT(*) c FROM event_projects').get().c;
+    return {total, upcoming, bySchool, byKind, byStatus, projects};
   }
 }
 
@@ -202,5 +259,15 @@ function rowToEvent(r) {
     status: r.status || 'active', firstSeenAt: r.first_seen_at, lastSeenAt: r.last_seen_at,
     missingRuns: Number(r.missing_runs) || 0,
     crossSources: String(r.cross_sources || '').split(',').filter(Boolean)
+  };
+}
+
+function rowToProject(r) {
+  return {
+    id: r.id, eventId: r.event_id, company: r.company, title: r.title,
+    positions: r.positions, requirements: r.requirements,
+    applyMode: r.apply_mode, applyUrl: r.apply_url,
+    sourceUrl: r.source_url, notes: r.notes,
+    createdAt: r.created_at, updatedAt: r.updated_at
   };
 }

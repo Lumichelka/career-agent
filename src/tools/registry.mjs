@@ -77,7 +77,7 @@ export const TOOLS = [
   {
     name: 'career_recruit_events',
     title: '查询线下招聘',
-    description: '读取本机已采集的线下招聘活动（宣讲会/双选会/就业指导），按时间排序并给出冲突与通勤提示。用于排行程；没有数据时如实说明需要先采集。',
+    description: '读取本机已采集的线下招聘活动（宣讲会/双选会/就业指导），按日历列出活动及其关联招聘项目。行程冲突与通勤规划已暂停；没有数据时如实说明需要先采集。',
     permission: 'read',
     handler: 'recruit.events',
     timeoutMs: 8000,

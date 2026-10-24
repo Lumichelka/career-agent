@@ -40,8 +40,25 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
     }
     if (pathname === 'events') {
       const {from, to, days} = range(url);
-      const events = withStore(dir, store => store.listEvents({from, to, limit: 300}));
+      const events = withStore(dir, store => store.listEvents({from, to, limit: 300, withProjects: true}));
       return {json: {events, days, from, to}};
+    }
+    if (pathname === 'calendar') {
+      const requested = url.searchParams.get('month') || '';
+      const month = /^\d{4}-\d{2}$/.test(requested) ? requested : new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 7);
+      const [year, mon] = month.split('-').map(Number);
+      const lastDay = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+      const from = `${month}-01T00:00:00+08:00`;
+      const to = `${month}-${String(lastDay).padStart(2, '0')}T23:59:59+08:00`;
+      const events = withStore(dir, store => store.listEvents({from, to, limit: 1000, withProjects: true}));
+      const days = [];
+      for (const e of events) {
+        const date = e.startAt.slice(0, 10);
+        let day = days.find(d => d.date === date);
+        if (!day) { day = {date, events: []}; days.push(day); }
+        day.events.push(e);
+      }
+      return {json: {month, days, stats: {events: events.length, projects: events.reduce((n, e) => n + (e.projects?.length || 0), 0)}}};
     }
     if (pathname === 'schedule') {
       const {from, to, days} = range(url);
@@ -64,6 +81,19 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   }
 
   if (method === 'POST') {
+    if (pathname === 'projects') {
+      try {
+        const project = withStore(dir, store => store.upsertProject(body || {}));
+        return {json: {ok: true, project}};
+      } catch (e) {
+        return {status: 400, json: {error: e.message}};
+      }
+    }
+    if (pathname.startsWith('projects/') && pathname.endsWith('/delete')) {
+      const id = pathname.split('/')[1];
+      withStore(dir, store => store.deleteProject(id));
+      return {json: {ok: true}};
+    }
     if (pathname === 'manual/parse') {
       try {
         const parsed = await parseManualInput(body || {});

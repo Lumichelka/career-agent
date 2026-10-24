@@ -78,6 +78,7 @@ main{max-width:1120px;margin:0 auto;padding:24px 22px 80px}
     <a href="/recruit">机会日历</a>
     <a href="/resume">简历与投递</a>
     <a href="/companies">公司档案</a>
+    <a href="/wechat">公众号</a>
   </nav>
   <div class="spacer"></div>
   <div class="right">
@@ -120,6 +121,7 @@ main{max-width:1120px;margin:0 auto;padding:24px 22px 80px}
           <a href="/recruit"><span>采集 / 筛选 / 导出</span><span>→</span></a>
           <a href="/resume"><span>简历版本 / 投递跟进</span><span>→</span></a>
           <a href="/companies"><span>公司档案 / 调研</span><span>→</span></a>
+          <a href="/wechat"><span>公众号文章</span><span>→</span></a>
           <a href="/chat" id="model-link"><span>模型与接口设置</span><span>→</span></a>
         </div>
       </section>
@@ -154,34 +156,42 @@ async function api(path, body) {
 }
 
 function renderStats(data) {
-  const s = data.schedule?.stats || {};
-  const conflicts = s.conflicts || 0;
   $('#stats').innerHTML = [
     ['未来 7 天活动', data.upcomingCount ?? 0],
-    ['时间冲突', conflicts],
+    ['招聘项目', data.projectCount ?? 0],
     ['长期画像', data.memory?.counts?.profile ?? 0],
     ['技能 / 工具', (data.capabilities?.skills?.length ?? 0) + ' / ' + (data.capabilities?.tools?.length ?? 0)]
   ].map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('');
 }
 
-function renderUpcoming(schedule) {
-  if (!schedule?.days?.length) { $('#upcoming-body').innerHTML = '<div class="empty">未来 7 天还没有活动。去「机会日历」采集，或换一个时间范围。</div>'; return; }
-  $('#upcoming-body').innerHTML = schedule.days.map(day => {
-    const items = day.items.map(({event, conflict, travel, warning}) => {
-      const cls = conflict ? 'conflict' : /小于估算通勤|未公布/.test(warning || '') ? 'warn' : '';
+function mapFor(e) {
+  const q = [e.venue, e.school, e.city].filter(Boolean).join(' ');
+  return 'https://uri.amap.com/search?keyword=' + encodeURIComponent(q || e.title || '招聘会');
+}
+
+function renderUpcoming(events) {
+  if (!events?.length) { $('#upcoming-body').innerHTML = '<div class="empty">未来 7 天还没有活动。去「机会日历」采集，或换一个时间范围。</div>'; return; }
+  const groups = new Map();
+  for (const e of events) {
+    const date = e.startAt.slice(0, 10);
+    if (!groups.has(date)) groups.set(date, []);
+    groups.get(date).push(e);
+  }
+  $('#upcoming-body').innerHTML = [...groups].map(([date, list]) => {
+    const weekday = '日一二三四五六'[new Date(date + 'T00:00:00+08:00').getDay()];
+    const items = list.map(event => {
       const flags = [];
-      if (conflict) flags.push('<span class="flag bad">时间冲突</span>');
-      else if (/小于估算通勤/.test(warning || '')) flags.push(`<span class="flag">${esc(warning)}</span>`);
       if (event.status === 'possibly_removed') flags.push('<span class="flag bad">可能撤下</span>');
       if (event.interviewStage) flags.push(`<span class="flag">${esc([...new Set([event.interviewStage, event.interviewType].filter(Boolean))].join(' · '))}</span>`);
       if ((event.crossSources || []).length > 1) flags.push('<span class="flag ok">多源收录</span>');
-      return `<article class="ev ${cls}">
+      if ((event.projects || []).length) flags.push(`<span class="flag ok">${event.projects.length} 个项目</span>`);
+      return `<article class="ev">
         <time>${esc(fmt(event.startAt))}${event.endAt ? '–' + esc(fmt(event.endAt)) : ''}</time>
         <div><p class="title">${esc(event.title)}</p>
-        <div class="meta">${esc(event.school)} · ${esc(event.kind)}${event.venue ? ' · ' + esc(event.venue) : ''}${travel ? ' · 通勤约 ' + esc(travel.minutes) + ' 分钟' : ''}${event.mapUrl ? ' · ' + `<a href="${esc(event.mapUrl)}" target="_blank" rel="noopener noreferrer">地图</a>` : ''}</div></div>
+        <div class="meta">${esc(event.school)} · ${esc(event.kind)}${event.venue ? ' · ' + esc(event.venue) : ''} · <a href="${esc(mapFor(event))}" target="_blank" rel="noopener noreferrer">地图</a></div></div>
         <div class="side">${flags.join('')}</div></article>`;
     }).join('');
-    return `<div class="day">${esc(day.date)} · 周${esc(day.weekday)}</div>${items}`;
+    return `<div class="day">${esc(date)} · 周${esc(weekday)}</div>${items}`;
   }).join('');
 }
 
@@ -199,20 +209,21 @@ function renderTasks(tasks) {
 }
 
 async function load() {
-  const [schedule, memory, capabilities, model] = await Promise.all([
-    api('recruit/schedule?days=7'),
+  const [recruit, memory, capabilities, model] = await Promise.all([
+    api('recruit/events?days=7'),
     api('memory'),
     api('capabilities'),
     api('model')
   ]);
-  const upcomingCount = (schedule.schedule.days || []).reduce((a, d) => a + d.items.length, 0);
-  renderStats({schedule: schedule.schedule, memory, capabilities, upcomingCount});
-  renderUpcoming(schedule.schedule);
+  const events = recruit.events || [];
+  const projectCount = events.reduce((n, e) => n + (e.projects?.length || 0), 0);
+  renderStats({memory, capabilities, upcomingCount: events.length, projectCount});
+  renderUpcoming(events);
   renderProfile(memory.profile);
   renderTasks(memory.tasks);
   $('#engine').textContent = model.label || '';
-  $('#hero-sub').textContent = upcomingCount
-    ? `未来 7 天有 ${upcomingCount} 场活动，${schedule.schedule.stats.conflicts} 处时间冲突。`
+  $('#hero-sub').textContent = events.length
+    ? `未来 7 天有 ${events.length} 场活动、${projectCount} 个招聘项目。`
     : '未来 7 天还没有活动，可以去「机会日历」采集。';
 }
 

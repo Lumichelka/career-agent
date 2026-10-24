@@ -3,6 +3,20 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.1.0 · 2026-10-25
+
+**登录型网站、公众号、日历看板与一对多项目**
+
+- 平台从 2 个扩展到 7 个：BOSS/小红书/实习僧/牛客/智联/51job/猎聘，统一侧栏入口
+- 修复 BOSS 打开后跳 about:blank：优先本站页面、关闭 Edge 首次提示、导航 watchdog
+- 新增截图 OCR 兜底（Windows OCR）与系统浏览器打开
+- 新增公众号账号/文章库（9 个种子账号）、链接/正文导入、文章关联活动
+- 新增 `event_projects` 表：一场活动多个招聘项目，项目可增删
+- `/recruit` 改为月历看板；工作台统计改为“活动/项目”，移除冲突/通勤
+- 删除 `schedule-planner` 技能（4→3）；工具改为按日历列活动+项目
+- 新增 `platform/projects/wechat` 测试，共 109 项
+- 回退：`git reset --hard v3.0.2`
+
 ## v3.0.2 · 2026-10-24
 
 **刷新工作台截图**
