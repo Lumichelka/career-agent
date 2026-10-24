@@ -1,0 +1,40 @@
+# 变更记录（CHANGELOG）
+
+> 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
+> 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
+
+## v3.0.0-phase0 · 2026-10-24
+
+**Phase 0：整理与地基**
+
+- 代码按层重组：`src/{server,agent,model,platform,tools,recruit,web,schemas,config}`、`scripts/`、`tests/`
+- 运行时数据外置到 `%LOCALAPPDATA%\ZhiXiang`；首次启动自动迁移旧 `.data`（保留旧目录，不删除）
+- 新增 `scripts/check.mjs`（环境/数据/数据库/测试一键自检）
+- 新增 `tests/paths.test.mjs`（数据目录解析与迁移）
+- 文档归档：`docs/archive/v2/`、`docs/assets/`、`docs/examples/`
+- 启动脚本、package scripts、首次登录提示同步更新
+- 验证：37 项测试通过；服务从新入口启动；79 场活动、登录、页面、导出均正常
+- 项目体积：105 MB → 约 2 MB（不含 node_modules）
+
+## v2.0.0 · 2026-10-23
+
+**v2 baseline（重构前快照）**
+
+- 账号隔离、模型预设、Key 加密、七阶段体检、流式与重试
+- 高校招聘采集（5 个可用源）、SQLite、行程/ICS 导出
+- 招聘日历页面、局域网模式
+- 32 项测试
+
+---
+
+## 分支与标签约定
+
+| 标签 | 含义 |
+| --- | --- |
+| `v2.0.0` | 重构前可用版本 |
+| `v3.0.0-phase0` | 目录重组 + 数据外置完成 |
+| `v3.0.0-m6` | 工具注册表 + 能力面板 |
+| `v3.0.0-m8` | 三层记忆 |
+| `v3.0.0-m7` | 技能包 |
+
+分支：`main`（稳定）、`dev`（集成）、`feat/*`（单个模块）。
