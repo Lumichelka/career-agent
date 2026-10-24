@@ -111,10 +111,14 @@ test('导出 ICS / CSV / Markdown 结构正确', () => {
   assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 3);
   const csv = toCSV(events);
   assert.equal(csv.split('\r\n')[0].includes('日期'), true);
+  assert.equal(csv.split('\r\n')[0].includes('招聘环节'), true);
   assert.equal(csv.split('\r\n').filter(Boolean).length, 4);
   const md = toMarkdown(buildSchedule(events));
   assert.match(md, /共 3 场/);
   assert.match(md, /2026-10-26/);
+  const icsInterview = toICS([{...events[0], interviewStage: '面试', interviewType: '无领导小组讨论'}]);
+  assert.match(icsInterview, /招聘环节：面试/);
+  assert.match(icsInterview, /面试类型：无领导小组讨论/);
 });
 
 test('中文 ICS 文本保持 UTF-8 可读', () => {

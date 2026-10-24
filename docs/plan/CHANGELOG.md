@@ -3,6 +3,19 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.0.0-m13 · 2026-10-24
+
+**2.1 字段补全：招聘环节 / 面试类型**
+
+- events 新增 `interview_stage` / `interview_type`，旧库自动加列
+- 新增 `extractInterview`：从标题/备注/详情识别无领导、半结构、结构化、群面、单面、笔试
+- 识别不到就留空，界面不显示、导出不编造
+- 卡片标签、ICS DESCRIPTION、CSV（新增两列）、Markdown 表都带上
+- 多源合并时保留已有环节/类型，不用空值覆盖
+- 实测：川农 2 场标题含面试信息的活动被正确标注
+- 新增 2 项测试，共 84 项
+- 回退：`git reset --hard v3.0.0-m12`
+
 ## v3.0.0-m12 · 2026-10-24
 
 **M12 第一版：多端、Docker 与备份**

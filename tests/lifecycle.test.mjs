@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {RecruitStore} from '../src/recruit/store.mjs';
+import {extractInterview} from '../src/recruit/collect.mjs';
 
 const now = () => new Date().toISOString();
 const baseEvent = (over = {}) => ({
@@ -23,13 +24,15 @@ test('新库：写入即为 active，记录首次/最近出现与来源', async 
   await withStore(async file => {
     const store = RecruitStore.open(file);
     try {
-      assert.equal(store.upsertEvent(baseEvent()), 'created');
+      assert.equal(store.upsertEvent(baseEvent({interviewStage: '面试', interviewType: '无领导小组讨论'})), 'created');
       const row = store.getEvent('a'.repeat(24));
       assert.equal(row.status, 'active');
       assert.ok(row.firstSeenAt);
       assert.equal(row.lastSeenAt, row.firstSeenAt);
       assert.deepEqual(row.crossSources, ['s1']);
       assert.equal(row.missingRuns, 0);
+      assert.equal(row.interviewStage, '面试');
+      assert.equal(row.interviewType, '无领导小组讨论');
     } finally { store.close(); }
   });
 });
@@ -51,6 +54,8 @@ test('旧库升级：自动补 status/first_seen/last_seen/cross_sources 列', a
       assert.equal(row.status, 'active');
       assert.equal(row.firstSeenAt, '2026-09-01T00:00:00.000Z');
       assert.deepEqual(row.crossSources, ['s1']);
+      assert.equal(row.interviewStage, '');
+      assert.equal(row.interviewType, '');
     } finally { store.close(); }
   });
 });
@@ -111,4 +116,26 @@ test('采集器：截断的列表不触发缺失标记（避免把没抓全当�
   const source = await import('node:fs/promises').then(fs => fs.readFile(new URL('../src/recruit/collect.mjs', import.meta.url), 'utf8'));
   assert.match(source, /truncated/);
   assert.match(source, /markMissing/);
+});
+
+test('环节识别：面试类型优先，识别不到留空', () => {
+  assert.deepEqual(extractInterview('某公司无领导小组讨论面试'), {stage: '面试', type: '无领导小组讨论'});
+  assert.deepEqual(extractInterview('半结构化面试安排'), {stage: '面试', type: '半结构化面试'});
+  assert.deepEqual(extractInterview('结构化面试 + 笔试'), {stage: '笔试', type: '结构化面试'});
+  assert.deepEqual(extractInterview('群面通知'), {stage: '面试', type: '群面'});
+  assert.deepEqual(extractInterview('一对一单面'), {stage: '面试', type: '单面'});
+  assert.deepEqual(extractInterview('校园宣讲会'), {stage: '', type: ''});
+});
+
+test('多源合并时保留已有的环节/类型', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.upsertEvent(baseEvent({sourceId: 's1', interviewStage: '面试', interviewType: '无领导小组讨论'}));
+      store.upsertEvent(baseEvent({sourceId: 's2', interviewStage: '', interviewType: ''}));
+      const row = store.getEvent('a'.repeat(24));
+      assert.equal(row.interviewStage, '面试');
+      assert.equal(row.interviewType, '无领导小组讨论');
+    } finally { store.close(); }
+  });
 });

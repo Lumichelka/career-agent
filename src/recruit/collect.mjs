@@ -33,11 +33,26 @@ export function eventId(event) {
     .digest('hex').slice(0, 24);
 }
 
+// 从标题/详情里识别"招聘环节 + 面试类型"；识别不到就留空，不猜。
+export function extractInterview(text) {
+  const t = String(text || '');
+  const type = /无领导(?:小组)?(?:讨论)?/.test(t) ? '无领导小组讨论'
+    : /半结构化/.test(t) ? '半结构化面试'
+      : /结构化/.test(t) ? '结构化面试'
+        : /群面|小组面/.test(t) ? '群面'
+          : /单面|一对一/.test(t) ? '单面'
+            : /笔试/.test(t) ? '笔试'
+              : /面试/.test(t) ? '面试' : '';
+  const stage = /笔试/.test(t) ? '笔试' : /面试|无领导|群面|单面/.test(t) ? '面试' : '';
+  return {stage, type};
+}
+
 function normalize(item, source) {
   const title = String(item.title || '').trim();
   const startAt = String(item.startAt || '').trim();
   if (!title || !startAt) return null;
   const kind = item.kind || guessKind(title, source.kind);
+  const iv = extractInterview([title, item.notes, item.rawText].filter(Boolean).join(' '));
   const event = {
     school: source.school,
     city: normalizeCity(item.city || source.city, source.city),
@@ -60,6 +75,8 @@ function normalize(item, source) {
     confidence: item.confidence ?? 0.55,
     rawText: item.rawText || '',
     notes: [item.notes, /取消|暂停举办|活动取消/.test(title) ? '来源标注取消' : '', /延期|改期|推迟/.test(title) ? '来源标注延期/改期' : ''].filter(Boolean).join('；'),
+    interviewStage: item.interviewStage || iv.stage,
+    interviewType: item.interviewType || iv.type,
     status: /取消|暂停举办|活动取消/.test(title) ? 'cancelled' : 'active',
     sourceId: source.id
   };

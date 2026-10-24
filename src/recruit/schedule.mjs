@@ -136,6 +136,8 @@ export function toICS(events, {calendarName = '职向 · 线下招聘行程'} = 
       'DESCRIPTION:' + icsEscape([
         e.company ? '单位：' + e.company : '',
         e.kind ? '类型：' + e.kind : '',
+        e.interviewStage ? '招聘环节：' + e.interviewStage : '',
+        e.interviewType && e.interviewType !== e.interviewStage ? '面试类型：' + e.interviewType : '',
         e.industry ? '行业：' + e.industry : '',
         e.applyMode ? '投递：' + e.applyMode : '',
         '地图：' + (e.mapUrl || mapUrlFor(e)),
@@ -151,12 +153,12 @@ export function toICS(events, {calendarName = '职向 · 线下招聘行程'} = 
 }
 
 export function toCSV(events) {
-  const head = ['日期', '开始', '结束', '学校', '城市', '类型', '活动名称', '单位', '地点', '地图链接', '行业', '投递方式', '来源链接', '置信度', '是否复核'];
+  const head = ['日期', '开始', '结束', '学校', '城市', '类型', '招聘环节', '面试类型', '活动名称', '单位', '地点', '地图链接', '行业', '投递方式', '来源链接', '置信度', '是否复核'];
   const rows = [...events].sort((a, b) => a.startAt.localeCompare(b.startAt)).map(e => {
     const c = china(e.startAt), ce = china(endOf(e));
     return [
       `${c.y}-${pad(c.m)}-${pad(c.d)}`, `${pad(c.h)}:${pad(c.mi)}`, `${pad(ce.h)}:${pad(ce.mi)}`,
-      e.school, e.city, e.kind, e.title, e.company, e.venue, e.mapUrl || mapUrlFor(e), e.industry, e.applyMode, e.sourceUrl,
+      e.school, e.city, e.kind, e.interviewStage || '', e.interviewType || '', e.title, e.company, e.venue, e.mapUrl || mapUrlFor(e), e.industry, e.applyMode, e.sourceUrl,
       Math.round((e.confidence || 0) * 100) + '%', e.verified ? '是' : '否'
     ];
   });
@@ -167,10 +169,11 @@ export function toCSV(events) {
 export function toMarkdown(schedule, {title = '线下招聘时间安排表'} = {}) {
   const out = ['# ' + title, '', `> 共 ${schedule.stats.events} 场，覆盖 ${schedule.stats.days} 天；冲突 ${schedule.stats.conflicts} 处，赶场风险 ${schedule.stats.risky} 处。`, ''];
   for (const day of schedule.days) {
-    out.push(`## ${day.date}（周${day.weekday}）`, '', '| 时间 | 活动 | 单位 | 地点 | 通勤 | 提示 |', '| --- | --- | --- | --- | --- | --- |');
+    out.push(`## ${day.date}（周${day.weekday}）`, '', '| 时间 | 活动 | 单位 | 环节 | 地点 | 通勤 | 提示 |', '| --- | --- | --- | --- | --- | --- | --- |');
     for (const {event, travel, warning, conflict} of day.items) {
       const c = china(event.startAt), ce = china(endOf(event));
-      out.push(`| ${pad(c.h)}:${pad(c.mi)}-${pad(ce.h)}:${pad(ce.mi)} | ${event.title} | ${event.company || '-'} | ${event.venue ? `[${event.venue}](${event.mapUrl || mapUrlFor(event)})` : '待确认'} | ${travel ? travel.minutes + ' 分钟' : '-'} | ${conflict ? '⚠ 时间冲突' : warning || '-'} |`);
+      const stage = [...new Set([event.interviewStage, event.interviewType].filter(Boolean))].join(' / ') || '-';
+      out.push(`| ${pad(c.h)}:${pad(c.mi)}-${pad(ce.h)}:${pad(ce.mi)} | ${event.title} | ${event.company || '-'} | ${stage} | ${event.venue ? `[${event.venue}](${event.mapUrl || mapUrlFor(event)})` : '待确认'} | ${travel ? travel.minutes + ' 分钟' : '-'} | ${conflict ? '⚠ 时间冲突' : warning || '-'} |`);
     }
     out.push('');
   }

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS events(
   positions TEXT, requirements TEXT, apply_mode TEXT, apply_url TEXT,
   source_url TEXT, published_at TEXT, fetched_at TEXT,
   confidence REAL DEFAULT 0.5, verified INTEGER DEFAULT 0, raw_text TEXT, notes TEXT,
+  interview_stage TEXT DEFAULT '', interview_type TEXT DEFAULT '',
   status TEXT DEFAULT 'active', first_seen_at TEXT, last_seen_at TEXT,
   missing_runs INTEGER DEFAULT 0, cross_sources TEXT DEFAULT ''
 );
@@ -43,7 +44,9 @@ const MIGRATIONS = [
   ['first_seen_at', 'TEXT'],
   ['last_seen_at', 'TEXT'],
   ['missing_runs', 'INTEGER DEFAULT 0'],
-  ['cross_sources', "TEXT DEFAULT ''"]
+  ['cross_sources', "TEXT DEFAULT ''"],
+  ['interview_stage', "TEXT DEFAULT ''"],
+  ['interview_type', "TEXT DEFAULT ''"]
 ];
 
 export class RecruitStore {
@@ -109,21 +112,24 @@ export class RecruitStore {
       const confidence = Math.min(0.95, Math.max(Number(existing.confidence) || 0, e.confidence ?? 0.5) + (cross.size > 1 ? 0.08 : 0));
       this.db.prepare(`UPDATE events SET source_id=?,school=?,city=?,kind=?,title=?,company=?,start_at=?,end_at=?,venue=?,address=?,industry=?,
         company_size=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,published_at=?,fetched_at=?,
-        confidence=?,raw_text=?,notes=?,status=?,first_seen_at=?,last_seen_at=?,missing_runs=0,cross_sources=? WHERE id=?`)
+        confidence=?,raw_text=?,notes=?,interview_stage=?,interview_type=?,status=?,first_seen_at=?,last_seen_at=?,missing_runs=0,cross_sources=? WHERE id=?`)
         .run(e.sourceId, e.school || '', e.city || '', e.kind || '其他', e.title, e.company || '', e.startAt, e.endAt || '', e.venue || '', e.address || '', e.industry || '',
           e.companySize || '', e.positions || '', e.requirements || '', e.applyMode || '', e.applyUrl || '',
           e.sourceUrl || '', e.publishedAt || '', e.fetchedAt, confidence, (e.rawText || '').slice(0, 20000), e.notes || '',
+          e.interviewStage || existing.interview_stage || '', e.interviewType || existing.interview_type || '',
           nextStatus, existing.first_seen_at || now, now, crossSources, e.id);
       return 'updated';
     }
     this.db.prepare(`INSERT INTO events(id,source_id,school,city,kind,title,company,start_at,end_at,venue,address,
       industry,company_size,positions,requirements,apply_mode,apply_url,source_url,published_at,fetched_at,confidence,verified,raw_text,notes,
+      interview_stage,interview_type,
       status,first_seen_at,last_seen_at,missing_runs,cross_sources)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(e.id, e.sourceId, e.school || '', e.city || '', e.kind || '其他', e.title, e.company || '', e.startAt, e.endAt || '',
         e.venue || '', e.address || '', e.industry || '', e.companySize || '', e.positions || '', e.requirements || '',
         e.applyMode || '', e.applyUrl || '', e.sourceUrl || '', e.publishedAt || '', e.fetchedAt, e.confidence ?? 0.5, 0,
-        (e.rawText || '').slice(0, 20000), e.notes || '', nextStatus, now, now, 0, e.sourceId);
+        (e.rawText || '').slice(0, 20000), e.notes || '', e.interviewStage || '', e.interviewType || '',
+        nextStatus, now, now, 0, e.sourceId);
     return 'created';
   }
 
@@ -192,6 +198,7 @@ function rowToEvent(r) {
     positions: r.positions, requirements: r.requirements, applyMode: r.apply_mode, applyUrl: r.apply_url,
     sourceUrl: r.source_url, publishedAt: r.published_at, fetchedAt: r.fetched_at,
     confidence: r.confidence, verified: !!r.verified, rawText: r.raw_text, notes: r.notes,
+    interviewStage: r.interview_stage || '', interviewType: r.interview_type || '',
     status: r.status || 'active', firstSeenAt: r.first_seen_at, lastSeenAt: r.last_seen_at,
     missingRuns: Number(r.missing_runs) || 0,
     crossSources: String(r.cross_sources || '').split(',').filter(Boolean)

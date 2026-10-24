@@ -171,6 +171,7 @@ function renderUpcoming(schedule) {
       if (conflict) flags.push('<span class="flag bad">时间冲突</span>');
       else if (/小于估算通勤/.test(warning || '')) flags.push(`<span class="flag">${esc(warning)}</span>`);
       if (event.status === 'possibly_removed') flags.push('<span class="flag bad">可能撤下</span>');
+      if (event.interviewStage) flags.push(`<span class="flag">${esc([...new Set([event.interviewStage, event.interviewType].filter(Boolean))].join(' · '))}</span>`);
       if ((event.crossSources || []).length > 1) flags.push('<span class="flag ok">多源收录</span>');
       return `<article class="ev ${cls}">
         <time>${esc(fmt(event.startAt))}${event.endAt ? '–' + esc(fmt(event.endAt)) : ''}</time>

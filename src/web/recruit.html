@@ -170,7 +170,8 @@ function renderSchedule(schedule){
       const conf=Math.round((event.confidence||0)*100);
       const statusFlag=event.status==='possibly_removed'?'<span class="flag bad">可能撤下</span>':event.status==='cancelled'?'<span class="flag bad">已取消</span>':'';
       const crossFlag=(event.crossSources&&event.crossSources.length>1)?'<span class="flag ok">多源收录</span>':'';
-      const side=[flag,statusFlag,crossFlag].filter(Boolean).join(' ');
+      const ivFlag=event.interviewStage?`<span class="flag">${esc([...new Set([event.interviewStage,event.interviewType].filter(Boolean))].join(' · '))}</span>`:'';
+      const side=[flag,ivFlag,statusFlag,crossFlag].filter(Boolean).join(' ');
       return `<article class="ev ${cls}">
         <time>${esc(fmtTime(event.startAt))}${event.endAt?'–'+esc(fmtTime(event.endAt)):''}</time>
         <div>
