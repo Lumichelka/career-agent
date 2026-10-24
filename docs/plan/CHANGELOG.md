@@ -3,6 +3,22 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.0.0-m2m4 · 2026-10-24
+
+**M2 + M4：采集框架拆分 + 活动生命周期**
+
+- 采集源拆成 `src/recruit/sources/` 一校一文件，自动发现；新增学校只加一个文件
+- 13 个源（5 个已接入），源卡片显示最近采集时间、状态、条数、失败原因
+- 采集并发 2（SQLite busy_timeout 5s），保留同域限速
+- 活动生命周期：`active / cancelled / possibly_removed`；连续 3 次缺失标记"可能撤下"，再次出现恢复
+- 截断保护：列表被 limit 截断时不做缺失标记，避免误伤
+- 多源合并：`cross_sources` + 置信度提升；多源活动不参与单源缺失标记
+- 旧数据库自动迁移（ALTER TABLE 加列，不回写历史）
+- 界面新增「可能撤下 / 已取消 / 多源收录」标签
+- 新增 `tests/sources.test.mjs`（4 项）、`tests/lifecycle.test.mjs`（6 项），共 68 项测试
+- 验证：82 场活动迁移后全部 active；实采 2 个源正常；页面 13 张源卡片、无报错
+- 回退：`git reset --hard v3.0.0-m7`
+
 ## v3.0.0-m7 · 2026-10-24
 
 **M7：四个技能包 + 技能路由**

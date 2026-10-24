@@ -141,6 +141,7 @@ function renderSources(sources){
       return `<div class="source ${s.enabled?'on':''}">
         <h3>${esc(s.name)} ${badge}</h3>
         <p>${esc(s.school)} · ${esc(s.channel||'')} · ${esc(s.mode)}</p>
+        <p>${s.last_run?`最近采集：${esc(String(s.last_run).slice(0,16).replace('T',' '))} · ${esc(s.last_count||0)} 条`:'尚未采集'}</p>
         ${note?`<p>${esc(note)}</p>`:''}
         <div class="row">
           <button data-collect="${esc(s.id)}" ${s.enabled?'':'disabled'}>采集这个源</button>
@@ -165,6 +166,9 @@ function renderSchedule(schedule){
       const cls=conflict?'conflict':/小于估算通勤|未公布/.test(warning||'')?'warn':'';
       const flag=conflict?'<span class="flag bad">时间冲突</span>':/小于估算通勤/.test(warning||'')?`<span class="flag">${esc(warning)}</span>`:'';
       const conf=Math.round((event.confidence||0)*100);
+      const statusFlag=event.status==='possibly_removed'?'<span class="flag bad">可能撤下</span>':event.status==='cancelled'?'<span class="flag bad">已取消</span>':'';
+      const crossFlag=(event.crossSources&&event.crossSources.length>1)?'<span class="flag ok">多源收录</span>':'';
+      const side=[flag,statusFlag,crossFlag].filter(Boolean).join(' ');
       return `<article class="ev ${cls}">
         <time>${esc(fmtTime(event.startAt))}${event.endAt?'–'+esc(fmtTime(event.endAt)):''}</time>
         <div>
@@ -180,7 +184,7 @@ function renderSchedule(schedule){
             <button data-verify="${esc(event.id)}">复核来源</button>
           </div>
         </div>
-        <div class="side">${flag}</div>
+        <div class="side">${side}</div>
       </article>`;
     }).join('');
     return `<div class="day"><h3>${esc(day.date)} <span>周${esc(day.weekday)} · ${day.items.length} 场</span></h3>${items}</div>`;

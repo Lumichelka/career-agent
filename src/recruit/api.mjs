@@ -2,7 +2,7 @@
 // 这里只负责"算出结果"，写响应的细节交给 server.mjs。
 import {join} from 'node:path';
 import {RecruitStore} from './store.mjs';
-import {SOURCES} from './sources.mjs';
+import {SOURCES} from './sources/index.mjs';
 import {runCollection, htmlToText} from './collect.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';

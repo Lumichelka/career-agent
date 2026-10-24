@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS events(
   venue TEXT, address TEXT, industry TEXT, company_size TEXT,
   positions TEXT, requirements TEXT, apply_mode TEXT, apply_url TEXT,
   source_url TEXT, published_at TEXT, fetched_at TEXT,
-  confidence REAL DEFAULT 0.5, verified INTEGER DEFAULT 0, raw_text TEXT, notes TEXT
+  confidence REAL DEFAULT 0.5, verified INTEGER DEFAULT 0, raw_text TEXT, notes TEXT,
+  status TEXT DEFAULT 'active', first_seen_at TEXT, last_seen_at TEXT,
+  missing_runs INTEGER DEFAULT 0, cross_sources TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS runs(
   id TEXT PRIMARY KEY, source_id TEXT, started_at TEXT, finished_at TEXT,
@@ -35,17 +37,40 @@ CREATE INDEX IF NOT EXISTS idx_events_school ON events(school);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
 `;
 
+// 旧库升级：只加列，不改历史数据。
+const MIGRATIONS = [
+  ['status', "TEXT DEFAULT 'active'"],
+  ['first_seen_at', 'TEXT'],
+  ['last_seen_at', 'TEXT'],
+  ['missing_runs', 'INTEGER DEFAULT 0'],
+  ['cross_sources', "TEXT DEFAULT ''"]
+];
+
 export class RecruitStore {
   constructor(file) {
     mkdirSync(dirname(file), {recursive: true});
     this.file = file;
     this.db = new DatabaseSync(file);
     this.db.exec('PRAGMA journal_mode = WAL');
+    this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    this.migrate();
   }
 
   static open(file) { return new RecruitStore(file); }
   close() { try { this.db.close(); } catch { /* 已关闭 */ } }
+
+  migrate() {
+    const columns = new Set(this.db.prepare('PRAGMA table_info(events)').all().map(r => r.name));
+    for (const [name, ddl] of MIGRATIONS) {
+      if (!columns.has(name)) this.db.exec(`ALTER TABLE events ADD COLUMN ${name} ${ddl}`);
+    }
+    this.db.exec("UPDATE events SET status='active' WHERE status IS NULL OR status=''");
+    this.db.exec('UPDATE events SET first_seen_at=fetched_at WHERE first_seen_at IS NULL');
+    this.db.exec('UPDATE events SET last_seen_at=fetched_at WHERE last_seen_at IS NULL');
+    this.db.exec("UPDATE events SET cross_sources=source_id WHERE cross_sources IS NULL OR cross_sources=''");
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)');
+  }
 
   syncSources(sources) {
     const stmt = this.db.prepare(`INSERT INTO sources(id,name,school,city,category,channel,list_url,mode,enabled,note)
@@ -72,37 +97,64 @@ export class RecruitStore {
       .run(url, sourceId, title || '', (text || '').slice(0, 200000), new Date().toISOString(), hash);
   }
 
+  // 同一活动再次出现：恢复 active、清零缺失计数、合并多源。
   upsertEvent(e) {
-    const existing = this.db.prepare('SELECT id, verified FROM events WHERE id=?').get(e.id);
+    const now = new Date().toISOString();
+    const nextStatus = e.status === 'cancelled' ? 'cancelled' : 'active';
+    const existing = this.db.prepare('SELECT * FROM events WHERE id=?').get(e.id);
     if (existing) {
+      const cross = new Set(String(existing.cross_sources || existing.source_id || '').split(',').filter(Boolean));
+      cross.add(e.sourceId);
+      const crossSources = [...cross].join(',');
+      const confidence = Math.min(0.95, Math.max(Number(existing.confidence) || 0, e.confidence ?? 0.5) + (cross.size > 1 ? 0.08 : 0));
       this.db.prepare(`UPDATE events SET source_id=?,school=?,city=?,kind=?,title=?,company=?,start_at=?,end_at=?,venue=?,address=?,industry=?,
         company_size=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,published_at=?,fetched_at=?,
-        confidence=?,raw_text=?,notes=? WHERE id=?`)
+        confidence=?,raw_text=?,notes=?,status=?,first_seen_at=?,last_seen_at=?,missing_runs=0,cross_sources=? WHERE id=?`)
         .run(e.sourceId, e.school || '', e.city || '', e.kind || '其他', e.title, e.company || '', e.startAt, e.endAt || '', e.venue || '', e.address || '', e.industry || '',
           e.companySize || '', e.positions || '', e.requirements || '', e.applyMode || '', e.applyUrl || '',
-          e.sourceUrl || '', e.publishedAt || '', e.fetchedAt, e.confidence ?? 0.5, (e.rawText || '').slice(0, 20000), e.notes || '', e.id);
+          e.sourceUrl || '', e.publishedAt || '', e.fetchedAt, confidence, (e.rawText || '').slice(0, 20000), e.notes || '',
+          nextStatus, existing.first_seen_at || now, now, crossSources, e.id);
       return 'updated';
     }
     this.db.prepare(`INSERT INTO events(id,source_id,school,city,kind,title,company,start_at,end_at,venue,address,
-      industry,company_size,positions,requirements,apply_mode,apply_url,source_url,published_at,fetched_at,confidence,verified,raw_text,notes)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      industry,company_size,positions,requirements,apply_mode,apply_url,source_url,published_at,fetched_at,confidence,verified,raw_text,notes,
+      status,first_seen_at,last_seen_at,missing_runs,cross_sources)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(e.id, e.sourceId, e.school || '', e.city || '', e.kind || '其他', e.title, e.company || '', e.startAt, e.endAt || '',
         e.venue || '', e.address || '', e.industry || '', e.companySize || '', e.positions || '', e.requirements || '',
         e.applyMode || '', e.applyUrl || '', e.sourceUrl || '', e.publishedAt || '', e.fetchedAt, e.confidence ?? 0.5, 0,
-        (e.rawText || '').slice(0, 20000), e.notes || '');
+        (e.rawText || '').slice(0, 20000), e.notes || '', nextStatus, now, now, 0, e.sourceId);
     return 'created';
+  }
+
+  // 本次没出现的活动：累计缺失；连续 3 次标记"可能撤下"（多源活动跳过，避免误伤）。
+  markMissing(sourceId, seenIds) {
+    const seen = new Set(seenIds);
+    const rows = this.db.prepare("SELECT id, missing_runs, cross_sources FROM events WHERE status='active' AND (source_id=? OR cross_sources LIKE ?)").all(sourceId, '%' + sourceId + '%');
+    let checked = 0, hidden = 0, skipped = 0;
+    for (const row of rows) {
+      if (seen.has(row.id)) continue;
+      if (String(row.cross_sources || '').includes(',')) { skipped++; continue; }
+      checked++;
+      const missing = (Number(row.missing_runs) || 0) + 1;
+      const status = missing >= 3 ? 'possibly_removed' : 'active';
+      this.db.prepare('UPDATE events SET missing_runs=?, status=? WHERE id=?').run(missing, status, row.id);
+      if (status === 'possibly_removed') hidden++;
+    }
+    return {checked, hidden, skipped};
   }
 
   setVerified(id, verified = 1, notes = '') {
     this.db.prepare('UPDATE events SET verified=?, notes=? WHERE id=?').run(verified ? 1 : 0, notes, id);
   }
 
-  listEvents({from, to, limit = 200, school, kind} = {}) {
+  listEvents({from, to, limit = 200, school, kind, includeCancelled = false} = {}) {
     const where = [], args = [];
     if (from) { where.push('start_at >= ?'); args.push(from); }
     if (to) { where.push('start_at <= ?'); args.push(to); }
     if (school) { where.push('school = ?'); args.push(school); }
     if (kind) { where.push('kind = ?'); args.push(kind); }
+    if (!includeCancelled) where.push("status != 'cancelled'");
     const sql = 'SELECT * FROM events' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY start_at ASC LIMIT ?';
     return this.db.prepare(sql).all(...args, limit).map(rowToEvent);
   }
@@ -122,11 +174,13 @@ export class RecruitStore {
   }
 
   stats() {
-    const total = this.db.prepare('SELECT COUNT(*) c FROM events').get().c;
-    const upcoming = this.db.prepare('SELECT COUNT(*) c FROM events WHERE start_at >= ?').get(new Date().toISOString().slice(0, 10)).c;
-    const bySchool = this.db.prepare('SELECT school, COUNT(*) c FROM events GROUP BY school ORDER BY c DESC').all();
-    const byKind = this.db.prepare('SELECT kind, COUNT(*) c FROM events GROUP BY kind ORDER BY c DESC').all();
-    return {total, upcoming, bySchool, byKind};
+    const day = new Date().toISOString().slice(0, 10);
+    const total = this.db.prepare("SELECT COUNT(*) c FROM events WHERE status != 'cancelled'").get().c;
+    const upcoming = this.db.prepare("SELECT COUNT(*) c FROM events WHERE start_at >= ? AND status != 'cancelled'").get(day).c;
+    const bySchool = this.db.prepare("SELECT school, COUNT(*) c FROM events WHERE status != 'cancelled' GROUP BY school ORDER BY c DESC").all();
+    const byKind = this.db.prepare("SELECT kind, COUNT(*) c FROM events WHERE status != 'cancelled' GROUP BY kind ORDER BY c DESC").all();
+    const byStatus = Object.fromEntries(this.db.prepare('SELECT status, COUNT(*) c FROM events GROUP BY status').all().map(r => [r.status, r.c]));
+    return {total, upcoming, bySchool, byKind, byStatus};
   }
 }
 
@@ -137,6 +191,9 @@ function rowToEvent(r) {
     venue: r.venue, address: r.address, industry: r.industry, companySize: r.company_size,
     positions: r.positions, requirements: r.requirements, applyMode: r.apply_mode, applyUrl: r.apply_url,
     sourceUrl: r.source_url, publishedAt: r.published_at, fetchedAt: r.fetched_at,
-    confidence: r.confidence, verified: !!r.verified, rawText: r.raw_text, notes: r.notes
+    confidence: r.confidence, verified: !!r.verified, rawText: r.raw_text, notes: r.notes,
+    status: r.status || 'active', firstSeenAt: r.first_seen_at, lastSeenAt: r.last_seen_at,
+    missingRuns: Number(r.missing_runs) || 0,
+    crossSources: String(r.cross_sources || '').split(',').filter(Boolean)
   };
 }

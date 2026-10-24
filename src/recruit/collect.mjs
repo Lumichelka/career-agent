@@ -2,7 +2,7 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {fetchText} from './fetch.mjs';
-import {SOURCES, sourceById, guessKind, guessCompany, normalizeCity} from './sources.mjs';
+import {SOURCES, sourceById, guessKind, guessCompany, normalizeCity} from './sources/index.mjs';
 import {browserText, parseRenderedText} from './browser.mjs';
 import {RecruitStore} from './store.mjs';
 
@@ -53,7 +53,8 @@ function normalize(item, source) {
     fetchedAt: new Date().toISOString(),
     confidence: item.confidence ?? 0.55,
     rawText: item.rawText || '',
-    notes: item.notes || '',
+    notes: [item.notes, /取消|暂停举办|活动取消/.test(title) ? '来源标注取消' : '', /延期|改期|推迟/.test(title) ? '来源标注延期/改期' : ''].filter(Boolean).join('；'),
+    status: /取消|暂停举办|活动取消/.test(title) ? 'cancelled' : 'active',
     sourceId: source.id
   };
   event.id = eventId(event);
@@ -116,6 +117,8 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
         items = source.parseList(res.text, source);
       }
     }
+    const parsedCount = items.length;
+    const truncated = parsedCount >= limit;
     items = items.slice(0, limit);
     result.fetched = items.length;
     onLog?.({source: source.id, text: `列表解析到 ${items.length} 条`});
@@ -142,14 +145,21 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
       }
     }
 
+    const seen = [];
     for (const item of items) {
       const event = normalize(item, source);
       if (!event) continue;
       event.confidence = scoreConfidence(event);
+      seen.push(event.id);
       if (store) {
         const action = store.upsertEvent(event);
         if (action === 'created') result.created++; else result.updated++;
       } else result.created++;
+    }
+    if (store && items.length && !truncated) {
+      const missing = store.markMissing(source.id, seen);
+      result.hidden = missing.hidden;
+      if (missing.hidden) onLog?.({source: source.id, text: '有 ' + missing.hidden + ' 场连续 3 次未出现，已标记“可能撤下”'});
     }
     if (!items.length) { result.status = 'empty'; result.message = '页面可访问，但没有解析到活动；可能需要浏览器模式或适配选择器。'; }
   } catch (e) {
@@ -169,15 +179,22 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
   return result;
 }
 
-export async function runCollection({dir, sourceIds, limit = 20, onLog}) {
+export async function runCollection({dir, sourceIds, limit = 20, concurrency = 2, onLog}) {
   const ids = sourceIds?.length ? sourceIds : SOURCES.filter(s => s.enabled).map(s => s.id);
-  const results = [];
-  for (const id of ids) {
-    let source;
-    try { source = sourceById(id); } catch (e) { results.push({id, status: 'unknown', message: e.message}); continue; }
-    results.push(await collectSource(source, {dir, limit, onLog}));
-  }
-  return {results, totals: {
+  const results = new Array(ids.length).fill(null);
+  const width = Math.max(1, Math.min(4, Math.floor(concurrency) || 1, ids.length));
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < ids.length) {
+      const index = cursor++;
+      const id = ids[index];
+      let source;
+      try { source = sourceById(id); } catch (e) { results[index] = {id, status: 'unknown', message: e.message}; continue; }
+      results[index] = await collectSource(source, {dir, limit, onLog});
+    }
+  };
+  await Promise.all(Array.from({length: width}, worker));
+  return {results: results.filter(Boolean), totals: {
     sources: results.length,
     fetched: results.reduce((a, r) => a + (r.fetched || 0), 0),
     created: results.reduce((a, r) => a + (r.created || 0), 0),

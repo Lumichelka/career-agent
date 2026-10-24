@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {SOURCES, sourceById, normalizeCity, parseTimeRange, parseDateText} from '../src/recruit/sources.mjs';
+import {SOURCES, sourceById, normalizeCity, parseTimeRange, parseDateText} from '../src/recruit/sources/index.mjs';
 import {eventId, htmlToText} from '../src/recruit/collect.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from '../src/recruit/schedule.mjs';

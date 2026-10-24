@@ -9,7 +9,7 @@
 //   node recruit/cli.mjs verify
 import {join, resolve} from 'node:path';
 import {writeFileSync, readFileSync, existsSync} from 'node:fs';
-import {SOURCES, sourceById} from './sources.mjs';
+import {SOURCES, sourceById} from './sources/index.mjs';
 import {runCollection, collectSource} from './collect.mjs';
 import {RecruitStore} from './store.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
