@@ -93,7 +93,7 @@ docs/                  审计、方案、部署、手册、答辩
 
 ```bash
 npm start                 # 启动（等同双击 开始使用.cmd）
-npm test                  # 31 项自动化测试
+npm test                  # 32 项自动化测试
 node diag-cli.mjs         # 命令行接口体检
 node recruit/cli.mjs sources
 node recruit/cli.mjs collect --limit 20
