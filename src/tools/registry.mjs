@@ -4,6 +4,28 @@ const platform = {type: 'string', enum: ['boss', 'xiaohongshu']};
 
 export const TOOLS = [
   {
+    name: 'resume_list',
+    title: '简历列表',
+    description: '列出本机保存的简历与版本数量，用于了解用户有哪些简历版本。',
+    permission: 'read',
+    handler: 'resume.list',
+    timeoutMs: 5000,
+    parameters: {type: 'object', properties: {}, additionalProperties: false}
+  },
+  {
+    name: 'resume_read',
+    title: '读取简历',
+    description: '读取某份简历的最新版本正文与标题。id 可选，缺省读第一份；需要 id 时先用 resume_list 查。',
+    permission: 'read',
+    handler: 'resume.read',
+    timeoutMs: 5000,
+    parameters: {
+      type: 'object',
+      properties: {id: {type: 'string', maxLength: 36, description: '简历 id，可选'}},
+      additionalProperties: false
+    }
+  },
+  {
     name: 'career_recruit_events',
     title: '查询线下招聘',
     description: '读取本机已采集的线下招聘活动（宣讲会/双选会/就业指导），按时间排序并给出冲突与通勤提示。用于排行程；没有数据时如实说明需要先采集。',

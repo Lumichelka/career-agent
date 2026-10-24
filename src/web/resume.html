@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>职向 · 简历与投递</title>
+<style>
+:root{--bg:#f6f8f5;--card:#fff;--ink:#1f3a2e;--muted:#7b8b80;--line:#e2e8e1;--green:#1f6b50;--soft:#e8f1ea;--danger:#a63a3a;--warn:#b25e22}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.7 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+a{color:var(--green);text-decoration:none}a:hover{text-decoration:underline}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px 26px;background:#fffdf8e8;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.brand{font-size:18px;font-weight:600;letter-spacing:2px}.brand small{display:block;font-size:9px;letter-spacing:2px;color:var(--muted);font-weight:400}
+nav{display:flex;gap:6px;flex-wrap:wrap}nav a{padding:7px 12px;border-radius:9px;font-size:12.5px;color:#4e6558}nav a.active{background:var(--green);color:#fff}nav a:hover{background:var(--soft);text-decoration:none}
+.spacer{flex:1}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:7px 12px;font:inherit;font-size:12.5px}
+button:hover{border-color:#b9cdbd;background:#f7fbf7}
+button.primary{background:var(--green);border-color:var(--green);color:#fff}button.primary:hover{background:#1a5c44}
+button.danger{color:var(--danger)}
+main{max-width:1150px;margin:0 auto;padding:22px 22px 80px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs button{border-radius:20px;padding:7px 16px}
+.tabs button.active{background:var(--green);color:#fff;border-color:var(--green)}
+.grid{display:grid;grid-template-columns:300px minmax(0,1fr);gap:16px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:16px}
+.panel h2{margin:0 0 12px;font-size:13px;letter-spacing:1px;color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.resume-item{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:8px;cursor:pointer;background:#fff}
+.resume-item:hover{border-color:#b9cdbd}.resume-item.selected{border-color:var(--green);background:#f7fbf8}
+.resume-item b{font-size:13px}.resume-item .meta{font-size:10.5px;color:var(--muted);margin-top:2px}
+.version{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.version .head{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.version b{font-size:13px}.version .meta{font-size:10.5px;color:var(--muted)}
+.preview{white-space:pre-wrap;font-size:12.5px;line-height:1.8;max-height:420px;overflow:auto;background:#fbfdfb;border:1px solid var(--line);border-radius:10px;padding:14px}
+form.stack{display:grid;gap:10px}
+label{display:grid;gap:4px;font-size:12px;color:#4e6558}
+input,textarea,select{padding:8px 10px;border:1px solid #d7e1d9;border-radius:8px;font:13px inherit;width:100%;background:#fff;color:var(--ink)}
+textarea{min-height:90px;resize:vertical}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+.stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stat b{display:block;font-size:20px;color:var(--green)}.stat span{font-size:10.5px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid #eef2ed;vertical-align:top}
+th{color:var(--muted);font-weight:500;white-space:nowrap}
+td select{padding:5px 7px;font-size:11.5px;width:auto}
+.empty{padding:22px;border:1px dashed var(--line);border-radius:12px;color:var(--muted);font-size:12px;text-align:center}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f3a2e;color:#fff;padding:9px 16px;border-radius:22px;font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:100}
+.toast.show{opacity:1}
+.gate{position:fixed;inset:0;z-index:99;background:#f4f6f0;display:grid;place-items:center;padding:20px}
+.gate[hidden]{display:none}
+.gate .box{background:#fff;border:1px solid var(--line);border-radius:20px;padding:30px 32px;max-width:420px;text-align:center}
+.hint{font-size:11px;color:var(--muted);line-height:1.8}
+@media(max-width:860px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}main{padding:14px 12px 70px}.top{padding:10px 14px;gap:10px}table{display:block;overflow-x:auto}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">✧ 职向<small>RESUME & TRACKING</small></div>
+  <nav>
+    <a href="/">今天</a>
+    <a href="/chat">对话</a>
+    <a href="/recruit">机会日历</a>
+    <a href="/resume" class="active">简历与投递</a>
+  </nav>
+  <div class="spacer"></div>
+  <button id="refresh">刷新</button>
+</header>
+
+<main id="main">
+  <div class="tabs">
+    <button data-tab="resume" class="active">简历库</button>
+    <button data-tab="apps">投递跟进</button>
+  </div>
+
+  <section id="tab-resume">
+    <div class="grid">
+      <aside>
+        <div class="panel">
+          <h2>我的简历 <a href="/chat">从对话保存 →</a></h2>
+          <div id="resume-list"><div class="empty">还没有简历</div></div>
+        </div>
+        <details class="panel">
+          <summary style="cursor:pointer;font-size:13px">＋ 新建一份简历</summary>
+          <form id="new-resume" class="stack" style="margin-top:10px">
+            <label>简历名称<input id="nr-name" maxlength="60" placeholder="例如：后端开发-中文"></label>
+            <label>简历正文（纯文本/Markdown）<textarea id="nr-content" maxlength="50000" placeholder="粘贴你的简历内容"></textarea></label>
+            <button type="submit" class="primary">创建</button>
+          </form>
+        </details>
+      </aside>
+
+      <section>
+        <div class="panel">
+          <h2 id="resume-title">选择左侧简历</h2>
+          <div id="resume-detail"><div class="empty">选择一份简历查看版本</div></div>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section id="tab-apps" hidden>
+    <div class="stats" id="app-stats"></div>
+    <div class="panel">
+      <h2>新增投递 <a href="/api/applications/export.csv" id="export-apps">导出 CSV →</a></h2>
+      <form id="app-form" class="stack">
+        <div class="row">
+          <label style="flex:1 1 180px">公司<input id="ap-company" maxlength="80" required placeholder="例如：某某银行"></label>
+          <label style="flex:1 1 180px">岗位<input id="ap-role" maxlength="80" required placeholder="例如：数据分析实习"></label>
+        </div>
+        <div class="row">
+          <label style="flex:1 1 140px">城市<input id="ap-city" maxlength="30" placeholder="成都"></label>
+          <label style="flex:1 1 140px">渠道<input id="ap-channel" maxlength="40" placeholder="官网 / 内推 / 宣讲会"></label>
+          <label style="flex:0 1 130px">阶段<select id="ap-stage"></select></label>
+        </div>
+        <div class="row">
+          <label style="flex:1 1 150px">截止日期<input id="ap-deadline" type="date"></label>
+          <label style="flex:1 1 150px">下次跟进<input id="ap-followup" type="date"></label>
+        </div>
+        <label>备注<textarea id="ap-notes" maxlength="2000" placeholder="面试轮次、联系人、待办"></textarea></label>
+        <button type="submit" class="primary">保存投递</button>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>投递列表</h2>
+      <div id="app-list"><div class="empty">还没有投递记录</div></div>
+    </div>
+  </section>
+</main>
+
+<div class="gate" id="gate" hidden>
+  <div class="box">
+    <h3>请先登录</h3>
+    <p class="hint">简历与投递记录只保存在本机，需要登录后查看。</p>
+    <p><a class="btn" href="/chat" style="display:inline-block;background:var(--green);color:#fff;border-radius:9px;padding:8px 16px">去登录</a></p>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = 'SESSION_TOKEN';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const toast = t => { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 3200); };
+const fmt = iso => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
+let STAGES = [];
+let state = {resumes: [], current: null, apps: []};
+
+async function api(path, body) {
+  const r = await fetch('/api/' + path, {method: body ? 'POST' : 'GET', headers: {'x-career-token': TOKEN, 'content-type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { const e = new Error('请先登录'); e.needLogin = true; throw e; }
+  if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+function renderResumeList() {
+  if (!state.resumes.length) { $('#resume-list').innerHTML = '<div class="empty">还没有简历。可以新建，或在对话里生成后点「保存为简历版本」。</div>'; return; }
+  $('#resume-list').innerHTML = state.resumes.map(r => `<div class="resume-item ${state.current?.id === r.id ? 'selected' : ''}" data-resume="${esc(r.id)}">
+    <b>${esc(r.name)}</b><div class="meta">${r.versions} 个版本 · ${esc(fmt(r.updatedAt))}</div></div>`).join('');
+  document.querySelectorAll('[data-resume]').forEach(el => el.onclick = () => openResume(el.dataset.resume));
+}
+
+async function openResume(id) {
+  const d = await api('resumes/' + id);
+  state.current = d.resume;
+  renderResumeList();
+  renderResumeDetail();
+}
+
+function renderResumeDetail() {
+  const r = state.current;
+  if (!r) return;
+  $('#resume-title').textContent = r.name + ' · ' + r.versions.length + ' 个版本';
+  const versions = r.versions.map(v => `<div class="version">
+    <div class="head"><div><b>${esc(v.title)}</b> <span class="meta">v${v.versionNo} · ${esc(fmt(v.createdAt))}</span></div>
+    <div class="row"><button data-view="${esc(v.id)}">查看</button><button data-download="${esc(v.id)}">下载 .md</button></div></div>
+    ${v.jdText ? '<div class="meta" style="margin-top:4px">关联 JD：' + esc(v.jdText.slice(0, 80)) + '…</div>' : ''}
+  </div>`).join('');
+  $('#resume-detail').innerHTML = versions +
+    `<div class="panel" style="margin:14px 0 0;padding:12px">
+      <h2 style="margin-bottom:8px">＋ 新建版本（可贴 JD 做定向改写）</h2>
+      <form id="new-version" class="stack">
+        <label>版本标题<input id="nv-title" maxlength="80" placeholder="例如：银行数据分析-定向版"></label>
+        <label>岗位描述 JD（可选）<textarea id="nv-jd" maxlength="20000" placeholder="粘贴完整 JD"></textarea></label>
+        <label>简历正文（已自动填入最新版，可直接改）<textarea id="nv-content" maxlength="50000"></textarea></label>
+        <label>备注<input id="nv-notes" maxlength="2000" placeholder="改了什么、为什么"></label>
+        <div class="row"><button type="submit" class="primary">保存新版本</button><button type="button" id="fill-latest">用最新版填充</button></div>
+      </form>
+    </div>
+    <div class="panel" style="margin:14px 0 0;padding:12px"><h2>版本预览</h2><div class="preview" id="version-preview">点上面「查看」显示正文</div></div>`;
+  const latest = r.versions[0];
+  if (latest) $('#nv-content').value = latest.content;
+  $('#fill-latest').onclick = () => { if (r.versions[0]) $('#nv-content').value = r.versions[0].content; };
+  document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
+    const v = r.versions.find(x => x.id === b.dataset.view);
+    $('#version-preview').textContent = v ? v.content : '';
+  });
+  document.querySelectorAll('[data-download]').forEach(b => b.onclick = () => {
+    const v = r.versions.find(x => x.id === b.dataset.download);
+    if (!v) return;
+    const blob = new Blob([v.content], {type: 'text/markdown;charset=utf-8'});
+    const u = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = u; a.download = (v.title || 'resume') + '.md'; a.click();
+    setTimeout(() => URL.revokeObjectURL(u), 1500);
+  });
+  $('#new-version').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api('resumes/' + r.id + '/versions', {
+        title: $('#nv-title').value || '定向版本',
+        jdText: $('#nv-jd').value,
+        content: $('#nv-content').value,
+        notes: $('#nv-notes').value
+      });
+      await loadResumes();
+      await openResume(r.id);
+      toast('已保存新版本');
+    } catch (err) { toast(err.message); }
+  };
+}
+
+function renderApps() {
+  const stats = {applications: state.apps.length};
+  const byStage = {};
+  for (const a of state.apps) byStage[a.stage] = (byStage[a.stage] || 0) + 1;
+  $('#app-stats').innerHTML = STAGES.map(s => `<div class="stat"><b>${byStage[s] || 0}</b><span>${esc(s)}</span></div>`).join('');
+  if (!state.apps.length) { $('#app-list').innerHTML = '<div class="empty">还没有投递记录</div>'; return; }
+  $('#app-list').innerHTML = `<table><thead><tr><th>公司</th><th>岗位</th><th>阶段</th><th>截止</th><th>跟进</th><th>备注</th><th></th></tr></thead><tbody>` +
+    state.apps.map(a => `<tr>
+      <td><b>${esc(a.company)}</b><div class="hint">${esc(a.city || '')}</div></td>
+      <td>${esc(a.role)}<div class="hint">${esc(a.channel || '')}</div></td>
+      <td><select data-stage="${esc(a.id)}">${STAGES.map(s => `<option ${s === a.stage ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></td>
+      <td>${esc(a.deadline || '-')}</td><td>${esc(a.nextFollowup || '-')}</td>
+      <td style="max-width:220px">${esc(a.notes || '')}</td>
+      <td><button class="danger" data-del="${esc(a.id)}">删除</button></td></tr>`).join('') + '</tbody></table>';
+  document.querySelectorAll('[data-stage]').forEach(sel => sel.onchange = async () => {
+    const app = state.apps.find(x => x.id === sel.dataset.stage);
+    try { await api('applications', {...app, stage: sel.value, id: app.id}); toast('已更新阶段'); await loadApps(); }
+    catch (e) { toast(e.message); }
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('删除这条投递记录？')) return;
+    try { await api('applications/' + b.dataset.del + '/delete', {}); await loadApps(); toast('已删除'); }
+    catch (e) { toast(e.message); }
+  });
+}
+
+async function loadResumes() {
+  const d = await api('resumes');
+  state.resumes = d.resumes || [];
+  if (!state.current && state.resumes.length) { await openResume(state.resumes[0].id); return; }
+  renderResumeList();
+}
+
+async function loadApps() {
+  const d = await api('applications');
+  STAGES = d.stages || STAGES;
+  state.apps = d.applications || [];
+  const sel = $('#ap-stage');
+  if (sel && !sel.options.length) sel.innerHTML = STAGES.map(s => `<option>${esc(s)}</option>`).join('');
+  renderApps();
+}
+
+function bind() {
+  document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
+    document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('active', x === b));
+    $('#tab-resume').hidden = b.dataset.tab !== 'resume';
+    $('#tab-apps').hidden = b.dataset.tab !== 'apps';
+  });
+  $('#new-resume').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const d = await api('resumes', {name: $('#nr-name').value || '我的简历', content: $('#nr-content').value});
+      await loadResumes(); await openResume(d.resume.id); toast('已创建');
+    } catch (err) { toast(err.message); }
+  };
+  $('#app-form').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api('applications', {
+        company: $('#ap-company').value, role: $('#ap-role').value,
+        city: $('#ap-city').value, channel: $('#ap-channel').value, stage: $('#ap-stage').value,
+        deadline: $('#ap-deadline').value, nextFollowup: $('#ap-followup').value, notes: $('#ap-notes').value
+      });
+      $('#app-form').reset();
+      await loadApps(); toast('已保存投递');
+    } catch (err) { toast(err.message); }
+  };
+  $('#export-apps').onclick = async e => {
+    e.preventDefault();
+    try {
+      const r = await fetch('/api/applications/export.csv', {headers: {'x-career-token': TOKEN}});
+      if (!r.ok) throw new Error('导出失败');
+      const blob = await r.blob(); const u = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = u; a.download = 'zhixiang-applications.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(u), 1500);
+    } catch (err) { toast(err.message); }
+  };
+  $('#refresh').onclick = () => boot();
+}
+
+async function boot() {
+  try { await api('auth/me'); }
+  catch (e) { if (e.needLogin) { $('#gate').hidden = false; $('#main').style.visibility = 'hidden'; return; } toast(e.message); return; }
+  try { await Promise.all([loadResumes(), loadApps()]); }
+  catch (e) { toast(e.message); }
+}
+
+bind();
+boot();
+</script>
+</body>
+</html>

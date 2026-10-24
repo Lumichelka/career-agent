@@ -3,6 +3,20 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.0.0-m11 · 2026-10-24
+
+**M11 第一版：简历版本库 + 投递跟进**
+
+- 新增 `src/resume/store.mjs`（resume.db）：简历、多版本、JD、投递记录
+- 新增 `/resume` 页面：简历库（新建/加版本/查看/下载 .md）与投递看板（阶段/截止/跟进/CSV）
+- 对话文稿一键保存：`POST /api/resumes/from-session` + 聊天里的「保存为简历」
+- 新增只读工具 `resume_list` / `resume_read`（能力面板 8 工具）
+- 提示词要求：改简历前先读原文，不得编造经历/数字
+- 工作台/对话/日历导航加入「简历与投递」
+- 新增 `tests/resume.test.mjs`（7 项），共 77 项测试
+- 验证：创建 → 加版本 → 预览 → 投递 → 改阶段 → CSV；对话保存实测跳转成功
+- 回退：`git reset --hard v3.0.0-m5`
+
 ## v3.0.0-m5 · 2026-10-24
 
 **M5：地图行程 + 新增两所高校源**

@@ -200,5 +200,14 @@
       b.onclick = () => { location.href = '/recruit'; };
       anchor.after(b);
     }
+    const recruit = $('#recruit-entry');
+    if (recruit && !$('#resume-entry')) {
+      const r = document.createElement('button');
+      r.id = 'resume-entry';
+      r.className = 'new platform-launch';
+      r.textContent = '▥ 简历与投递';
+      r.onclick = () => { location.href = '/resume'; };
+      recruit.after(r);
+    }
   } catch { /* 侧栏结构变化时忽略 */ }
 })();

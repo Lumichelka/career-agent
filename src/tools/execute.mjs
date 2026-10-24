@@ -4,6 +4,7 @@ import {validateArguments} from './policy.mjs';
 import * as recruit from './handlers/recruit.mjs';
 import * as search from './handlers/search.mjs';
 import * as platform from './handlers/platform.mjs';
+import * as resume from './handlers/resume.mjs';
 
 export const HANDLERS = {
   'recruit.events': recruit.events,
@@ -11,7 +12,9 @@ export const HANDLERS = {
   'search.company': search.companyResearch,
   'platform.status': platform.status,
   'platform.search': platform.search,
-  'platform.read': platform.read
+  'platform.read': platform.read,
+  'resume.list': resume.list,
+  'resume.read': resume.read
 };
 
 export function createToolExecutor({runner = null} = {}) {
