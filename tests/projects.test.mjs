@@ -69,3 +69,19 @@ test('API：日历返回活动与项目，项目可增删', async () => {
     assert.equal(out.json.ok, true);
   });
 });
+
+test('API：批量粘贴多个招聘项目', async () => {
+  await withDir(async dir => {
+    const store = RecruitStore.open(join(dir, 'recruit.db'));
+    store.upsertEvent(baseEvent());
+    store.close();
+    const text = '甲公司 | 数据分析 | SQL/Python | 网申 | https://a.example\n乙公司 | 产品经理 | 沟通\n\n';
+    let out = await handleRecruit({method: 'POST', pathname: 'projects/bulk', body: {eventId: 'a'.repeat(24), text}, dir});
+    assert.equal(out.json.ok, true);
+    assert.equal(out.json.count, 2);
+    assert.equal(out.json.projects[0].company, '甲公司');
+    assert.equal(out.json.projects[0].applyMode, '网申');
+    out = await handleRecruit({method: 'POST', pathname: 'projects/bulk', body: {eventId: 'a'.repeat(24), text: '   '}, dir});
+    assert.equal(out.status, 400);
+  });
+});

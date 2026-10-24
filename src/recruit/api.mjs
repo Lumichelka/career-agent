@@ -81,6 +81,29 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   }
 
   if (method === 'POST') {
+    if (pathname === 'projects/bulk') {
+      const eventId = String(body?.eventId || '');
+      const text = String(body?.text || '');
+      if (!eventId) return {status: 400, json: {error: '缺少关联活动'}};
+      const lines = text.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 100);
+      if (!lines.length) return {status: 400, json: {error: '请粘贴至少一行项目'}};
+      try {
+        const projects = withStore(dir, store => {
+          const saved = [];
+          for (const line of lines) {
+            const parts = line.split(/\s*[|｜\t]\s*/);
+            const company = parts[0] || '';
+            const title = parts[1] || '';
+            if (!company && !title) continue;
+            saved.push(store.upsertProject({eventId, company, title, positions: parts[2] || '', applyMode: parts[3] || '', applyUrl: parts[4] || ''}));
+          }
+          return saved;
+        });
+        return {json: {ok: true, count: projects.length, projects}};
+      } catch (e) {
+        return {status: 400, json: {error: e.message}};
+      }
+    }
     if (pathname === 'projects') {
       try {
         const project = withStore(dir, store => store.upsertProject(body || {}));
