@@ -6,7 +6,7 @@ test('源注册表：自动发现 13 个源，id 唯一', () => {
   assert.equal(SOURCES.length, 13);
   const ids = SOURCES.map(s => s.id);
   assert.equal(new Set(ids).size, ids.length);
-  assert.equal(enabledSources().length, 5);
+  assert.equal(enabledSources().length, 7);
 });
 
 test('每个源字段完整，已接入的必须有 parseList', () => {

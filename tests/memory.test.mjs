@@ -95,6 +95,8 @@ test('记忆概要：层、计数、限制', async () => {
     const payload = await buildMemoryPayload(dir, {id: 'sid', memory: '本次要点'});
     assert.equal(payload.session.memory, '本次要点');
     assert.equal(payload.profile.length, 1);
+    assert.equal(payload.counts.profile, 1);
+    assert.equal(payload.counts.tasks, 1);
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
 

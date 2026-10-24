@@ -181,6 +181,7 @@ function renderSchedule(schedule){
             <br>置信度 ${conf}% · ${event.verified?'<span class="flag ok">已复核</span>':'待复核'}
           </div>
           <div class="row">
+            ${event.mapUrl?`<a href="${esc(event.mapUrl)}" target="_blank" rel="noopener noreferrer">地图 ↗</a>`:''}
             ${event.sourceUrl?`<a href="${esc(event.sourceUrl)}" target="_blank" rel="noopener noreferrer">来源 ↗</a>`:''}
             <button data-verify="${esc(event.id)}">复核来源</button>
           </div>

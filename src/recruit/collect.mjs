@@ -6,6 +6,12 @@ import {SOURCES, sourceById, guessKind, guessCompany, normalizeCity} from './sou
 import {browserText, parseRenderedText} from './browser.mjs';
 import {RecruitStore} from './store.mjs';
 
+// 允许请求体写成函数（例如按当天日期生成查询参数）。
+function requestBody(source) {
+  const body = source.request?.body;
+  return typeof body === 'function' ? body() : body;
+}
+
 export function htmlToText(html) {
   return String(html || '')
     .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -90,7 +96,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
       if (store) store.saveRaw({url: source.listUrl, sourceId: source.id, title, text});
       items = parseRenderedText(text, source);
     } else {
-      const res = await fetchText(source.listUrl, {method: source.request?.method || 'GET', headers: {...(source.mode === 'json' ? {referer: source.listUrl} : {}), ...source.request?.headers}, body: source.request?.body});
+      const res = await fetchText(source.listUrl, {method: source.request?.method || 'GET', headers: {...(source.mode === 'json' ? {referer: source.listUrl} : {}), ...source.request?.headers}, body: requestBody(source)});
       if (!res.ok) {
         result.status = res.reason === 'robots_disallowed' ? 'disallowed' : res.reason === 'blocked' ? 'blocked' : 'error';
         result.message = res.message;
@@ -101,7 +107,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
         const pages = source.pageUrl ? Math.min(source.maxPages || 1, 5) : 1;
         for (let p = 1; p <= pages; p++) {
           const pageUrl = source.pageUrl ? source.pageUrl(p) : source.listUrl;
-          const pageRes = p === 1 ? res : await fetchText(pageUrl, {method: source.request?.method || 'GET', headers: {referer: source.listUrl, ...source.request?.headers}, body: source.request?.body});
+          const pageRes = p === 1 ? res : await fetchText(pageUrl, {method: source.request?.method || 'GET', headers: {referer: source.listUrl, ...source.request?.headers}, body: requestBody(source)});
           if (!pageRes.ok) break;
           let json;
           try { json = JSON.parse(pageRes.text); } catch { throw new Error('接口返回的不是 JSON，可能被登录页或验证码拦截'); }
@@ -111,7 +117,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
           }
           const pageItems = source.parseList(pageRes.text, source, json);
           items.push(...pageItems);
-          if (!pageItems.length || items.length >= limit) break;
+          if (!pageItems.length || items.length >= limit || (json.totalPage && p >= Number(json.totalPage))) break;
         }
       } else {
         items = source.parseList(res.text, source);

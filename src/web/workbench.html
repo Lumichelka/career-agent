@@ -173,7 +173,7 @@ function renderUpcoming(schedule) {
       return `<article class="ev ${cls}">
         <time>${esc(fmt(event.startAt))}${event.endAt ? '–' + esc(fmt(event.endAt)) : ''}</time>
         <div><p class="title">${esc(event.title)}</p>
-        <div class="meta">${esc(event.school)} · ${esc(event.kind)}${event.venue ? ' · ' + esc(event.venue) : ''}${travel ? ' · 通勤约 ' + esc(travel.minutes) + ' 分钟' : ''}</div></div>
+        <div class="meta">${esc(event.school)} · ${esc(event.kind)}${event.venue ? ' · ' + esc(event.venue) : ''}${travel ? ' · 通勤约 ' + esc(travel.minutes) + ' 分钟' : ''}${event.mapUrl ? ' · ' + `<a href="${esc(event.mapUrl)}" target="_blank" rel="noopener noreferrer">地图</a>` : ''}</div></div>
         <div class="side">${flags.join('')}</div></article>`;
     }).join('');
     return `<div class="day">${esc(day.date)} · 周${esc(day.weekday)}</div>${items}`;

@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {normalizeBaseUrl, endpointFor, isPrivateHostname, validateProxy, explainError, detectPreset, decorateChatError} from '../src/model/providers.mjs';
 import {KeyVault} from '../src/model/keyvault.mjs';
 import {ModelSettings, validateModelSettings} from '../src/model/model-settings.mjs';
-import {buildSchedule, estimateTravel, toICS, toCSV, toMarkdown} from '../src/recruit/schedule.mjs';
+import {buildSchedule, estimateTravel, toICS, toCSV, toMarkdown, mapUrlFor} from '../src/recruit/schedule.mjs';
 
 test('接口地址规范化：去掉重复协议路径', () => {
   assert.equal(normalizeBaseUrl(' https://api.deepseek.com/chat/completions '), 'https://api.deepseek.com');
@@ -120,4 +120,23 @@ test('导出 ICS / CSV / Markdown 结构正确', () => {
 test('中文 ICS 文本保持 UTF-8 可读', () => {
   const ics = toICS([events[0]], {calendarName: '职向 线下招聘行程'});
   assert.match(ics, /X-WR-CALNAME:职向 线下招聘行程/);
+});
+
+test('地图链接：不依赖 Key，编码地点与城市', () => {
+  const url = mapUrlFor({venue: '四川大学望江校区 就业中心', school: '四川大学', city: '成都'});
+  assert.match(url, /^https:\/\/uri\.amap\.com\/search\?keyword=/);
+  assert.ok(url.includes(encodeURIComponent('四川大学望江校区 就业中心')));
+  assert.ok(url.includes('city=' + encodeURIComponent('成都')));
+  assert.ok(!mapUrlFor({venue: '某地', city: '全国'}).includes('city='));
+});
+
+test('行程与导出包含地图链接', () => {
+  const schedule = buildSchedule(events);
+  assert.ok(schedule.days[0].items[0].event.mapUrl);
+  const ics = toICS(events);
+  assert.match(ics, /地图：https:\/\/uri\.amap\.com/);
+  const csv = toCSV(events);
+  assert.ok(csv.split('\r\n')[0].includes('地图链接'));
+  const md = toMarkdown(schedule);
+  assert.match(md, /\[四川大学望江校区就业中心221\]\(https:\/\/uri\.amap\.com/);
 });

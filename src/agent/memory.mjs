@@ -152,6 +152,7 @@ export async function buildMemoryPayload(dir, session = null) {
     tasks: tasks.tasks.slice(0, 20),
     session: session ? {id: session.id, memory: String(session.memory || '')} : null,
     layers: MEMORY_LAYERS,
-    limits: LIMITS
+    limits: LIMITS,
+    counts: {profile: profile.facts.length, tasks: tasks.tasks.length}
   };
 }

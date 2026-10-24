@@ -40,6 +40,14 @@ export function estimateTravel(fromVenue, toVenue, fromCity = '', toCity = '') {
 }
 
 const pad = n => String(n).padStart(2, '0');
+
+// 地图搜索链接：不依赖 API Key，手机/浏览器可直接打开高德。
+export function mapUrlFor(event) {
+  const keyword = [event.venue, event.school, event.city].filter(Boolean).join(' ').trim();
+  const city = event.city && event.city !== '全国' ? event.city : '';
+  return 'https://uri.amap.com/search?keyword=' + encodeURIComponent(keyword || event.title || '招聘会') + (city ? '&city=' + encodeURIComponent(city) : '');
+}
+
 function china(date) {
   const d = new Date(new Date(date).getTime() + 8 * 3600 * 1000);
   return {y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(), h: d.getUTCHours(), mi: d.getUTCMinutes()};
@@ -57,7 +65,7 @@ export function buildSchedule(events, {homeCity = '成都'} = {}) {
     const day = china(e.startAt);
     const key = `${day.y}-${pad(day.m)}-${pad(day.d)}`;
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({...e});
+    groups.get(key).push({...e, mapUrl: mapUrlFor(e)});
   }
   const days = [];
   for (const [date, list] of groups) {
@@ -130,6 +138,7 @@ export function toICS(events, {calendarName = '职向 · 线下招聘行程'} = 
         e.kind ? '类型：' + e.kind : '',
         e.industry ? '行业：' + e.industry : '',
         e.applyMode ? '投递：' + e.applyMode : '',
+        '地图：' + (e.mapUrl || mapUrlFor(e)),
         '来源：' + (e.sourceUrl || ''),
         '信息核对：' + (e.verified ? '已复核' : '待复核（置信度 ' + Math.round((e.confidence || 0) * 100) + '%）')
       ].filter(Boolean).join('\n')),
@@ -142,12 +151,12 @@ export function toICS(events, {calendarName = '职向 · 线下招聘行程'} = 
 }
 
 export function toCSV(events) {
-  const head = ['日期', '开始', '结束', '学校', '城市', '类型', '活动名称', '单位', '地点', '行业', '投递方式', '来源链接', '置信度', '是否复核'];
+  const head = ['日期', '开始', '结束', '学校', '城市', '类型', '活动名称', '单位', '地点', '地图链接', '行业', '投递方式', '来源链接', '置信度', '是否复核'];
   const rows = [...events].sort((a, b) => a.startAt.localeCompare(b.startAt)).map(e => {
     const c = china(e.startAt), ce = china(endOf(e));
     return [
       `${c.y}-${pad(c.m)}-${pad(c.d)}`, `${pad(c.h)}:${pad(c.mi)}`, `${pad(ce.h)}:${pad(ce.mi)}`,
-      e.school, e.city, e.kind, e.title, e.company, e.venue, e.industry, e.applyMode, e.sourceUrl,
+      e.school, e.city, e.kind, e.title, e.company, e.venue, e.mapUrl || mapUrlFor(e), e.industry, e.applyMode, e.sourceUrl,
       Math.round((e.confidence || 0) * 100) + '%', e.verified ? '是' : '否'
     ];
   });
@@ -161,7 +170,7 @@ export function toMarkdown(schedule, {title = '线下招聘时间安排表'} = {
     out.push(`## ${day.date}（周${day.weekday}）`, '', '| 时间 | 活动 | 单位 | 地点 | 通勤 | 提示 |', '| --- | --- | --- | --- | --- | --- |');
     for (const {event, travel, warning, conflict} of day.items) {
       const c = china(event.startAt), ce = china(endOf(event));
-      out.push(`| ${pad(c.h)}:${pad(c.mi)}-${pad(ce.h)}:${pad(ce.mi)} | ${event.title} | ${event.company || '-'} | ${event.venue || '待确认'} | ${travel ? travel.minutes + ' 分钟' : '-'} | ${conflict ? '⚠ 时间冲突' : warning || '-'} |`);
+      out.push(`| ${pad(c.h)}:${pad(c.mi)}-${pad(ce.h)}:${pad(ce.mi)} | ${event.title} | ${event.company || '-'} | ${event.venue ? `[${event.venue}](${event.mapUrl || mapUrlFor(event)})` : '待确认'} | ${travel ? travel.minutes + ' 分钟' : '-'} | ${conflict ? '⚠ 时间冲突' : warning || '-'} |`);
     }
     out.push('');
   }
