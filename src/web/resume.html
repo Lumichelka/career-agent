@@ -202,7 +202,7 @@ function renderResumeDetail() {
   $('#resume-title').textContent = r.name + ' · ' + r.versions.length + ' 个版本';
   const versions = r.versions.map(v => `<div class="version">
     <div class="head"><div><b>${esc(v.title)}</b> <span class="meta">v${v.versionNo} · ${esc(fmt(v.createdAt))}</span></div>
-    <div class="row"><button data-view="${esc(v.id)}">查看</button><button data-download="${esc(v.id)}">下载 .md</button></div></div>
+    <div class="row"><button data-view="${esc(v.id)}">查看</button><button data-download="${esc(v.id)}">下载 .md</button><button data-docx="${esc(v.id)}">下载 Word</button></div></div>
     ${v.jdText ? '<div class="meta" style="margin-top:4px">关联 JD：' + esc(v.jdText.slice(0, 80)) + '…</div>' : ''}
   </div>`).join('');
   $('#resume-detail').innerHTML = versions +
@@ -229,8 +229,21 @@ function renderResumeDetail() {
     if (!v) return;
     const blob = new Blob([v.content], {type: 'text/markdown;charset=utf-8'});
     const u = URL.createObjectURL(blob); const a = document.createElement('a');
-    a.href = u; a.download = (v.title || 'resume') + '.md'; a.click();
+    a.href = u; a.download = (v.title || 'resume').replace(/[\\/:*?"<>|]/g, '-') + '.md'; a.click();
     setTimeout(() => URL.revokeObjectURL(u), 1500);
+  });
+  document.querySelectorAll('[data-docx]').forEach(b => b.onclick = async () => {
+    const v = r.versions.find(x => x.id === b.dataset.docx);
+    if (!v) return;
+    try {
+      const res = await fetch('/api/resumes/version/' + v.id + '/docx', {headers: {'x-career-token': TOKEN}});
+      if (!res.ok) throw new Error('导出失败');
+      const blob = await res.blob();
+      const u = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = u; a.download = (v.title || 'resume').replace(/[\\/:*?"<>|]/g, '-') + '.docx'; a.click();
+      setTimeout(() => URL.revokeObjectURL(u), 1500);
+      toast('已导出 Word');
+    } catch (e) { toast(e.message); }
   });
   $('#new-version').onsubmit = async e => {
     e.preventDefault();

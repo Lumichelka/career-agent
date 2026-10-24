@@ -3,6 +3,18 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.0.0-m16 · 2026-10-24
+
+**3.1 收尾：简历 Word 导出**
+
+- 新增 `src/resume/docx.mjs`：零依赖 ZIP + WordprocessingML 生成 DOCX
+- 标题/二级标题/列表/普通段落转 Word 样式，XML 转义与中文正常
+- 新增 `GET /api/resumes/version/<id>/docx`；简历版本卡加「下载 Word」
+- 下载文件名自动去掉非法字符
+- 新增 `tests/docx.test.mjs`（4 项），共 98 项测试
+- 实测：python-docx 能打开，标题识别 Heading 1，列表保留；浏览器下载成功
+- 回退：`git reset --hard v3.0.0-m15`
+
 ## v3.0.0-m15 · 2026-10-24
 
 **2.2 公司档案**

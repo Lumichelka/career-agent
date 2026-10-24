@@ -2,6 +2,7 @@
 import {join} from 'node:path';
 import {readFile} from 'node:fs/promises';
 import {ResumeStore, STAGES} from './store.mjs';
+import {buildDocx} from './docx.mjs';
 
 function csv(rows) {
   const head = ['公司', '岗位', '城市', '渠道', '阶段', '截止日期', '下次跟进', '备注'];
@@ -20,6 +21,15 @@ export async function handleResume({method, pathname, url, body, dir}) {
       if (pathname === 'applications') return {json: {applications: store.listApplications(), stages: STAGES, stats: store.stats()}};
       if (pathname === 'applications/export.csv') return {file: {body: csv(store.listApplications()), type: 'text/csv; charset=utf-8', name: 'zhixiang-applications.csv'}};
       if (pathname === 'interviews') return {json: {interviews: store.listInterviews(), stats: store.stats()}};
+      if (parts[0] === 'resumes' && parts[1] === 'version' && parts[2] && parts[3] === 'docx') {
+        const version = store.getVersion(parts[2]);
+        if (!version) return {status: 404, json: {error: '简历版本不存在'}};
+        return {file: {
+          body: buildDocx(version.content, {title: version.title}),
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          name: 'zhixiang-resume.docx'
+        }};
+      }
       if (parts[0] === 'resumes' && parts[1] && parts.length === 2) {
         const resume = store.getResume(parts[1]);
         return resume ? {json: {resume}} : {status: 404, json: {error: '简历不存在'}};
