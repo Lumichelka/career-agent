@@ -81,7 +81,7 @@ child.stdin.on("error",()=>{});
 child.stdin.end(prompt);
 });}
 
-export async function runAgent({root,session,message,attachments=[],profile=[],skill=null,onEvent=()=>{},signal,modelCall=runModel,backend=null,images=[],fallback=false}){
+export async function runAgent({root,session,message,attachments=[],profile=[],skill=null,onEvent=()=>{},signal,modelCall=runModel,backend=null,images=[],fallback=false,externalTools=[],externalCaller=null}){
   const started=Date.now(),trace=[],calls=[];
   // 调用记录只存元数据：不存提示词、不存结果正文；只挂在助手消息上，不进任务记录。
   const callBackend={kind:backend?.kind||'',preset:backend?.preset||'',model:backend?.model||'',label:backend?.label||''};
@@ -120,7 +120,8 @@ export async function runAgent({root,session,message,attachments=[],profile=[],s
     const plan=parsePlan(planned.raw);
     onEvent({type:'plan',plan});
     phase('正在执行计划，按结果决定是否继续调用工具');
-    const draft=await callModel('act',{root,taskId:session.id,toolNames:skill?.tools??null,signal:deadline.signal,images,onEvent:e=>{if(e.type==='tool')trace.push({type:e.toolType||'mcp_tool_call',label:e.text});onEvent(e)},prompt:context+'\n本次行动计划（可依据实际结果修正，不能假装步骤完成）：'+JSON.stringify(plan)+'\n执行阶段：完成可完成的部分；检索失败则明确证据不足。需要追问时直接问，不等待外部输入。最后自查岗位来源、城市、日期、简历事实与用户约束。'});
+    // 外部 Agent 工具只进执行阶段（规划/复核不调工具）；Codex 执行体不支持动态注入，由调用方明确说明。
+    const draft=await callModel('act',{root,taskId:session.id,toolNames:skill?.tools??null,signal:deadline.signal,images,externalTools,externalCaller,onEvent:e=>{if(e.type==='tool')trace.push({type:e.toolType||'mcp_tool_call',label:e.text});onEvent(e)},prompt:context+'\n本次行动计划（可依据实际结果修正，不能假装步骤完成）：'+JSON.stringify(plan)+'\n执行阶段：完成可完成的部分；检索失败则明确证据不足。需要追问时直接问，不等待外部输入。最后自查岗位来源、城市、日期、简历事实与用户约束。'});
     let result=parseResult(draft.raw);
     if(result.artifact.content.trim()||result.sources.length||result.visualization.items.length){
       phase('正在复核文稿事实、来源与用户约束');

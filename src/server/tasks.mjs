@@ -450,6 +450,13 @@ export class TaskManager {
           case 'platform_required':
             void deferState('waiting_confirmation', {phase: '等待你完成登录或确认'});
             break;
+          // 首次出网确认：任务是 waiting_confirmation（徽标计入），等用户在对话页选完再继续本轮。
+          case 'external_confirm_required':
+            void deferState('waiting_confirmation', {phase: '等待出网确认'});
+            break;
+          case 'external_confirm_resolved':
+            if (task.state === 'waiting_confirmation') void deferState('running', {phase: '继续执行'});
+            break;
           case 'platform_resolved':
           case 'confirm_resolved':
             if (task.state === 'waiting_confirmation') void deferState('running', {phase: '继续执行'});

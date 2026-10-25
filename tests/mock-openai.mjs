@@ -25,11 +25,21 @@ const BULK_PROJECT = {eventIndex: 0, company: '中国银行四川省分行', tit
 const BULK_SOURCE = {sourceId: 'manual', sourceUrl: 'https://job.swufe.edu.cn/info/1', notes: '浏览器截图读取（非采集器）'};
 const bulkArgs = extra => JSON.stringify({events: [BULK_EVENT], projects: [BULK_PROJECT], source: BULK_SOURCE, idempotencyKey: 'idem-http-1', ...extra});
 
-function decide(body) {
+function decide(body, state = {}) {
   const messages = body.messages || [];
   const last = messages[messages.length - 1] || {role: 'user', content: ''};
   const all = messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n');
   const userText = typeof last.content === 'string' ? last.content : '';
+  // #35 外部 Agent 工具：模型像调本地工具一样直接点名 mcp__*。
+  const external = (body.tools || []).map(tool => tool?.function?.name || tool?.name)
+    .find(name => typeof name === 'string' && name.startsWith('mcp__')) || null;
+  if (external && /请调用外部工具/.test(userText)) {
+    return {toolCalls: [{id: 'call_external', name: external, args: '{}'}]};
+  }
+  if (external && /请反复调用外部工具/.test(all)) {
+    state.externalRounds = (state.externalRounds || 0) + 1;
+    return {toolCalls: [{id: 'call_external_' + state.externalRounds, name: external, args: JSON.stringify({q: state.externalRounds})}]};
+  }
   if (body.tools?.length && /研究这个招聘项目/.test(userText)) {
     return {toolCalls: [{id: 'call_career_recruit_projects', name: 'career_recruit_projects', args: '{\"days\":30}'}]};
   }
@@ -95,7 +105,7 @@ export async function startMockOpenAI({port = 0, delayMs = 0, usage = 'standard'
     // 工具已成功执行后的下一次模型请求失败：用来验证副作用门（有工具成功后失败）。
     if (state.failAfterTool && (body.messages || []).at(-1)?.role === 'tool') { res.writeHead(401, {'content-type': 'application/json'}); res.end('{"error":"tool follow-up failed"}'); return; }
     if (state.failNext > 0) { state.failNext--; res.writeHead(429, {'content-type': 'application/json'}); res.end('{"error":"rate limited"}'); return; }
-    const answer = decide(body);
+    const answer = decide(body, state);
     if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
     const value = usageValues(state.usage);
 

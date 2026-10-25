@@ -35,6 +35,23 @@ export function validateArguments(tool, rawArgs) {
   return out;
 }
 
+// 外部 Agent 工具的参数来自上游 JSON Schema：未知参数只在 schema 明确 additionalProperties:false 时拒绝；
+// schema 没声明 properties 时原样透传（上游可能用自由对象承载内容）。
+export function validateExternalArguments(tool, rawArgs) {
+  if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) throw new Error('工具参数必须是对象');
+  const spec = tool.parameters && typeof tool.parameters === 'object' ? tool.parameters : {};
+  const props = spec.properties && typeof spec.properties === 'object' ? spec.properties : null;
+  if (props && spec.additionalProperties === false) {
+    for (const key of Object.keys(rawArgs)) {
+      if (!Object.hasOwn(props, key)) throw new Error('工具包含未声明参数：' + key);
+    }
+  }
+  for (const key of spec.required || []) {
+    if (rawArgs[key] === undefined || rawArgs[key] === null) throw new Error('缺少参数：' + key);
+  }
+  return {...rawArgs};
+}
+
 // 兼容旧调用：按工具名查注册表再校验
 export function validateToolArguments(name, args) {
   const tool = getTool(name);
