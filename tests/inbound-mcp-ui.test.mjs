@@ -14,15 +14,17 @@ try { ({chromium} = await import('playwright')); } catch { /* 没有 playwright 
 // 390 宽下的设置页：入站 MCP 区可见、可签发、一次性凭据与三种片段可读，且不横向溢出。
 test('设置页 390 宽：入站 MCP 区可见、可签发、无横向溢出', async t => {
   if (!chromium) { console.log('跳过：未安装 playwright'); return; }
+  const dir = await mkdtemp(join(tmpdir(), 'zx-inbound-ui-'));
+  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0});
+  t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
   let browser;
-  try { browser = await chromium.launch({channel: 'msedge'}); }
+  // Chromium 会拒绝随机撞上的受限端口（如 1719）；显式放行本次实例端口。
+  try { browser = await chromium.launch({channel: 'msedge', args: ['--explicitly-allowed-ports=' + app.port]}); }
   catch (error) {
     console.log('跳过：没有可用的 Edge/Chromium（' + error.message.split('\n')[0] + '）');
     return;
   }
-  const dir = await mkdtemp(join(tmpdir(), 'zx-inbound-ui-'));
-  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0});
-  t.after(async () => { await browser.close(); await app.close(); await rm(dir, {recursive: true, force: true}); });
+  t.after(() => browser.close());
 
   const reg = await fetch(app.origin + '/api/auth/register', {
     method: 'POST',

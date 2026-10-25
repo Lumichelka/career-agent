@@ -11,15 +11,17 @@ import {startMockOpenAI} from './mock-openai.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 
 // 浏览器不可用时明确跳过，绝不静默通过。本机装了 Microsoft Edge，优先用它。
-async function launchBrowser(t) {
+async function launchBrowser(t, port) {
+  // Playwright 的浏览器会拒绝随机撞上的 Chromium 受限端口（如 1719）；显式放行本次实例端口。
+  const args = port ? ['--explicitly-allowed-ports=' + port] : [];
   let firstError = '';
   try {
-    return await chromium.launch({channel: 'msedge', headless: true});
+    return await chromium.launch({channel: 'msedge', headless: true, args});
   } catch (error) {
     firstError = error.message;
   }
   try {
-    return await chromium.launch({headless: true});
+    return await chromium.launch({headless: true, args});
   } catch (error) {
     t.skip('Playwright 没有可用浏览器：Microsoft Edge 与内置 Chromium 都启动失败（' + firstError + ' / ' + error.message + '）');
     return null;
@@ -43,7 +45,7 @@ test('工作流抽屉：发消息后出现任务卡，390 宽不横向溢出，�
   const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0});
   t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
 
-  const browser = await launchBrowser(t);
+  const browser = await launchBrowser(t, app.port);
   if (!browser) return;
   t.after(() => browser.close());
 
