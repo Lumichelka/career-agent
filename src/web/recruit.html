@@ -234,7 +234,7 @@ function renderSources(sources,wechat){
     const st=s.last_status||'待采集';
     return '<span class="badge '+(/^(ok|connected)$/.test(st)?'ok':'off')+'">'+esc(st)+'</span>';
   };
-  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b><div class="src-sub">'+esc(a.school||'未归类')+' · 公众号</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions"><a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
+  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b><div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.lastAnalysis?' · 最近分析 '+esc(String(a.lastAnalysis).slice(0,10)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions"><a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
   const group={};
   for(const s of sources)(group[s.category] ||= []).push(s);
   for(const [cat,list] of Object.entries(group)){
