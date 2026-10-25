@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原型 · 外部 Agent 配置与连接状态（#24）</title>
+<style>
+:root{
+  --green:#176b55;--green-dark:#123c30;--ink:#20332c;--muted:#7e8c85;
+  --line:#e3e9e4;--bg:#f8faf9;--card:#fff;--amber:#a8691f;--red:#a64232;--blue:#2c6390;
+  --shadow:0 18px 50px #172e2722;--top:40px;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{max-width:100%}
+body{margin:0;padding-top:var(--top);color:var(--ink);background:var(--bg);font:14px/1.75 'Segoe UI','Microsoft YaHei',sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--green)}
+code{font-family:'Cascadia Mono',Consolas,monospace;font-size:10.5px}
+h2,h3,h4{margin:0}
+.sub{font-size:10.5px;color:var(--muted);font-weight:400}
+/* ---------- prototype bar ---------- */
+.proto{position:fixed;left:0;right:0;top:0;z-index:300;min-height:var(--top);display:flex;align-items:center;justify-content:center;gap:10px;background:#172e27;color:#e8f2ec;padding:4px 12px;font-size:10.5px;flex-wrap:wrap}
+.proto>*{flex:0 0 auto}
+.proto .lbl{font-size:8.5px;letter-spacing:1.5px;color:#8fb3a2;white-space:nowrap}
+.proto-title{font-size:10.5px;color:#dcebe2;white-space:nowrap}
+.proto-sep{width:1px;height:16px;background:#ffffff24}
+.proto .seg{display:flex;gap:2px;background:#ffffff10;border-radius:999px;padding:2px}
+.proto .seg button{border:0;background:none;color:#bcd4c7;border-radius:999px;padding:3px 9px;font-size:10px;white-space:nowrap}
+.proto .seg button.on{background:#eaf6ef;color:#17603f}
+.proto select{border:1px solid #ffffff30;background:#203b31;color:#e8f2ec;border-radius:6px;padding:2px 6px;font-size:10px;max-width:190px}
+.proto button.link{border:0;background:none;color:#cfe6d9;text-decoration:underline;font-size:10px;white-space:nowrap}
+/* ---------- app shell ---------- */
+.app{display:flex;min-height:calc(100dvh - var(--top))}
+.rail{width:250px;flex:0 0 250px;background:#172e27;color:#e4eee9;padding:18px 15px;display:flex;flex-direction:column;gap:9px}
+.brand{font-size:24px;letter-spacing:4px;padding:0 8px 8px}
+.brand small{display:block;font-size:8.5px;letter-spacing:2px;color:#9db9aa;margin-top:4px}
+.rail button.entry{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;border:1px solid #ffffff24;background:#ffffff0c;color:#edf7f1;border-radius:12px;padding:8px 12px;font-size:12px;text-align:left}
+.rail button.entry:hover{background:#ffffff17}
+.rail .sessions{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.rail .sessions button{border:0;background:transparent;color:#aebfb5;text-align:left;font-size:11px;padding:7px 10px;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail .sessions button.on{background:#ffffff0e;color:#fff}
+.rail .foot{margin-top:auto;padding-top:14px;border-top:1px solid #ffffff14;font-size:10px;line-height:1.9;color:#91aa9c}
+.rail .foot .linkbtn{display:block;border:0;background:none;color:#cfe6d9;font-size:11px;padding:2px 0;text-align:left}
+.rail .foot .linkbtn:hover{color:#fff}
+.rail .foot #foot-hint{margin-top:6px;color:#8fb3a2;font-size:9.5px;line-height:1.7}
+main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:calc(100dvh - var(--top));background:radial-gradient(ellipse at 50% 0,#e6f0e870,transparent 60%)}
+header{height:60px;flex:0 0 60px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 22px;background:#ffffffb8;border-bottom:1px solid var(--line)}
+header .title{font-size:15.5px;font-weight:600;display:flex;align-items:baseline;gap:9px}
+header .title span{font-size:11px;color:var(--muted);font-weight:400}
+header .right{display:flex;align-items:center;gap:10px}
+.pill{border:1px solid #dce9df;background:#eff6f0;color:#4c7b66;border-radius:30px;padding:3px 10px;font-size:10px;white-space:nowrap}
+#messages{flex:1;overflow:auto;padding:22px max(20px,calc((100% - 720px)/2));display:flex;flex-direction:column;gap:14px}
+.msg.user{margin-left:auto;max-width:84%;background:#eaf0e4;border-radius:15px;padding:9px 14px;font-size:13px}
+.msg.assistant .role{font-size:10px;color:var(--muted);margin-bottom:3px}
+.msg.assistant .body{font-size:13px;line-height:1.9}
+.composer-area{flex:0 0 auto;padding:8px max(20px,calc((100% - 720px)/2)) 12px;background:linear-gradient(transparent,#f8faf9 30%)}
+.composer{border:1px solid #dbe5dd;background:#fff;border-radius:16px;padding:8px 12px;color:#9aa89f;font-size:12.5px;box-shadow:0 8px 24px #172e270d}
+.composer .bar{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.composer .send{width:30px;height:30px;border-radius:50%;border:0;background:var(--green);color:#fff;font-size:13px}
+/* ---------- buttons / chips ---------- */
+.btn{border:1px solid #cfe0d5;background:#fff;border-radius:8px;padding:5px 10px;font-size:11px;color:#305c47;white-space:nowrap}
+.btn:hover{background:#f2f8f3}
+.btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+.btn.primary:hover{background:#125840}
+.btn.ghost{border-color:#e2e8e3;color:#7b8c82;background:transparent}
+.btn.danger{border-color:#e6c6c0;color:#9a3b2c;background:#fff}
+.btn.dashed{border-style:dashed;background:transparent;width:100%;color:#5b7a68}
+.btn.small{padding:3px 8px;font-size:10.5px}
+.btn:disabled{opacity:.45;cursor:default}
+.chip{display:inline-flex;align-items:center;gap:4px;border-radius:20px;padding:1px 8px;font-size:9.5px;border:1px solid transparent;white-space:nowrap;vertical-align:middle}
+.chip.ok{background:#eaf5ee;color:#286149;border-color:#cfe4d6}
+.chip.err{background:#fbeceb;color:#96382c;border-color:#edcfc9}
+.chip.wait{background:#fdf3e5;color:#8a5a17;border-color:#ecd9bb}
+.chip.off{background:#f2f4f2;color:#7c8b82;border-color:#e2e8e3}
+.chip.ro{background:#eef3f8;color:#2c6390;border-color:#d6e2ee}
+.chip.rw{background:#fdf3e5;color:#8a5a17;border-color:#ecd9bb}
+.tag{display:inline-block;border:1px solid #e1e8e3;background:#f7faf7;color:#6c7f73;border-radius:5px;padding:0 5px;font-size:9px;vertical-align:middle}
+.dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;background:#b9c6bd}
+.dot.ok{background:#2f8a68}
+.dot.err{background:#bb4a38}
+.dot.wait{background:#d09a3c}
+.dot.live{background:#2f8a68;box-shadow:0 0 0 4px #176b5522;animation:pulse 1.5s infinite}
+.dot.idle{background:#b9c6bd}
+@keyframes pulse{50%{box-shadow:0 0 0 7px #176b550d}}
+/* ---------- dialogs ---------- */
+dialog{position:fixed;top:calc(var(--top) + 12px);left:50%;transform:translateX(-50%);margin:0;border:1px solid #dde7e0;border-radius:18px;padding:0;width:min(960px,94vw);max-height:calc(100dvh - var(--top) - 24px);box-shadow:0 30px 80px #172e2733;color:var(--ink);background:#fdfefd;overflow:hidden}
+dialog[open]{display:flex;flex-direction:column}
+dialog::backdrop{background:#172e2736}
+.dlg-head{display:flex;align-items:flex-start;gap:10px;padding:16px 20px 10px;border-bottom:1px solid var(--line)}
+.dlg-head h2{font-size:17px;line-height:1.4}
+.dlg-head .sub{margin-top:2px;max-width:640px}
+.dlg-head .x{margin-left:auto;border:0;background:none;font-size:20px;line-height:1;color:#7d8f83;padding:2px 7px;border-radius:8px}.dlg-head .x:focus,.drawer-head .x:focus,.sheet-head .x:focus{outline:none}
+.tabs{display:flex;gap:2px;padding:0 20px;border-bottom:1px solid var(--line);background:#fbfcfb;flex:0 0 auto}
+.tabs button{border:0;background:none;padding:9px 12px;font-size:12px;color:#6b7f74;border-bottom:2px solid transparent;white-space:nowrap}
+.tabs button.on{color:#1e5a44;border-bottom-color:var(--green);font-weight:600}
+.dlg-body{padding:15px 20px 20px;overflow:auto;flex:1;min-height:0}
+/* ---------- agent list ---------- */
+.grid2{display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px;align-items:start}
+.list-pane{border-right:1px solid var(--line);padding-right:14px;min-width:0}
+.list-head{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.list-head b{font-size:12.5px}
+.list-head .sub{margin-left:auto}
+.agent-row{display:flex;align-items:flex-start;gap:8px;width:100%;border:1px solid #e6ece7;background:#fff;border-radius:11px;padding:8px 10px;margin-bottom:6px;text-align:left;min-width:0}
+.agent-row:hover{background:#f7fbf8}
+.agent-row.on{border-color:#bcd7c5;background:#f0f8f2;box-shadow:inset 0 0 0 1px #bcd7c5}
+.agent-row .dot{margin-top:7px}
+.amain{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+.amain b{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.amain small{font-size:9.5px;color:#7c8c82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aside{font-size:9.5px;color:#8b9a90;white-space:nowrap;margin-top:2px}
+.detail-pane{min-width:0}
+.detail-head{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.dh-main{flex:1;min-width:0}
+.dh-main h3{font-size:15px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dh-main .sub{margin-top:2px;overflow-wrap:anywhere}
+.dh-actions{display:flex;gap:6px;flex-wrap:wrap}
+.subtabs{display:flex;gap:3px;margin:4px 0 12px;border-bottom:1px solid var(--line)}
+.subtabs button{border:0;background:none;padding:6px 10px;font-size:11.5px;color:#6b7f74;border-bottom:2px solid transparent}
+.subtabs button.on{color:#1e5a44;border-bottom-color:var(--green);font-weight:600}
+.back-mobile{display:none}
+/* ---------- status / blocks ---------- */
+.status-card{border:1px solid #dfe8e1;background:#fff;border-radius:12px;padding:11px 13px;display:flex;flex-direction:column;gap:5px}
+.status-card.ok{border-left:3px solid #2f8a68}
+.status-card.err{border-left:3px solid var(--red);background:#fffdfc}
+.status-card.wait{border-left:3px solid #d09a3c}
+.status-card.idle{border-left:3px solid #c3cec6}
+.sc-line{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px}
+.sc-line .sub{margin-left:auto}
+.kv{display:flex;gap:8px;font-size:10.5px;color:#6d8176;line-height:1.7}
+.kv span{flex:0 0 58px;color:#93a39a}
+.kv b{font-weight:500;color:#405a4c;overflow-wrap:anywhere}
+.note{font-size:10.5px;color:#7b8c82;margin:4px 0 0;overflow-wrap:anywhere}
+.note.amber{color:#8a5a17;background:#fdf6ec;border:1px solid #efdfc6;border-radius:8px;padding:5px 8px}
+.rec{font-size:10.5px;color:#5f7568;background:#f3f8f4;border-radius:8px;padding:5px 8px;overflow-wrap:anywhere}
+.rec b{color:#2e5b46}
+.progress{height:5px;border-radius:4px;background:#edf2ee;overflow:hidden;margin-top:3px}
+.progress i{display:block;height:100%;background:linear-gradient(90deg,#c48a2f,#e0b563);border-radius:4px}
+.block{border:1px solid #dfe8e1;background:#fff;border-radius:12px;padding:10px 12px;margin-top:10px;min-width:0}
+.block-head{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.block-head b{font-size:12px}
+.block-head .sub{color:#8b9a90;font-size:9.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.block-head .btn{margin-left:auto}
+.tool-list{display:flex;flex-direction:column;gap:3px;margin-top:4px}
+.tool-row{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:7px;background:#fbfdfb;min-width:0}
+.tool-row code{color:#2d5b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.tool-row .src{font-size:9px;color:#93a39a;white-space:nowrap}
+.empty-mini{font-size:11px;color:#8b9a90;border:1px dashed #dde7e0;border-radius:9px;padding:12px;text-align:center;margin-top:4px}
+/* ---------- form ---------- */
+.form{display:flex;flex-direction:column;gap:12px}
+.field{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+.field>.btn{align-self:flex-start}
+.field>label{font-size:11px;color:#4d6959}
+.field input[type=text],.field input[type=password],.field input:not([type]){padding:7px 10px;border:1px solid #d7e1d9;border-radius:8px;background:#fff;font-size:12.5px;width:100%}
+.field input:focus{outline:2px solid #bcd7c5;outline-offset:-1px}
+.field .hint{margin:0}
+.field.check label{display:flex;align-items:flex-start;gap:7px;font-size:11.5px;color:#4d6959}
+.field.check input{width:auto;margin-top:4px}
+.hint{font-size:9.5px;color:#8b9a90;line-height:1.7;margin:0}
+.seg2{display:flex;gap:6px;flex-wrap:wrap}
+.seg2 label{border:1px solid #dbe5dd;border-radius:9px;padding:5px 10px;font-size:11px;color:#5f7568;display:flex;align-items:center;gap:5px;background:#fff}
+.seg2 label.on{border-color:#bcd7c5;background:#f0f8f2;color:#286149}
+.seg2 input{display:none}
+.env-row{display:flex;gap:6px}
+.env-row input{flex:1;min-width:0}
+.form-foot{display:flex;align-items:center;gap:7px;flex-wrap:wrap;border-top:1px dashed #e5ebe6;padding-top:10px}
+.form-foot .hint{margin-left:auto}
+/* ---------- drawer ---------- */
+.scrim{position:fixed;inset:var(--top) 0 0 0;background:#172e2740;z-index:60;opacity:0;pointer-events:none;transition:opacity .18s}
+body.drawer-open .scrim{opacity:1;pointer-events:auto}
+#drawer{position:fixed;top:var(--top);right:0;bottom:0;width:min(410px,94vw);background:#fbfcfb;border-left:1px solid var(--line);z-index:70;transform:translateX(103%);transition:transform .22s ease;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+body.drawer-open #drawer{transform:none}
+@media (min-width:751px){body.drawer-open main{margin-right:410px;transition:margin .22s ease}body.drawer-open .scrim{opacity:0;pointer-events:none}}
+.drawer-head{display:flex;align-items:center;gap:8px;padding:13px 14px 7px}
+.drawer-head h3{font-size:14.5px}
+.drawer-head .sub{font-size:9.5px}
+.drawer-head .x{margin-left:auto;border:0;background:none;font-size:19px;color:#7d8f83;line-height:1}
+.drawer-tabs{display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--line)}
+.drawer-tabs button{border:0;background:none;padding:7px 9px;font-size:11px;color:#6b7f74;border-bottom:2px solid transparent}
+.drawer-tabs button.on{color:#1e5a44;border-bottom-color:var(--green);font-weight:600}
+.drawer-body{flex:1;overflow:auto;padding:11px 13px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.drawer-foot{border-top:1px solid var(--line);padding:7px 13px;font-size:9.5px;color:#8b9a90;line-height:1.6}
+.drawer-detail{display:flex;flex-direction:column;gap:8px;min-width:0}
+.dh{display:flex;align-items:center;gap:7px}
+.dh .grow{flex:1}
+.drawer-detail h3{font-size:14px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.row-btns{display:flex;gap:6px;flex-wrap:wrap}
+.taskcard{border:1px solid #dfe8e1;background:#fff;border-radius:12px;padding:10px 12px;font-size:11px;color:#5f7568}
+/* ---------- sheet ---------- */
+#sheet{position:fixed;top:var(--top);right:0;bottom:0;width:min(440px,96vw);background:#fff;border-left:1px solid var(--line);z-index:90;transform:translateX(103%);transition:transform .2s ease;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+body.sheet-open #sheet{transform:none}
+.sheet-head{display:flex;align-items:center;gap:8px;padding:13px 15px 9px;border-bottom:1px solid var(--line)}
+.sheet-head h3{font-size:14px}
+.sheet-head .x{margin-left:auto;border:0;background:none;font-size:19px;color:#7d8f83;line-height:1}
+.sheet-body{flex:1;overflow:auto;padding:13px 15px 20px}
+#sheet-scrim{position:fixed;inset:var(--top) 0 0 0;background:#172e2740;z-index:85;opacity:0;pointer-events:none;transition:opacity .18s}
+body.sheet-open #sheet-scrim{opacity:1;pointer-events:auto}
+@media (min-width:751px){body.sheet-open .scrim{opacity:0;pointer-events:none}}
+/* ---------- misc ---------- */
+.empty-state{border:1px dashed #d7e3da;border-radius:14px;background:#fbfdfb;padding:26px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:7px}
+.empty-state .mark{font-size:26px;color:#7fae94}
+.empty-state h4{font-size:14px}
+.empty-state p{font-size:11px;color:#7d8e84;margin:0;max-width:380px;line-height:1.8}
+.empty-state .hint{max-width:370px}
+.mrtr{margin-top:10px}
+.switch-row{display:flex;align-items:flex-start;gap:8px;font-size:11px;color:#4d6959;margin-top:6px;flex-wrap:wrap}
+.switch-row label{display:flex;align-items:flex-start;gap:6px;flex:1;min-width:0}
+.switch-row input{width:auto;margin-top:4px}
+.switch-row .btn{margin-left:auto}
+.chips{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.banner{border:1px solid #d9e6dd;background:#f2f8f4;border-radius:11px;padding:8px 11px;font-size:10.5px;color:#53705f;line-height:1.75;margin-bottom:11px}
+.banner b{color:#2e5b46}
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,14px);background:#172e27;color:#eaf6ef;border-radius:10px;padding:8px 14px;font-size:11.5px;opacity:0;pointer-events:none;transition:.2s;z-index:400;max-width:86vw;text-align:center}
+body.toasting .toast{opacity:1;transform:translate(-50%,0)}
+/* ---------- mobile ---------- */
+@media (max-width:750px){
+  .rail{display:none}
+  header{height:52px;flex-basis:52px;padding:0 13px}
+  header .title{font-size:14px}
+  header .title span{display:none}
+  #messages{padding:16px 13px}
+  .composer-area{padding:6px 13px 10px}
+  .proto{justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;gap:7px}
+  .proto .lbl{display:none}
+  .back-mobile{display:inline-flex}
+  .proto .proto-title,.proto .proto-sep{display:none}
+  dialog{top:0;left:0;transform:none;width:100vw;max-width:100vw;height:100dvh;max-height:none;margin:0;border:0;border-radius:0}
+  .dlg-head{padding:12px 14px 8px}
+  .dlg-body{padding:10px 14px 16px;max-height:none}
+  .tabs{padding:0 10px;overflow-x:auto}
+  .grid2{grid-template-columns:1fr}
+  .grid2[data-view="list"] .detail-pane{display:none}
+  .grid2[data-view="detail"] .list-pane{display:none}
+  .list-pane{border-right:0;padding-right:0}
+  .detail-head{gap:7px}
+  #drawer{width:100%;top:auto;height:76dvh;border-left:0;border-top:1px solid var(--line);border-radius:16px 16px 0 0;padding-top:5px}
+  body.drawer-open main{margin-right:0}
+  #sheet{width:100%;top:var(--top);left:0;right:0;border-left:0}
+  .form-foot{padding-bottom:8px}
+}
+</style>
+</head>
+<body>
+<div class="proto">
+  <span class="lbl">原型 #24</span>
+  <span class="proto-title">外部 Agent · 配置 / 连接状态 / 工具 / MRTR</span>
+  <span class="proto-sep"></span>
+  <span class="lbl">形态</span>
+  <div class="seg" id="proto-variant"></div>
+  <span class="lbl">状态</span>
+  <select id="proto-state">
+    <option value="native">按各 Agent 实际</option>
+    <option value="modern">已连接 · modern</option>
+    <option value="legacy">已连接 · legacy</option>
+    <option value="recycled">已回收</option>
+    <option value="connecting">连接中</option>
+    <option value="idle">未连接</option>
+    <option value="queued">排队中</option>
+    <option value="failed-auth">失败 · AUTH_FAILED</option>
+    <option value="failed-connect">失败 · CONNECT_FAILED</option>
+    <option value="failed-negotiation">失败 · ERA_NEGOTIATION_FAILED</option>
+    <option value="discovery-failed">工具发现失败</option>
+    <option value="empty">没有 Agent</option>
+  </select>
+  <span class="lbl">身份</span>
+  <div class="seg" id="proto-owner"></div>
+  <button class="link" data-act="about">说明</button>
+</div>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand">✧ 职向<small>YOUR CAREER AGENT</small></div>
+    <button class="entry">＋ 新的求职对话</button>
+    <button class="entry">⇄ 登录型网站</button>
+    <button class="entry">▦ 招聘日历 / 行程表</button>
+    <div class="sessions">
+      <button class="on">西南财大双选会</button>
+      <button>实习方向梳理</button>
+    </div>
+    <div class="foot">
+      <button class="linkbtn" data-act="open-settings">模型与接口设置</button>
+      <div id="foot-hint"></div>
+      <button class="linkbtn">退出账号</button>
+      <small>资料保存在本机；任务内容会发送至你选择的模型服务。</small>
+    </div>
+  </aside>
+  <main>
+    <header>
+      <div class="title">职向 <span>求职智能体</span></div>
+      <div class="right">
+        <button class="btn small" data-act="open-drawer">▤ 工作流 · 1</button>
+        <span class="pill">● 联网检索 · 求职规划</span>
+      </div>
+    </header>
+    <div id="messages">
+      <article class="msg user">帮我把西南财大双选会的截图整理进招聘项目。来源校对后自动写入就行，写敏感内容前先问我。</article>
+      <article class="msg assistant">
+        <div class="role">✧ 职向</div>
+        <div class="body">
+          <p>已读取你上传的 2 张双选会截图，校对后自动写入 <b>9 条招聘项目</b>（公司、岗位、时间、投递方式）。</p>
+          <p>本次执行走本机 <b>Claude Code</b>（stdio · 已连接 modern）。写入已记入审计，可整批撤销；敏感正文没有写入。</p>
+          <p class="sub">执行记录：截图识别 → 来源校对 → 写入 9 条 · 09:41–09:56</p>
+        </div>
+      </article>
+    </div>
+    <div class="composer-area">
+      <div class="composer">
+        告诉我你的求职需求，或上传简历开始……
+        <div class="bar"><span>＋</span><span class="send">↑</span></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<dialog id="settings">
+  <div class="dlg-head">
+    <div><h2 id="dlg-title">模型与接口</h2><p class="sub" id="dlg-sub"></p></div>
+    <button class="x" data-act="close-settings" aria-label="关闭">×</button>
+  </div>
+  <div class="tabs" id="dlg-tabs"></div>
+  <div class="dlg-body" id="dlg-body"></div>
+</dialog>
+
+<div class="scrim" data-act="close-drawer"></div>
+<aside id="drawer">
+  <div class="drawer-head">
+    <h3>工作流</h3><span class="sub">来源校对 · 西南财大双选会</span>
+    <button class="x" data-act="close-drawer" aria-label="关闭">×</button>
+  </div>
+  <div class="drawer-tabs" id="drawer-tabs"></div>
+  <div class="drawer-body" id="drawer-body"></div>
+  <div class="drawer-foot" id="drawer-foot"></div>
+</aside>
+
+<div id="sheet-scrim" data-act="close-sheet"></div>
+<aside id="sheet">
+  <div class="sheet-head"><h3>编辑配置</h3><button class="x" data-act="close-sheet" aria-label="关闭">×</button></div>
+  <div class="sheet-body" id="sheet-body"></div>
+</aside>
+
+<dialog id="cost">
+  <div class="dlg-head"><div><h2>首次采样前提示</h2><p class="sub">来自 Claude Code 的 sampling 请求</p></div><button class="x" data-act="close-cost" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <p style="font-size:12.5px;margin:0 0 8px">这个外部 Agent 请求用你的模型补全一段内容，本应用会自动完成，然后继续它的工具调用。</p>
+    <div class="status-card ok" style="margin-bottom:10px">
+      <div class="kv"><span>使用模型</span><b>deepseek-chat · API · DeepSeek 官方</b></div>
+      <div class="kv"><span>单次上限</span><b>2 048 tokens · 30 秒</b></div>
+      <div class="kv"><span>费用</span><b>按实际用量计入你的 API 费用（估算）</b></div>
+      <div class="kv"><span>记录</span><b>请求内容写任务证据（截断），不进对话</b></div>
+    </div>
+    <p class="hint" style="margin-bottom:12px">提示只在一个 Agent 第一次采样前出现一次。这里关闭采样，上游请求会被拒绝（UNSUPPORTED）。</p>
+    <div class="row-btns"><button class="btn primary" data-act="close-cost">允许本次采样</button><button class="btn ghost" data-act="close-cost">不允许（拒绝上游）</button></div>
+  </div>
+</dialog>
+
+<dialog id="about">
+  <div class="dlg-head"><div><h2>这个原型在问什么</h2><p class="sub">#24 · 外部 Agent 的配置、连接状态与工具列表在网页端怎么呈现</p></div><button class="x" data-act="close-about" aria-label="关闭">×</button></div>
+  <div class="dlg-body">
+    <p style="font-size:12px;line-height:1.9;margin:0 0 10px">三个形态只换「放哪、怎么分级」，共用同一套内容：配置表单、连接状态、工具列表、MRTR 开关、空 / 失败状态。顶栏可切形态、切状态（失败码、排队、回收、没有 Agent）、切身份（owner / 成员，成员看不到 stdio）。</p>
+    <div class="tool-list">
+      <div class="tool-row"><code>A · 设置页</code><span class="src">配置 + 状态 + 工具都在现有「模型与接口设置」对话框；对话页只留入口和提示</span></div>
+      <div class="tool-row"><code>B · 工作流抽屉</code><span class="src">全部进 #18 的右侧抽屉；设置只留模型，连接编辑在抽屉里的第二层</span></div>
+      <div class="tool-row"><code>C · 两处分工</code><span class="src">设置管配置（CRUD / 凭据 / MRTR），抽屉管运行时（状态 / 工具 / 测试 / 刷新）</span></div>
+    </div>
+    <p class="hint" style="margin-top:10px">双击本文件即可跑；无构建、无请求、状态只在内存里。链接里的参数：<code>?variant=A|B|C&amp;state=modern|failed-auth|…&amp;owner=1|0</code>。</p>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+<script>
+const VARIANT_NAMES={A:'设置页',B:'工作流抽屉',C:'两处分工'};
+const FOOT={
+  A:'外部 Agent 也在「模型与接口设置」里：配置、状态、工具同一处。',
+  B:'外部 Agent 在「工作流」面板里；设置只留模型。',
+  C:'配置在「模型与接口设置」，状态与工具在「工作流 › 外部 Agent」。'
+};
+const BASE=[
+  {id:'claude-code',name:'Claude Code',transport:'stdio',command:'claude',args:['mcp','serve'],enabled:true,era:'modern',serverInfo:'claude-mcp 2.1.207',latency:412,lastConnected:'今天 09:41',env:[],mrtr:{sampling:true,elicitation:true},
+   tools:[['search_files',true],['read_file',true],['list_sources',true],['write_note',false],['export_markdown',false]]},
+  {id:'dify',name:'Dify · 简历助手',transport:'http',url:'https://dify.example.com/mcp',masked:'https://dify.example.com/mcp…',enabled:true,era:'legacy',serverInfo:'dify-mcp 0.9.2',latency:1180,lastConnected:'昨天 22:10',recycled:true,tokenSaved:true,mrtr:{sampling:true,elicitation:false},
+   tools:[['search_jobs',true],['read_resume',true],['match_score',true],['fetch_page',true],['list_projects',true],['write_note',false],['update_project',false],['export_markdown',false]]},
+  {id:'coze',name:'Coze',transport:'stdio',command:'uvx',args:['coze-mcp-server'],enabled:false,lastConnected:'',env:[{k:'COZE_API_TOKEN',v:'已保存（KeyVault）'}],mrtr:{sampling:true,elicitation:true},
+   lastError:{code:'AUTH_FAILED',message:'401 Unauthorized：上游拒绝了 COZE_API_TOKEN',recovery:'在配置里更新 COZE_API_TOKEN 后重试；连接按 1s→5s→30s 退避，最多 3 次/10 分钟。'},tools:[]}
+];
+const S={variant:'A',demo:'native',owner:true,settingsTab:'agents',settingsOpen:false,drawerOpen:false,drawerTab:'agent',selected:'claude-code',agentView:'list',agentTab:'status',drawerView:'list',sheetOpen:false,adding:false,connectingId:null,form:null};
+const $=q=>document.querySelector(q);
+const esc=v=>String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const splitArgs=s=>String(s||'').split(/\s+/).filter(Boolean);
+const slug=s=>String(s||'').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,24)||'agent';
+function maskUrl(u){try{const x=new URL(u);const p=(x.pathname||'/').slice(0,24);return x.origin+p+(u.length>26?'…':'')}catch(e){return u}}
+function agentById(id){return BASE.find(a=>a.id===id)}
+function visibleAgents(){
+  let list=BASE.slice();
+  if(!S.owner) list=list.filter(a=>a.transport!=='stdio');
+  if(S.demo==='empty') list=[];
+  return list;
+}
+function selectedAgent(){const a=agentById(S.selected);return a&&visibleAgents().includes(a)?a:visibleAgents()[0]||null}
+function pickDefault(){if(!S.owner){const http=BASE.find(a=>a.transport!=='stdio');if(http)S.selected=http.id}}
+const DEMO_STATE={
+  modern:{kind:'connected',era:'modern',at:'刚刚'},
+  legacy:{kind:'connected',era:'legacy',at:'刚刚'},
+  recycled:{kind:'recycled',era:'legacy',at:'昨天 22:10'},
+  connecting:{kind:'connecting'},
+  idle:{kind:'idle'},
+  queued:{kind:'queued'},
+  'failed-auth':{kind:'failed',code:'AUTH_FAILED',message:'401 Unauthorized：上游拒绝了凭据',recovery:'更新 Bearer token 或自定义 header；401 不做自动刷新（本应用不实现 OAuth）。'},
+  'failed-connect':{kind:'failed',code:'CONNECT_FAILED',message:'spawn claude 失败：ENOENT',recovery:'确认命令是绝对路径或 PATH 可解析；换一个可执行文件后重试。'},
+  'failed-negotiation':{kind:'failed',code:'ERA_NEGOTIATION_FAILED',message:'探测响应不可识别：上游不是 MCP server',recovery:'确认上游支持 MCP 与 Streamable HTTP；换传输或换入口后再试。'},
+  'discovery-failed':{kind:'failed',code:'UPSTREAM_ERROR',message:'tools/list 返回 500',recovery:'连接已建立，但工具发现失败；按契约不返回半截列表，先看上游日志再重试。',discovery:true}
+};
+function naturalStatus(a){
+  if(!a)return{kind:'idle'};
+  if(a.recycled)return{kind:'recycled',era:a.era,at:a.lastConnected};
+  if(a.lastError)return{kind:'failed',...a.lastError};
+  return{kind:'connected',era:a.era||'modern',at:a.lastConnected};
+}
+function statusOf(a){
+  if(!a)return{kind:'idle'};
+  if(S.connectingId===a.id)return{kind:'connecting'};
+  if(S.demo!=='native'&&a.id===S.selected&&DEMO_STATE[S.demo])return{...DEMO_STATE[S.demo]};
+  return naturalStatus(a);
+}
+function statusLabel(st){
+  if(st.kind==='connected')return'已连接 · '+(st.era||'modern');
+  if(st.kind==='failed')return'失败 · '+st.code;
+  if(st.kind==='recycled')return'已回收';
+  if(st.kind==='queued')return'排队中';
+  if(st.kind==='connecting')return'连接中…';
+  return'未连接';
+}
+function dotCls(st){return st.kind==='connected'?'ok':st.kind==='failed'?'err':st.kind==='queued'?'wait':st.kind==='connecting'?'live':'idle'}
+function statusChip(st){return '<span class="chip '+(st.kind==='connected'?'ok':st.kind==='failed'?'err':st.kind==='queued'?'wait':'off')+'">'+esc(statusLabel(st))+'</span>'}
+
+/* ---------- builders ---------- */
+function agentRow(a){
+  const st=statusOf(a);
+  return '<button class="agent-row '+(S.selected===a.id?'on':'')+'" data-act="select" data-id="'+a.id+'">'+
+    '<span class="dot '+dotCls(st)+'"></span>'+
+    '<span class="amain"><b>'+esc(a.name)+'</b><small><span class="tag">'+a.transport+'</span> '+esc(statusLabel(st))+(a.lastConnected?' · '+esc(a.lastConnected):'')+'</small></span>'+
+    '<span class="aside">'+(a.tools||[]).length+' 工具</span></button>';
+}
+function bigStatus(st){
+  if(st.kind==='connected'){
+    return '<div class="chip ok" style="padding:2px 10px">● '+esc(statusLabel(st))+'</div>';
+  }
+  if(st.kind==='failed')return '<span class="chip err">● 失败 · '+esc(st.code)+'</span>';
+  if(st.kind==='recycled')return '<span class="chip off">○ 已回收</span>';
+  if(st.kind==='queued')return '<span class="chip wait">◷ 排队中</span>';
+  if(st.kind==='connecting')return '<span class="chip wait">◌ 连接中…</span>';
+  return '<span class="chip off">○ 未连接</span>';
+}
+function statusCard(a,st){
+  if(st.kind==='connected'){
+    const era=st.era||a.era||'modern';
+    return '<div class="status-card ok">'+
+      '<div class="sc-line">'+bigStatus(st)+'<span class="sub">'+(a.lastConnected?'最近连接 '+esc(a.lastConnected):'刚刚连接')+'</span></div>'+
+      '<div class="kv"><span>上游</span><b>'+esc(a.serverInfo||'—')+'</b></div>'+
+      '<div class="kv"><span>协商</span><b>auto · '+(a.latency||'—')+' ms · 探测 '+(era==='modern'?'server/discover':'initialize')+'</b></div>'+
+      '<div class="kv"><span>空闲</span><b>空闲 30 分钟回收；下次调用自动重连</b></div>'+
+      (era==='legacy'?'<p class="note amber">上游未支持 2026-07-28：已回退 initialize（legacy 时代），功能照用。</p>':'')+
+    '</div>';
+  }
+  if(st.kind==='connecting'){
+    return '<div class="status-card wait"><div class="sc-line">'+bigStatus(st)+'<span class="sub">开始 '+esc(a.name)+'</span></div>'+
+      '<div class="kv"><span>步骤</span><b>1 / 3 · 探测传输与时代（stdio 用一次性兄弟进程跑 server/discover）</b></div>'+
+      '<div class="progress"><i style="width:38%"></i></div>'+
+      '<p class="note">连接是懒建的：第一次调用或「测试连接」才会起；之后常驻、空闲 30 分钟回收。</p></div>';
+  }
+  if(st.kind==='recycled'){
+    return '<div class="status-card idle"><div class="sc-line">'+bigStatus(st)+'<span class="sub">'+(a.lastConnected?'上次连接 '+esc(a.lastConnected):'')+'</span></div>'+
+      '<div class="kv"><span>原因</span><b>空闲 30 分钟，连接与子进程已关闭</b></div>'+
+      '<div class="kv"><span>下次</span><b>调用时自动重连；工具列表走 10 分钟缓存，过期后重新发现</b></div>'+
+      '<p class="note">不需要手动恢复；「测试连接」只做 connect + 发现，不调用工具。</p></div>';
+  }
+  if(st.kind==='queued'){
+    return '<div class="status-card wait"><div class="sc-line">'+bigStatus(st)+'<span class="sub">在途 2 / 2 · 每用户上限 2，全局 8</span></div>'+
+      '<div class="kv"><span>等待</span><b>38 s / 上限 120 s（超时 QUEUE_TIMEOUT）</b></div>'+
+      '<div class="progress"><i style="width:32%"></i></div>'+
+      '<p class="note">排队的是调用，不是连接：同一连接内多路复用；排队时仍可用发现缓存里的工具名。</p></div>';
+  }
+  if(st.kind==='failed'){
+    return '<div class="status-card err"><div class="sc-line">'+bigStatus(st)+'<span class="sub">'+esc(a.name)+'</span></div>'+
+      '<div class="kv"><span>错误</span><b>'+esc(st.message)+'</b></div>'+
+      '<div class="rec"><b>恢复</b> '+esc(st.recovery)+'</div>'+
+      (st.discovery?'<p class="note">连接已建立，但 tools/list 失败：按契约发现失败即连接失败，不返回半截工具列表。</p>':'')+
+      '<div class="row-btns" style="margin-top:4px"><button class="btn" data-act="test">重试连接</button><button class="btn ghost" data-act="config">更新凭据</button></div></div>';
+  }
+  return '<div class="status-card idle"><div class="sc-line">'+bigStatus(st)+'<span class="sub">'+(a.enabled?'已启用，还没连接过':'已停用')+'</span></div>'+
+    '<div class="kv"><span>说明</span><b>懒连接：第一次调用或「测试连接」才建立；不会在后台空跑</b></div>'+
+    '<p class="note">停用后从工具面板撤下；已连接会被断开并回收进程。</p></div>';
+}
+function toolsBlock(a,st){
+  const n=(a.tools||[]).length;
+  const list='<div class="tool-list">'+(a.tools||[]).map(t=>'<div class="tool-row"><code>mcp__'+a.id+'__'+esc(t[0])+'</code><span class="chip '+(t[1]?'ro':'rw')+'">'+(t[1]?'只读':'写')+'</span><span class="src">'+esc(a.name)+'</span></div>').join('')+'</div>';
+  const head='<div class="block-head"><b>工具</b><span class="sub">'+n+' 个 · mcp__'+a.id+'__…</span><button class="btn ghost" data-act="refresh">刷新</button></div>';
+  if(st.kind==='failed'){
+    return '<div class="block">'+head+'<div class="empty-mini">连接失败：工具列表不可用。修复后点「测试连接」重新发现；这不是空工具列表。</div></div>';
+  }
+  if(st.kind==='idle'){
+    return '<div class="block">'+head+'<div class="empty-mini">还没连接：连接成功后自动 listTools；缓存 10 分钟，任务开始时 pin 快照。</div></div>';
+  }
+  if(st.kind==='connecting'){
+    return '<div class="block">'+head+'<div class="empty-mini">连接中：发现会在连接建立后开始……</div></div>';
+  }
+  return '<div class="block">'+head+list+
+    (st.kind==='recycled'?'<p class="note">连接已回收，下面是上次发现留下的缓存；缓存过期后会重新发现，旧工具名不保证还能用。</p>':'')+
+    (st.kind==='queued'?'<p class="note">调用在排队；工具面用本次任务开始时的快照，中途不随上游增删变化。</p>':'')+
+    '<p class="note">读 / 写来自上游 annotations（readOnlyHint 缺省按写），只用于分级，不是授权。</p></div>';
+}
+function mrtrEditable(mrtr,opts){
+  const agent=opts&&opts.agent;
+  const editable=opts&&opts.editable;
+  const attr=k=>(editable?(agent?'data-agent-mrtr="'+k+'"':'data-form-mrtr="'+k+'"'):'disabled');
+  return '<div class="mrtr">'+
+    '<div class="switch-row"><label><input type="checkbox" '+attr('sampling')+' '+(mrtr.sampling?'checked':'')+'> <span><b>sampling</b> · 允许上游请求模型补全</span></label>'+
+      (editable?'<button class="btn ghost" data-act="cost">首次采样提示</button>':'')+'</div>'+
+    '<p class="hint">默认开。首次对某 Agent 采样前提示「将使用你的模型，可能产生费用」；关闭后上游请求被拒绝（UNSUPPORTED）。</p>'+
+    '<div class="switch-row"><label><input type="checkbox" '+attr('elicitation')+' '+(mrtr.elicitation?'checked':'')+'> <span><b>elicitation</b> · 允许上游弹表单</span></label></div>'+
+    '<p class="hint">表单在聊天页弹出（标题「来自 '+esc(agent?agent.name:'<agent>')+' 的请求」），5 分钟超时，不预填任何用户数据；关闭后拒绝。</p>'+
+  '</div>';
+}
+function mrtrChips(a){
+  return '<div class="chips"><span class="chip '+(a.mrtr.sampling?'ok':'off')+'">sampling '+(a.mrtr.sampling?'开':'关')+'</span><span class="chip '+(a.mrtr.elicitation?'ok':'off')+'">elicitation '+(a.mrtr.elicitation?'开':'关')+'</span><span class="sub">配置里改</span></div>';
+}
+function formFor(a){
+  return{__key:a?a.id:'__new',name:a?a.name:'',transport:a?a.transport:(S.owner?'stdio':'http'),command:a?a.command||'':'',args:a?(a.args||[]).join(' '):'',url:a?(a.masked||a.url||''):'',lan:false,enabled:a?a.enabled:true,token:'',header:a?a.header||'':'',mrtr:{sampling:a?a.mrtr.sampling:true,elicitation:a?a.mrtr.elicitation:true},env:(a&&a.env?a.env:[]).map(e=>({...e}))};
+}
+function formState(a){if(!S.form||S.form.__key!==(a?a.id:'__new'))S.form=formFor(a);return S.form}
+function formHtml(a,opts){
+  const f=formState(a);
+  const stdio=f.transport==='stdio';
+  const envRows=(f.env||[]).map((e,i)=>'<div class="env-row"><input data-env="'+i+'-k" value="'+esc(e.k)+'" placeholder="变量名，如 COZE_API_TOKEN"><input data-env="'+i+'-v" value="'+esc(e.v)+'" placeholder="值（保存后只显示掩码）"></div>').join('');
+  return '<form class="form" id="agent-form" onsubmit="return false">'+
+    '<div class="field"><label>名称（1–40 字，用户内唯一）</label><input data-field="name" value="'+esc(f.name)+'" placeholder="例如 Claude Code" maxlength="40"></div>'+
+    '<div class="field"><label>传输方式</label><div class="seg2">'+
+      '<label class="'+(stdio?'on':'')+'"><input type="radio" name="transport" value="stdio" data-form-transport="stdio" '+(stdio?'checked':'')+' '+(S.owner?'':'disabled')+'> stdio · 本机进程</label>'+
+      '<label class="'+(!stdio?'on':'')+'"><input type="radio" name="transport" value="http" data-form-transport="http" '+(!stdio?'checked':'')+'> HTTP · Streamable</label>'+
+    '</div><p class="hint">'+(S.owner?'stdio 仅 owner：等价于以服务器 OS 身份执行命令；子进程不继承 CAREER_*、模型 Key、代理。':(!S.owner?'成员身份：stdio 不显示、API 也会 400 拒绝（#14）；只能配 HTTP。':''))+'</p></div>'+
+    (stdio?
+      '<div class="field"><label>命令（绝对路径或 PATH 可解析）</label><input data-field="command" value="'+esc(f.command)+'" placeholder="claude"></div>'+
+      '<div class="field"><label>参数（空格分隔，shell: false）</label><input data-field="args" value="'+esc(f.args)+'" placeholder="mcp serve"></div>'+
+      '<div class="field"><label>环境变量</label>'+envRows+'<button type="button" class="btn ghost" data-act="add-env">＋ 添加环境变量</button><p class="hint">只注入这个 Agent；值存 KeyVault，界面只显示键名与掩码。</p></div>'
+      :
+      '<div class="field"><label>URL（Streamable HTTP）</label><input data-field="url" value="'+esc(f.url)+'" placeholder="https://…/mcp"><p class="hint">公网必须 HTTPS；URL 里的用户信息或查询串视为凭据，整体存 KeyVault，界面只显 scheme://host/path…</p></div>'+
+      '<div class="field check"><label><input type="checkbox" data-field="lan" '+(f.lan?'checked':'')+'> 允许局域网 HTTP（本机 / 私网地址）</label></div>'+
+      '<div class="field"><label>凭据</label><div class="seg2"><label class="on"><input type="radio" name="auth" checked> Authorization: Bearer</label><label><input type="radio" name="auth"> 自定义 header（X-API-Key 等）</label></div><input type="password" data-field="token" value="" placeholder="'+(a&&a.tokenSaved?'已保存 · 不会回显；留空则不修改':'粘贴 token（只存 KeyVault，不回显）')+'"><input data-field="header" value="'+esc(f.header)+'" placeholder="自定义 header 名（可选，如 X-API-Key）；留空走 Authorization: Bearer"><p class="hint">遇到 401 不做 OAuth 发现，直接报 AUTH_FAILED；每条请求从 KeyVault 取，不写进提示词 / trace / 证据。</p></div>')+
+    '<div class="field check"><label><input type="checkbox" data-field="enabled" '+(f.enabled?'checked':'')+'> 启用这个 Agent</label></div>'+
+    '<div class="field"><label>MRTR</label>'+mrtrEditable(f.mrtr,{editable:true})+'</div>'+
+    '<div class="form-foot"><button type="button" class="btn primary" data-act="save">保存</button>'+
+      (opts&&opts.adding?'':'<button type="button" class="btn" data-act="test">测试连接</button><button type="button" class="btn danger" data-act="delete">删除</button>')+
+      '<span class="hint">非密配置存 users/&lt;id&gt;/.data/agents.json；密钥进 KeyVault</span></div>'+
+  '</form>';
+}
+function statusPane(a){
+  const st=statusOf(a);
+  return statusCard(a,st)+toolsBlock(a,st)+
+    '<div class="block"><div class="block-head"><b>MRTR</b><span class="sub">Model-Requested Turn：采样与弹表单</span><button class="btn ghost" data-act="config">去配置</button></div>'+mrtrChips(a)+'<p class="note">默认都开；采样首次会提示费用。本应用自己的敏感写确认不走 MRTR。</p></div>';
+}
+function configPane(a){
+  return '<div class="banner">配置存 <b>users/&lt;id&gt;/.data/agents.json</b>，凭据进该用户的 <b>KeyVault</b>；一个用户最多 10 个 Agent。</div>'+formHtml(a,{});
+}
+function emptyState(withAdd){
+  return '<div class="empty-state"><div class="mark">◇</div><h4>还没有外部 Agent</h4>'+
+    '<p>外部 Agent 通过 MCP 连接：本机进程（stdio，仅 owner）或 Streamable HTTP。连上后可以把它的工具借给任务用。</p>'+
+    (withAdd?'<button class="btn primary" data-act="add">添加外部 Agent</button>':'')+
+    '<p class="hint">可连 Dify 应用、Coze 包装器、Claude Code（uvx coze-mcp-server / claude mcp serve）。</p></div>';
+}
+function listPane(){
+  const list=visibleAgents();
+  const head='<div class="list-head"><b>外部 Agent</b><span class="sub">'+list.length+' / 10</span></div>';
+  if(!list.length)return head+'<div class="empty-mini">还没有 Agent</div>';
+  if(!S.owner)return '<div class="banner">成员身份：只看到 <b>HTTP</b> Agent（每用户独立）；stdio 仅 owner 可配（#14）。</div>'+head+(list.length?list.map(agentRow).join(''):'<div class="empty-mini">还没有 HTTP Agent</div>')+'<button class="btn dashed" data-act="add" style="margin-top:7px">＋ 添加外部 Agent</button>';
+  if(!list.length)return head+'<div class="empty-mini">还没有 Agent</div>';
+  return head+list.map(agentRow).join('')+'<button class="btn dashed" data-act="add" style="margin-top:7px">＋ 添加外部 Agent</button>'+
+    '<p class="hint" style="margin-top:6px">stdio 仅 owner；HTTP 每用户独立。</p>';
+}
+function aPane(){
+  const a=selectedAgent();
+  const detail=!a?emptyState(true):
+    '<div class="detail-pane"><div class="detail-head"><button class="btn ghost back-mobile" data-act="back">← 全部</button><div class="dh-main"><h3>'+esc(a.name)+' <span class="tag">'+a.transport+'</span></h3><p class="sub">'+esc(a.transport==='stdio'?((a.command||'')+' '+(a.args||[]).join(' ')):(a.masked||a.url||''))+(a.lastConnected?' · 最近连接 '+esc(a.lastConnected):'')+'</p></div><div class="dh-actions"><button class="btn" data-act="test">测试连接</button></div></div>'+
+    '<div class="subtabs"><button data-act="agent-tab" data-k="status" class="'+(S.agentTab==='status'?'on':'')+'">状态与工具</button><button data-act="agent-tab" data-k="config" class="'+(S.agentTab==='config'?'on':'')+'">配置</button></div>'+
+    '<div class="detail-body">'+(S.agentTab==='config'?configPane(a):statusPane(a))+'</div></div>';
+  return '<div class="grid2" data-view="'+S.agentView+'"><div class="list-pane">'+listPane()+'</div>'+detail+'</div>';
+}
+function cPane(){
+  const a=selectedAgent();
+  const detail=!a?emptyState(true):'<div class="detail-pane">'+configPane(a)+'</div>';
+  return '<div class="banner">C · 设置只管<b>配置</b>：名称、传输、凭据、开关、MRTR。连接状态、工具列表、测试 / 刷新在「工作流 › 外部 Agent」。</div>'+
+    '<div class="grid2" data-view="'+S.agentView+'"><div class="list-pane">'+listPane()+'</div>'+detail+'</div>';
+}
+function modelPane(){
+  return '<div class="field"><label>执行后端</label><select><option>本机 Codex（当前登录）</option><option>API · 联网服务</option><option>本地模型 · Ollama / LM Studio</option></select></div>'+
+    '<div class="field" style="margin-top:10px"><label>接口基础地址</label><input value="https://api.deepseek.com"></div>'+
+    '<div class="field" style="margin-top:10px"><label>模型名</label><input value="deepseek-chat"></div>'+
+    '<div class="field" style="margin-top:10px"><label>API Key</label><input type="password" value="" placeholder="已保存 · 不会回显"></div>'+
+    '<p class="hint" style="margin-top:10px">'+(S.variant==='B'?'外部 Agent 在工作流面板里配置；这里只留模型。':(S.variant==='C'?'外部 Agent 的配置在同级的「外部 Agent」标签里；运行时状态在工作流面板。':'外部 Agent 在「外部 Agent」标签里：配置、状态、工具同一处。'))+'</p>'+
+    '<div class="row-btns" style="margin-top:12px"><button class="btn">测试接口</button><button class="btn primary">保存并用于后续任务</button></div>';
+}
+/* ---------- render ---------- */
+function renderProto(){
+  $('#proto-variant').innerHTML=['A','B','C'].map(v=>'<button data-act="variant" data-v="'+v+'" class="'+(S.variant===v?'on':'')+'">'+v+' · '+VARIANT_NAMES[v]+'</button>').join('');
+  $('#proto-owner').innerHTML=['1','0'].map(v=>'<button data-act="owner" data-v="'+v+'" class="'+((S.owner?'1':'0')===v?'on':'')+'">'+(v==='1'?'owner':'成员')+'</button>').join('');
+  $('#proto-state').value=S.demo;
+  $('#foot-hint').textContent=FOOT[S.variant];
+}
+function syncDialogs(){
+  const dlg=$('#settings');
+  if(S.settingsOpen&&!dlg.open)dlg.showModal();
+  if(!S.settingsOpen&&dlg.open)dlg.close();
+  document.body.classList.toggle('drawer-open',S.drawerOpen);
+  document.body.classList.toggle('sheet-open',S.sheetOpen);
+}
+function renderSettings(){
+  const dlg=$('#settings');
+  if(S.variant==='B'&&S.settingsTab==='agents')S.settingsTab='model';
+  const tabs=S.variant==='B'?[['model','模型与接口']]:[['model','模型与接口'],['agents','外部 Agent · '+BASE.length]];
+  $('#dlg-tabs').innerHTML=tabs.map(t=>'<button data-act="settings-tab" data-k="'+t[0]+'" class="'+(S.settingsTab===t[0]?'on':'')+'">'+t[1]+'</button>').join('');
+  $('#dlg-title').textContent=S.settingsTab==='agents'?'外部 Agent':'模型与接口';
+  $('#dlg-sub').textContent=S.settingsTab==='agents'
+    ?(S.variant==='C'?'配置只在这里改；状态与工具在对话页的工作流面板。':'配置、连接状态、工具列表与 MRTR 都在这一处。')
+    :'选择你要使用的模型与接口；外部 Agent 的位置随形态不同。';
+  $('#dlg-body').innerHTML=S.settingsTab==='agents'?(S.variant==='C'?cPane():aPane()):modelPane();
+}
+function drawerAgentList(){
+  const list=visibleAgents();
+  if(!list.length)return emptyState(true);
+  return list.map(agentRow).join('')+'<button class="btn dashed" data-act="add" style="margin-top:6px">＋ 添加外部 Agent</button><p class="hint">每用户最多 10 个；stdio 仅 owner。</p>';
+}
+function drawerTask(){
+  return '<div class="taskcard"><b>来源校对 · 西南财大双选会</b><br>已自动写入 9 条 · 可撤销 9 条 · 09:41–09:56<br><span class="sub">工作流面板见 #18；这里只借它的抽屉。</span></div>';
+}
+function drawerDetail(){
+  const a=selectedAgent();
+  if(!a)return emptyState(true);
+  const st=statusOf(a);
+  const cfgBtn=S.variant==='C'?'<button class="btn ghost" data-act="goto-config">去设置改配置</button>':'<button class="btn ghost" data-act="edit">编辑配置</button>';
+  return '<div class="drawer-detail"><div class="dh"><button class="btn ghost" data-act="back">← 全部</button><span class="grow"></span>'+cfgBtn+'</div>'+
+    '<h3>'+esc(a.name)+' '+statusChip(st)+'</h3><p class="sub">'+esc(a.transport==='stdio'?((a.command||'')+' '+(a.args||[]).join(' ')):(a.masked||a.url||''))+'</p>'+
+    statusCard(a,st)+
+    (S.variant==='C'
+      ?toolsBlock(a,st)+'<div class="block"><div class="block-head"><b>MRTR</b><button class="btn ghost" data-act="goto-config">去设置改</button></div>'+mrtrChips(a)+'<p class="note">开关归配置；这里只看当前值。</p></div>'
+      :toolsBlock(a,st)+'<div class="block"><div class="block-head"><b>MRTR</b><span class="sub">就放在运行时旁边</span></div>'+mrtrEditable(a.mrtr,{editable:true,agent:a})+'</div>')+
+    '<div class="row-btns"><button class="btn" data-act="test">测试连接</button><button class="btn ghost" data-act="refresh">刷新工具</button></div>'+
+  '</div>';
+}
+function renderDrawer(){
+  const tabs=S.variant==='A'?[['task','任务']]:[['task','任务'],['agent','外部 Agent']];
+  if(S.variant==='A'&&S.drawerTab==='agent')S.drawerTab='task';
+  $('#drawer-tabs').innerHTML=tabs.map(t=>'<button data-act="drawer-tab" data-k="'+t[0]+'" class="'+(S.drawerTab===t[0]?'on':'')+'">'+t[1]+'</button>').join('');
+  $('#drawer-body').innerHTML=S.drawerTab==='task'?drawerTask():(S.drawerView==='detail'?drawerDetail():drawerAgentList());
+  $('#drawer-foot').textContent=S.drawerTab==='task'?'任务状态与撤销入口见 #18。':(S.variant==='C'?'配置在「模型与接口设置 › 外部 Agent」；这里只看运行时。':'连接池 2 / 8 · 发现缓存 10 分钟 · 空闲 30 分钟回收。');
+}
+function renderSheet(){
+  if(!S.sheetOpen){$('#sheet-body').innerHTML='';return}
+  const a=selectedAgent();
+  $('#sheet-body').innerHTML=a?formHtml(a,{}):emptyState(false);
+}
+function render(){
+  pickDefault();
+  if(!selectedAgent()&&S.adding===false&&visibleAgents().length)S.selected=visibleAgents()[0].id;
+  renderProto();
+  syncDialogs();
+  renderSettings();
+  renderDrawer();
+  renderSheet();
+}
+/* ---------- actions ---------- */
+let testTimer=null,toastTimer=null;
+function toast(msg){
+  const t=$('#toast');t.textContent=msg;document.body.classList.add('toasting');
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>document.body.classList.remove('toasting'),2600);
+}
+function testConnection(){
+  const a=selectedAgent();if(!a){toast('没有 Agent 可测');return}
+  S.connectingId=a.id;if(!S.adding)S.agentTab='status';render();
+  clearTimeout(testTimer);
+  testTimer=setTimeout(()=>{
+    S.connectingId=null;const st=statusOf(a);render();
+    toast(st.kind==='connected'?('连接成功：'+st.era+' · 发现 '+(a.tools||[]).length+' 个工具'):st.kind==='recycled'?'已回收，未重新连接':'连接失败：'+st.code);
+  },1100);
+}
+function saveAgent(){
+  const f=S.form;if(!f)return;
+  if(!f.name.trim()){toast('名称必填（1–40 字）');return}
+  if(S.adding){
+    const id=slug(f.name);
+    BASE.push({id,name:f.name.trim(),transport:f.transport,command:f.command,args:splitArgs(f.args),url:f.url,masked:f.url?maskUrl(f.url):'',enabled:!!f.enabled,env:f.env||[],mrtr:{...f.mrtr},tools:[],lastConnected:''});
+    S.selected=id;S.adding=false;
+  }else{
+    const a=agentById(S.selected);if(!a)return;
+    a.name=f.name.trim();a.transport=f.transport;a.command=f.command;a.args=splitArgs(f.args);a.enabled=!!f.enabled;a.mrtr={...f.mrtr};a.env=f.env||[];a.header=f.header||'';
+    if(f.url){a.url=f.url;a.masked=maskUrl(f.url)}
+  }
+  S.form=null;S.agentTab='status';S.drawerView='list';
+  toast('已保存（原型只改内存，不落库）');render();
+}
+function deleteAgent(){
+  const i=BASE.findIndex(a=>a.id===S.selected);if(i<0)return;
+  BASE.splice(i,1);S.form=null;S.selected=(visibleAgents()[0]||{}).id||null;S.agentTab='status';S.sheetOpen=false;
+  toast('已删除（原型）');render();
+}
+function addAgent(){
+  S.adding=true;S.form=formFor(null);S.agentTab='config';S.agentView='detail';S.drawerView='detail';S.settingsOpen=true;S.settingsTab='agents';
+  S.drawerOpen=false;render();
+}
+function refreshTools(){
+  const a=selectedAgent();if(!a)return;
+  const st=statusOf(a);
+  if(st.kind==='connected'||st.kind==='queued'||st.kind==='recycled'){toast('已刷新：发现 '+(a.tools||[]).length+' 个工具（缓存 10 分钟）')}
+  else{toast('连接不可用：先测试连接')}
+}
+function openConfig(){
+  S.settingsOpen=true;S.settingsTab='agents';S.agentTab='config';S.agentView='detail';S.drawerOpen=false;
+  if(S.variant==='B'){S.sheetOpen=true}
+  render();
+}
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-act]');if(!t)return;
+  const act=t.dataset.act;
+  if(act==='variant'){S.variant=t.dataset.v;S.settingsOpen=S.variant==='A';S.drawerOpen=S.variant!=='A';S.drawerTab='agent';S.agentView='list';S.drawerView='list';S.sheetOpen=false;S.settingsTab=S.variant==='B'?'model':'agents';render()}
+  else if(act==='owner'){S.owner=t.dataset.v==='1';if(!S.owner){const http=BASE.find(a=>a.transport!=='stdio');S.selected=http?http.id:S.selected}S.form=null;render()}
+  else if(act==='open-settings'){S.settingsOpen=true;S.settingsTab=S.variant==='A'||S.variant==='C'?'agents':'model';render()}
+  else if(act==='close-settings'){S.settingsOpen=false;render()}
+  else if(act==='open-drawer'){S.drawerOpen=true;if(S.variant!=='A')S.drawerTab='agent';render()}
+  else if(act==='close-drawer'){S.drawerOpen=false;render()}
+  else if(act==='close-sheet'){S.sheetOpen=false;render()}
+  else if(act==='settings-tab'){S.settingsTab=t.dataset.k;S.sheetOpen=false;if(S.settingsTab==='agents'&&S.variant==='A')S.agentTab='status';render()}
+  else if(act==='drawer-tab'){S.drawerTab=t.dataset.k;render()}
+  else if(act==='select'){S.selected=t.dataset.id;S.adding=false;S.form=null;S.agentView='detail';S.drawerView='detail';render()}
+  else if(act==='back'){S.agentView='list';S.drawerView='list';render()}
+  else if(act==='agent-tab'){S.agentTab=t.dataset.k;render()}
+  else if(act==='config'){openConfig()}
+  else if(act==='goto-config'){S.settingsOpen=true;S.settingsTab='agents';S.drawerOpen=false;S.agentTab='config';S.agentView='detail';render()}
+  else if(act==='edit'){S.sheetOpen=true;S.form=null;render()}
+  else if(act==='add'){addAgent()}
+  else if(act==='save'){saveAgent()}
+  else if(act==='delete'){deleteAgent()}
+  else if(act==='test'){testConnection()}
+  else if(act==='refresh'){refreshTools()}
+  else if(act==='add-env'){S.form.env.push({k:'',v:''});render()}
+  else if(act==='cost'){const d=$('#cost');if(!d.open)d.showModal()}
+  else if(act==='close-cost'){$('#cost').close()}
+  else if(act==='about'){const d=$('#about');if(!d.open)d.showModal()}
+  else if(act==='close-about'){$('#about').close()}
+});
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.id==='proto-state'){S.demo=t.value;S.connectingId=null;S.form=null;render();return}
+  if(t.matches('[data-form-transport]')){S.form.transport=t.value;render();return}
+  if(t.matches('[data-agent-mrtr]')){const a=selectedAgent();if(a){a.mrtr[t.dataset.agentMrtr]=t.checked;if(S.form&&S.form.__key===a.id)S.form.mrtr[t.dataset.agentMrtr]=t.checked}toast('MRTR 已'+(t.checked?'开启':'关闭')+'：'+(t.checked?'下次调用生效':'上游请求会被拒绝'));render();return}
+});
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(!S.form)return;
+  if(t.matches('[data-field]')){const k=t.dataset.field;S.form[k]=t.type==='checkbox'?t.checked:t.value}
+  else if(t.matches('[data-form-mrtr]')){S.form.mrtr[t.dataset.formMrtr]=t.checked}
+  else if(t.dataset.env){const[i,f]=t.dataset.env.split('-');if(S.form.env[i])S.form.env[i][f]=t.value}
+});
+/* init from URL */
+(function init(){
+  const q=new URLSearchParams(location.search);
+  const v=(q.get('variant')||'A').toUpperCase();S.variant=VARIANT_NAMES[v]?v:'A';
+  S.demo=q.get('state')||'native';
+  S.owner=q.get('owner')!=='0';
+  if(q.get('agent')&&agentById(q.get('agent')))S.selected=q.get('agent');
+  if(q.get('screen')==='detail')S.agentView='detail';
+  if(q.get('pane')==='config')S.agentTab='config';
+  if(q.get('view')==='detail')S.drawerView='detail';
+  if(q.get('edit')==='1')S.sheetOpen=true;
+  if(q.get('settings')==='1'){S.settingsOpen=true;S.settingsTab='agents'}
+  else if(S.variant==='A'){S.settingsOpen=true}
+  if(S.variant!=='A')S.drawerOpen=q.get('settings')!=='1';
+  if(S.variant==='B')S.settingsTab='model';
+  if(!S.owner){const http=BASE.find(a=>a.transport!=='stdio');if(http)S.selected=http.id}
+  render();
+})();
+</script>
+</body>
+</html>
