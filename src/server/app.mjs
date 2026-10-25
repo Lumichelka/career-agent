@@ -1,7 +1,7 @@
 import {Accounts} from './accounts.mjs';
 import {ModelSettings, validateModelSettings} from '../model/model-settings.mjs';
 import {presetOptions, decorateChatError} from '../model/providers.mjs';
-import {BACKEND_CHOICES, MAX_IMAGE_BYTES, BackendChoice, isImageAttachment, normalizeImageAttachment, publicBackends, resolveTurn, selectBackend} from '../model/backends.mjs';
+import {BACKEND_CHOICES, MAX_IMAGE_BYTES, BackendChoice, isImageAttachment, normalizeImageAttachment, publicBackends, resolveTurn, selectBackend, suggestFallback} from '../model/backends.mjs';
 import {runApiModel, probeApi} from '../model/api-model.mjs';
 import {runDiagnostics} from '../model/diag.mjs';
 import {KeyVault} from '../model/keyvault.mjs';
@@ -42,6 +42,8 @@ const tokenFile = join(dataDir, 'local-session-token');
 let token = await readFile(tokenFile, 'utf8').catch(() => '');
 if (!/^[a-f0-9]{48}$/.test(token)) { token = randomBytes(24).toString('hex'); await writeFile(tokenFile, token, 'utf8'); }
 const running = new Map(), taskEvents = new Map(), loginWaiters = new Map(), loginPrompted = new Set();
+// 服务端兜底的连续失败计数：客户端不老实递增 fallbackDepth 时，换后端建议仍然封顶 3 次。
+const failureStreaks = new Map();
 // 任务闸与任务记录：每用户 2 / 全局 8 / 排队 120s；记录落在 users/<id>/tasks/，供抽屉刷新。
 const taskManager = new TaskManager({dataDir, gate: new TaskGate(taskLimits), maxDurationMs: taskLimits.maxDurationMs});
 let actualPort = Number(port);
@@ -349,6 +351,29 @@ const server = http.createServer(async (req, res) => {
         if (!out.ok) return send(res, {error: out.message, code: out.code, configTarget: out.configTarget || ''}, out.status);
         return send(res, {ok: true, current: out.current, choices: out.choices, nextTurn: true});
       }
+      // 「换 X 重试」的一次点击：建议必须绑定在刚刚失败的那张任务卡上，且只能消费一次。
+      // 这里只切换后端并返回；重跑整轮由客户端拿着同一条消息/附件重新提交 /api/chat（带 fallbackDepth）。
+      if (url.pathname === '/api/backends/fallback') {
+        const taskId = String(body.taskId || '');
+        const kind = String(body.kind || '');
+        const check = await taskManager.checkFallback(user.id, {taskId, kind});
+        if (!check.ok) {
+          const messages = {
+            missing: '没有这个任务', 'no-suggestion': '这条任务没有可用的回退建议',
+            'not-failed': '任务没有失败，不需要回退', consumed: '这条建议已经用过了',
+            'depth-limit': '换后端建议已用满 3 次', 'kind-mismatch': '建议的后端与这次点击不一致'
+          };
+          return send(res, {error: messages[check.reason] || '这条回退建议不可用', code: 'FALLBACK_' + String(check.reason || 'INVALID').toUpperCase()}, check.status);
+        }
+        const out = await selectBackend({settings: models.public(), choice: backends, user, kind});
+        if (!out.ok) return send(res, {error: out.message, code: out.code, configTarget: out.configTarget || ''}, out.status);
+        const consumed = await taskManager.consumeFallback(user.id, {taskId, kind});
+        if (!consumed.ok) return send(res, {error: '这条回退建议已经用过了', code: 'FALLBACK_CONSUMED'}, 409);
+        return send(res, {
+          ok: true, current: out.current, choices: out.choices, nextTurn: true,
+          fallback: {kind, label: consumed.task.fallback.label || '', depth: Number(consumed.task.fallback.depth) || 0}
+        });
+      }
       if (url.pathname === '/api/model/save') {
         if (body.mode === 'codex' && user.name !== 'owner') throw Error('共同测试请配置自己的 API 或本地模型');
         return send(res, await models.save(body));
@@ -442,6 +467,9 @@ const server = http.createServer(async (req, res) => {
         if (totalImageBytes > MAX_IMAGE_BYTES) return send(res, {error: '图片总量超过 8MB，请压缩或减少图片后重试'}, 413);
         if (!text && !attachments.length) return send(res, {error: '请输入问题或上传资料'}, 400);
         const lock = body.lock === true;
+        // fallbackDepth 由客户端在「换 X 重试」后递增；服务端用它和连续失败计数一起封顶 3 次建议。
+        const fallbackDepth = Math.max(0, Math.min(9, Math.trunc(Number(body.fallbackDepth) || 0)));
+        const isFallbackTurn = fallbackDepth > 0;
         // 能力解析：当前后端不满足本轮能力就停下来给候选卡，不静默降级。
         const turn = resolveTurn({settings: models.public(), choice: backends, user, requested: requestedBackend, attachments});
         if (!turn.ok) {
@@ -477,8 +505,7 @@ const server = http.createServer(async (req, res) => {
         res.on('close', () => { if (!res.writableEnded) controller.abort(); });
         try {
           const modelConfig = models.snapshot();
-          // 锁定只锁本轮：失败时不再走备用接口（回退建议本身归 #33）。
-          const executionConfig = lock ? {...modelConfig, fallback: null} : modelConfig;
+          // 换后端只由一次点击发生：settings.fallback 里的旧备用接口保持惰性，不在这里静默切换。
           const backend = turn.backend;
           // 任务生命周期（排队/运行/终态、15 分钟上限、证据与草稿）交给 TaskManager；执行体仍是原来的 runAgent。
           const outcome = await taskManager.run({
@@ -489,6 +516,24 @@ const server = http.createServer(async (req, res) => {
             signal: controller.signal,
             emit,
             describeError: e => decorateChatError(e.message, !!modelConfig.apiKey),
+            // 失败后最多给一条建议：锁定、本轮已有工具成功、建议满 3 次、连续失败超过 3 次都不给。
+            onFailure: async ({error}) => {
+              if (['QUEUE_TIMEOUT', 'TASK_TIMEOUT', 'CANCELLED'].includes(error?.code)) return null;
+              const streak = (failureStreaks.get(s.id) || 0) + 1;
+              failureStreaks.set(s.id, streak);
+              const out = suggestFallback({
+                settings: models.public(),
+                user,
+                capabilities: turn.capabilities,
+                currentKind: backend.kind,
+                depth: fallbackDepth,
+                streak,
+                locked: lock,
+                hadToolSuccess: error?.hadToolSuccess === true
+              });
+              if (!out.ok) return null;
+              return {...out.suggestion, message: text.slice(0, 8000)};
+            },
             execute: async ({task, signal, emit: runEmit, addDraft}) => {
               if (backend.kind === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
               const profile = (await loadProfile(dir)).facts;
@@ -497,7 +542,7 @@ const server = http.createServer(async (req, res) => {
                 root,
                 modelCall: options => backend.kind === 'codex'
                   ? runModel({...options, taskBridgeToken})
-                  : runApiModel({...options, config: {...executionConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir, userId: user.id, taskId: task.id, actorRef: backend.label}}),
+                  : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir, userId: user.id, taskId: task.id, actorRef: backend.label}}),
                 backend,
                 images,
                 session: s,
@@ -506,21 +551,23 @@ const server = http.createServer(async (req, res) => {
                 profile,
                 skill,
                 onEvent: runEmit,
-                signal
+                signal,
+                fallback: isFallbackTurn
               });
               if (result.artifact.content.trim()) addDraft({title: result.artifact.title || '求职文稿', content: result.artifact.content});
               return result;
             }
           });
           if (outcome.error) {
-            // #33 的 fallback_suggested 事件与「换 X 重试」一次点击回退从这里扩展；本次只保证锁定状态下不回退。
+            // 回退建议已由 TaskManager 的 onFailure 算好并写进任务记录，fallback_suggested 先于 error 发出。
             // 排队超时/执行失败/取消：TaskManager 已经写过 error 事件，这里只收尾会话与任务记录。
-            s.lastTask = {...s.lastTask, status: outcome.task.state === 'cancelled' ? 'stopped' : 'failed', error: outcome.task.error?.message || outcome.error.message, taskId: outcome.task.id};
+            s.lastTask = {...s.lastTask, status: outcome.task.state === 'cancelled' ? 'stopped' : 'failed', error: outcome.task.error?.message || outcome.error.message, taskId: outcome.task.id, fallback: outcome.task.fallback || null};
             await save(dir, s);
             await recordTask(dir, {sessionId: s.id, title: s.title, status: 'failed', error: s.lastTask.error}).catch(() => {});
           } else {
+            failureStreaks.delete(s.id);
             const result = outcome.result;
-            s.messages.push({role: 'user', content: text, attachments: historyAttachments}, {role: 'assistant', backend: backend.label, backendKind: backend.kind, locked: lock, calls: result.calls, content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
+            s.messages.push({role: 'user', content: text, attachments: historyAttachments}, {role: 'assistant', backend: backend.label, backendKind: backend.kind, locked: lock, fallback: isFallbackTurn, calls: result.calls, content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
             s.memory = result.memory.slice(0, 5000);
             s.lastTask = {...s.lastTask, status: 'complete', taskId: outcome.task.id, quality: result.quality, durationMs: result.durationMs, finishedAt: new Date().toISOString()};
             if (result.artifact.content.trim()) s.artifacts.push({id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()});

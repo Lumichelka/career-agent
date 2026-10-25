@@ -70,7 +70,7 @@ function structuredUsage(value) {
 
 // usage: 'standard'（OpenAI 风格最后一块/非流式）| 'empty-choices'（Kimi 独立统计块）| 'none'
 export async function startMockOpenAI({port = 0, delayMs = 0, usage = 'standard'} = {}) {
-  const state = {requests: [], paths: [], failNext: 0, status: 200, usage};
+  const state = {requests: [], paths: [], failNext: 0, status: 200, usage, failAfterTool: false};
   const server = http.createServer(async (req, res) => {
     const path = new URL(req.url, 'http://mock').pathname;
     const isChat = path.endsWith('/chat/completions');
@@ -84,6 +84,8 @@ export async function startMockOpenAI({port = 0, delayMs = 0, usage = 'standard'
     state.requests.push(body);
     state.paths.push(path);
     if (state.status && state.status !== 200) { res.writeHead(state.status, {'content-type': 'application/json'}); res.end('{"error":"mock status"}'); return; }
+    // 工具已成功执行后的下一次模型请求失败：用来验证副作用门（有工具成功后失败）。
+    if (state.failAfterTool && (body.messages || []).at(-1)?.role === 'tool') { res.writeHead(401, {'content-type': 'application/json'}); res.end('{"error":"tool follow-up failed"}'); return; }
     if (state.failNext > 0) { state.failNext--; res.writeHead(429, {'content-type': 'application/json'}); res.end('{"error":"rate limited"}'); return; }
     const answer = decide(body);
     if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));

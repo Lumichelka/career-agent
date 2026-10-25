@@ -61,7 +61,7 @@ export function codexBridgeArgs(root){return [
 export function attachCodexBridge(args,{root,search=true,bridgeUrl=process.env.CAREER_BRIDGE_URL}={}){
   return search&&bridgeUrl?[...codexBridgeArgs(root),...args]:args;
 }
-export function runModel({root,prompt,schema="response.schema.json",search=true,onEvent=()=>{},signal,taskId,taskBridgeToken}){return new Promise((resolve,reject)=>{
+export function runModel({root,prompt,schema="response.schema.json",search=true,onEvent=()=>{},onToolResult=null,signal,taskId,taskBridgeToken}){return new Promise((resolve,reject)=>{
 const exe=resolveCodex();
 const args=['-c','model_provider="career_http"','-c','model_providers.career_http.name="OpenAI HTTP"','-c','model_providers.career_http.wire_api="responses"','-c','model_providers.career_http.requires_openai_auth=true','-c','model_providers.career_http.supports_websockets=false','-c','model_providers.career_http.base_url="https://chatgpt.com/backend-api/codex"',...(search?['--search']:[]),'--ask-for-approval','never','exec','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--disable','multi_agent','--json','--output-schema',join(root,'src','schemas',schema),'-'];
 if(signal?.aborted)return reject(new Error("本次任务已停止。"));
@@ -73,7 +73,7 @@ function finish(error,result){if(ended)return;ended=true;clearTimeout(timer);sig
 child.on('error',()=>finish(new Error('无法启动本机 Codex。请检查安装与登录状态。')));
 child.stderr.on('data',d=>{stderr=(stderr+d.toString()).slice(-12000)});
 function processLine(line){let event;try{event=JSON.parse(line)}catch{return}if(event.type==='error'||event.type==='turn.failed'){const reason=String(event.message||event.error?.message||'运行失败');onEvent({type:'status',text:'模型服务报告错误'});stderr+='\n'+reason;}
-const item=event.item;if(!item)return;if(event.type==='item.completed'&&['web_search','web_search_call','mcp_tool_call'].includes(item.type)){toolEvidence.push(JSON.stringify(item).slice(0,10000));if(toolEvidence.length>12)toolEvidence.shift();}if(item.type==='agent_message'&&typeof item.text==='string')final=item.text;
+const item=event.item;if(!item)return;if(event.type==='item.completed'&&['web_search','web_search_call','mcp_tool_call'].includes(item.type)){toolEvidence.push(JSON.stringify(item).slice(0,10000));if(toolEvidence.length>12)toolEvidence.shift();onToolResult?.({name:item.type,success:true});}if(item.type==='agent_message'&&typeof item.text==='string')final=item.text;
 if(['web_search','web_search_call','command_execution','mcp_tool_call','file_change'].includes(item.type)&&event.type==='item.started'){const label=item.type.startsWith('web_search')?'正在检索公开信息':item.type==='command_execution'?'正在读取与核对任务资料':item.type==='mcp_tool_call'?'正在调用工具':'正在生成文件';trace.push({type:item.type,label});onEvent({type:'tool',toolType:item.type,text:label});}}
 child.stdout.on('data',d=>{buffer+=d.toString();const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines)processLine(line)});
 child.on('close',code=>{if(buffer.trim())processLine(buffer);if(ended)return;if(code!==0||!final){let message='模型运行失败，没有生成替代回复。';if(/auth|login|401|unauthorized/i.test(stderr))message='Codex 登录失效，请使用本机官方登录后重试。';else if(/429|usage limit|rate limit|quota/i.test(stderr))message='Codex 额度或频率受限，请额度恢复后重试。';else if(/network|connect|stream|dns|fetch|proxy/i.test(stderr))message='连接模型服务失败，请检查网络后重试。';return finish(new Error(message));}finish(null,{raw:final,toolEvidence})});
@@ -81,14 +81,17 @@ child.stdin.on("error",()=>{});
 child.stdin.end(prompt);
 });}
 
-export async function runAgent({root,session,message,attachments=[],profile=[],skill=null,onEvent=()=>{},signal,modelCall=runModel,backend=null,images=[]}){
+export async function runAgent({root,session,message,attachments=[],profile=[],skill=null,onEvent=()=>{},signal,modelCall=runModel,backend=null,images=[],fallback=false}){
   const started=Date.now(),trace=[],calls=[];
   // 调用记录只存元数据：不存提示词、不存结果正文；只挂在助手消息上，不进任务记录。
   const callBackend={kind:backend?.kind||'',preset:backend?.preset||'',model:backend?.model||'',label:backend?.label||''};
+  // 副作用门：只有真正成功的工具调用才算「本轮有工具成功」；失败、阻塞、待确认、幂等重放都不算。
+  let toolSuccesses=0;const toolSuccessNames=[];
+  const noteToolResult=outcome=>{if(!outcome?.success)return;toolSuccesses+=1;if(outcome.name&&toolSuccessNames.length<12)toolSuccessNames.push(outcome.name);};
   const callModel=async(step,options)=>{
-    const at=new Date().toISOString(),began=Date.now(),record={step,backend:callBackend,at,durationMs:0,outcome:'ok'};
+    const at=new Date().toISOString(),began=Date.now(),record={step,backend:callBackend,at,durationMs:0,outcome:fallback?'fallback':'ok'};
     try{
-      const out=await modelCall(options);
+      const out=await modelCall({...options,onToolResult:noteToolResult});
       record.durationMs=Date.now()-began;
       if(out?.usage){
         record.usage=out.usage;
@@ -98,7 +101,7 @@ export async function runAgent({root,session,message,attachments=[],profile=[],s
       calls.push(record);
       return out;
     }catch(error){
-      record.durationMs=Date.now()-began;record.outcome='failed';record.errorCode=errorCodeOf(error);
+      record.durationMs=Date.now()-began;record.outcome='failed';if(fallback)record.fallback=true;record.errorCode=errorCodeOf(error);
       calls.push(record);
       throw error;
     }
@@ -128,6 +131,10 @@ export async function runAgent({root,session,message,attachments=[],profile=[],s
     phase('正在检查交付内容并保存任务结果');
     const quality=checkDelivery(result,{needsSearch:plan.needsSearch,trace});
     if(quality.issues.length)result.reply+='\n\n执行限制：'+quality.issues.join('；')+'。';
-    return {...result,trace,calls,plan,quality,skill:skill?{id:skill.id,name:skill.name}:null,durationMs:Date.now()-started};
+    return {...result,trace,calls,plan,quality,skill:skill?{id:skill.id,name:skill.name}:null,hadToolSuccess:toolSuccesses>0,toolSuccesses,durationMs:Date.now()-started};
+  }catch(error){
+    // 失败路径也要把副作用带出来：聊天错误处据此决定是否还能建议换后端。
+    if(error&&typeof error==='object'){error.hadToolSuccess=toolSuccesses>0;error.toolSuccesses=toolSuccesses;if(toolSuccessNames.length)error.toolSuccessNames=[...toolSuccessNames];}
+    throw error;
   }finally{clearTimeout(timer);signal?.removeEventListener('abort',stop);}
 }
