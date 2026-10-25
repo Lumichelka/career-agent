@@ -222,6 +222,12 @@ export function platformTools() {
   return TOOLS.filter(t => t.handler.startsWith('platform.'));
 }
 
+// 入站 /mcp 暴露的工具：注册表里除平台工具以外的全部本地工具。
+// 平台工具是任务内的登录型浏览器操作，靠内部任务桥与 taskId 鉴权；入站连接没有任务，因此不暴露。
+export function inboundTools() {
+  return TOOLS.filter(t => !t.handler.startsWith('platform.'));
+}
+
 export function toolNames() {
   return TOOLS.map(t => t.name);
 }
