@@ -1,6 +1,6 @@
 # 职向 v3 · 大学生线下求职智能体
 
-> **当前状态：`v3.2.0`；双选会自动拆招聘项目、公众号并入学校来源、对话优先。**
+> **当前状态：`v3.2.1`；公众号支持浏览器 fallback/来源页 harvest，项目上下文进入对话。**
 > 先看：[最终交付清单](docs/plan/18-最终交付清单.md) · [平台与公众号](docs/plan/19-平台与公众号.md) · [日历与项目](docs/plan/20-日历与招聘项目.md) · [CHANGELOG](docs/plan/CHANGELOG.md)
 > 数据目录：`%LOCALAPPDATA%\ZhiXiang`（首次启动会自动迁移旧 `.data`）
 
