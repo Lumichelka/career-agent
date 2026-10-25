@@ -17,7 +17,6 @@ import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
-import {prepareDataDir} from '../config/paths.mjs';
 import {listTools} from '../tools/registry.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
@@ -25,13 +24,12 @@ import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, im
 // 应用工厂：装配一个可启动的实例，不做进程级的事（环境变量、日志格式归 index.mjs）。
 // 返回 {server, token, dataDir, host, port, origin, close}；port 传 0 时由系统分配，close 幂等。
 export async function createApp({
+  dataDir,
   root = fileURLToPath(new URL('../..', import.meta.url)),
-  dataDir: givenDataDir = '',
   host = '127.0.0.1',
-  port = 0,
-  log = () => {}
+  port = 0
 } = {}) {
-const dataDir = givenDataDir || await prepareDataDir({root, log});
+if (!dataDir) throw new Error('createApp 需要 dataDir：准备数据目录是进程级入口（index.mjs）的职责');
 await mkdir(dataDir, {recursive: true});
 const tokenFile = join(dataDir, 'local-session-token');
 let token = await readFile(tokenFile, 'utf8').catch(() => '');
@@ -425,9 +423,6 @@ await new Promise((resolve, reject) => { server.once('error', reject); server.li
 actualPort = server.address().port;
 localOrigin = 'http://127.0.0.1:' + actualPort;
 allowedHosts = buildAllowedHosts(actualPort);
-// 内部任务桥（Codex 子进程）通过这两个变量访问本实例；端口在 listen 之后才确定。
-process.env.CAREER_BRIDGE_URL = localOrigin;
-process.env.CAREER_BRIDGE_TOKEN = token;
 let closing = null;
 const close = () => closing || (closing = new Promise(resolve => {
   for (const controller of running.values()) controller.abort();

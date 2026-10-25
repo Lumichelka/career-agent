@@ -11,6 +11,9 @@ const host = process.env.CAREER_HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 4189);
 const dataDir = await prepareDataDir({root, log: message => console.log(message)});
 const app = await createApp({root, dataDir, host, port});
+// 内部任务桥（Codex 子进程）通过这两个变量访问本实例；端口在 listen 之后才确定。
+process.env.CAREER_BRIDGE_URL = app.origin;
+process.env.CAREER_BRIDGE_TOKEN = app.token;
 const lan = host === '0.0.0.0' ? Object.values(os.networkInterfaces()).flat().filter(n => n && n.family === 'IPv4' && !n.internal).map(n => 'http://' + n.address + ':' + app.port) : [];
 console.log('职向智能体：http://127.0.0.1:' + app.port);
 if (lan.length) console.log('局域网访问（同一 Wi-Fi 的其它设备）：' + lan.join(' '));

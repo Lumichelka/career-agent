@@ -10,10 +10,16 @@ import {createApp} from '../src/server/app.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
-test('createApp：临时数据目录 + 随机端口起动，关闭后不再响应', async t => {
+// 每个用例一条独立实例：临时数据目录 + 系统分配端口，结束关闭并清目录。
+async function startApp(t) {
   const dir = await mkdtemp(join(tmpdir(), 'zx-app-'));
   const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0});
   t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
+  return app;
+}
+
+test('createApp：临时数据目录 + 随机端口起动，关闭后不再响应', async t => {
+  const app = await startApp(t);
   assert.ok(app.port > 0, '应报告实际监听端口');
   assert.equal(app.host, '127.0.0.1');
 
@@ -29,9 +35,7 @@ test('createApp：临时数据目录 + 随机端口起动，关闭后不再响�
 });
 
 test('静态页：no-store 与 CSP 不回归', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'zx-app-'));
-  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0});
-  t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
+  const app = await startApp(t);
   const res = await fetch(app.origin + '/chat');
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /text\/html/);
@@ -41,9 +45,7 @@ test('静态页：no-store 与 CSP 不回归', async t => {
 });
 
 test('鉴权：缺 token 403，缺登录 401，注册后 cookie 可访问本人接口', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'zx-app-'));
-  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0});
-  t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
+  const app = await startApp(t);
 
   const noToken = await fetch(app.origin + '/api/new', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
   assert.equal(noToken.status, 403);
@@ -73,9 +75,7 @@ test('鉴权：缺 token 403，缺登录 401，注册后 cookie 可访问本人�
 });
 
 test('跨账号隔离：各自的会话列表与数据目录互不可见', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'zx-app-'));
-  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0});
-  t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
+  const app = await startApp(t);
 
   const register = async name => {
     const res = await fetch(app.origin + '/api/auth/register', {
@@ -103,16 +103,14 @@ test('跨账号隔离：各自的会话列表与数据目录互不可见', async
   assert.equal(aliceList.sessions.length, 1);
   assert.equal(bobList.sessions.length, 0, 'bob 不应看到 alice 的会话');
 
-  const usersDir = join(dir, 'users');
+  const usersDir = join(app.dataDir, 'users');
   const dirs = await readdir(usersDir);
   assert.ok(dirs.includes(alice.user.id) && dirs.includes(bob.user.id), '每个账号应有独立数据目录');
   assert.notEqual(alice.user.id, bob.user.id);
 });
 
 test('Host 头不在白名单时返回 403', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'zx-app-'));
-  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0});
-  t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
+  const app = await startApp(t);
   const status = await new Promise((resolve, reject) => {
     const req = http.request({host: '127.0.0.1', port: app.port, path: '/health', headers: {Host: 'evil.example'}}, res => { res.resume(); resolve(res.statusCode); });
     req.on('error', reject); req.end();
