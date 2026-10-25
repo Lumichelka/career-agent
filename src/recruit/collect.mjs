@@ -109,8 +109,10 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     onLog?.({source: source.id, text: '开始采集：' + source.name});
 
     let items = [];
+    let listText = '';
     if (source.mode === 'browser') {
       const {text, title} = await browserText(source.listUrl);
+      listText = text;
       if (store) store.saveRaw({url: source.listUrl, sourceId: source.id, title, text});
       items = parseRenderedText(text, source);
     } else {
@@ -120,6 +122,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
         result.message = res.message;
         return result;
       }
+      listText = res.text;
       if (store) store.saveRaw({url: source.listUrl, sourceId: source.id, title: source.name, text: res.text.slice(0, 120000)});
       if (source.mode === 'json') {
         const pages = source.pageUrl ? Math.min(source.maxPages || 1, 5) : 1;
@@ -203,6 +206,18 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     result.projects = projectTotal;
     result.projectEvents = projectEvents;
     result.projectErrors = projectErrors;
+
+    // 来源页如果链接了公众号推文，顺手发现并分析（不批量刷公众号主页）。
+    if (store && listText.includes('mp.weixin.qq.com')) {
+      try {
+        const {harvestWechat} = await import('../wechat/harvest.mjs');
+        const harvested = await harvestWechat({text: listText, dir, school: source.school, limit: 2, onLog});
+        result.wechatArticles = harvested.imported;
+        if (harvested.imported) onLog?.({source: source.id, text: `从来源页发现并入库 ${harvested.imported} 篇公众号文章`});
+      } catch (e) {
+        onLog?.({source: source.id, text: `公众号链接处理失败：${e.message}`});
+      }
+    }
     if (store && items.length && !truncated) {
       const missing = store.markMissing(source.id, seen);
       result.hidden = missing.hidden;
@@ -254,6 +269,7 @@ export async function runCollection({dir, sourceIds, limit = 20, concurrency = 2
     fetched: results.reduce((a, r) => a + (r.fetched || 0), 0),
     created: results.reduce((a, r) => a + (r.created || 0), 0),
     updated: results.reduce((a, r) => a + (r.updated || 0), 0),
+    wechatArticles: results.reduce((a, r) => a + (r.wechatArticles || 0), 0),
     projects: results.reduce((a, r) => a + (r.projects || 0), 0),
     failed: results.filter(r => ['error', 'blocked', 'disallowed'].includes(r.status)).length
   }};

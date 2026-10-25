@@ -130,13 +130,13 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
       <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。</span>
     </div>
     <div class="sources" id="sources"><div class="empty">正在读取信息源…</div></div>
-    <details class="panel" style="margin-top:14px;padding:12px">
+    <details class="panel" style="margin-top:14px;padding:12px" open>
       <summary style="cursor:pointer;font-size:13px">公众号文章：粘贴推文，判断是否含招聘</summary>
       <div class="grid2" style="margin-top:10px">
         <label>文章链接<input id="wx-url" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off"></label>
         <label>正文粘贴（微信验证时）<textarea id="wx-text" placeholder="链接抓不到正文时再粘贴" style="min-height:70px"></textarea></label>
       </div>
-      <div class="row" style="margin-top:8px"><button id="wx-import">记录并分析</button><span id="wx-status" class="hint"></span></div>
+      <div class="row" style="margin-top:8px"><button id="wx-import">记录并分析</button><button id="wx-harvest">从来源页找公众号</button><span id="wx-status" class="hint"></span></div>
       <div id="wx-result" class="hint" style="margin-top:8px"></div>
     </details>
   </section>
@@ -341,6 +341,18 @@ el('#wx-import').onclick=async()=>{
     el('#wx-status').textContent='';
     if(wxDraft) el('#wx-result').innerHTML+='<br><button data-wx-draft>用草稿填入手动导入</button>';
     await loadAll();
+  }catch(e){el('#wx-status').textContent=e.message;toast(e.message)}
+};
+el('#wx-harvest').onclick=async()=>{
+  const url=el('#wx-url').value.trim();
+  if(!url){toast('请填写来源页或文章链接');return}
+  el('#wx-status').textContent='扫描来源页中的公众号链接…';
+  try{
+    const resp=await fetch('/api/wechat/harvest',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({url})});
+    const d=await resp.json().catch(()=>({error:'返回格式异常'}));
+    if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));
+    el('#wx-result').innerHTML='发现 '+d.links+' 个链接，入库 '+d.imported+' 篇'+(d.articles?.length?'<br>'+d.articles.map(a=>esc(a.title)+' · '+esc(a.hasRecruitment)+' · '+a.projects+' 项目草稿').join('<br>'):'');
+    el('#wx-status').textContent='';await loadAll();
   }catch(e){el('#wx-status').textContent=e.message;toast(e.message)}
 };
 const manualDialog=el('#manual-dialog');

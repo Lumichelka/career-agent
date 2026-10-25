@@ -2,8 +2,9 @@
 import {join} from 'node:path';
 import {WeChatStore} from './store.mjs';
 import {fetchText} from '../recruit/fetch.mjs';
-import {parseArticleHtml} from '../recruit/manual.mjs';
 import {analyzeArticle} from './analyze.mjs';
+import {fetchWechatArticle} from './fetch-article.mjs';
+import {harvestWechat} from './harvest.mjs';
 
 export function bizOf(url) {
   try { return new URL(url).searchParams.get('__biz') || ''; } catch { return ''; }
@@ -26,20 +27,13 @@ export async function handleWechat({method, pathname, url, body, dir}) {
         const link = String(body?.url || '').trim();
         if (!/^https?:\/\//.test(link)) return {status: 400, json: {error: '请填写公众号文章链接'}};
         const pasted = String(body?.text || '').trim();
-        let title = '', text = '', publishedAt = '';
-        try {
-          const res = await fetchText(link, {timeout: 25000, retries: 0, minInterval: 0, checkRobots: false});
-          if (res.ok) {
-            const parsed = parseArticleHtml(res.text);
-            title = parsed.title || '';
-            text = String(parsed.text || '');
-            publishedAt = parsed.publishedAt || '';
-          }
-        } catch { /* 公众号经常要求验证，下面改用粘贴正文 */ }
-        // 微信会返回验证页/CSS 页，正文很短时不保存垃圾记录。
+        const got = await fetchWechatArticle(link);
+        let text = got.ok ? got.text : '';
+        let title = got.ok ? got.title : '';
+        let publishedAt = got.ok ? got.publishedAt || '' : '';
         if (text.trim().length < 120) {
           if (pasted.length < 10) {
-            return {status: 400, json: {error: '微信文章需要验证，链接抓不到正文。请把推文正文粘贴到下方再导入。', needPaste: true}};
+            return {status: 400, json: {error: got.message || '微信文章需要验证，链接抓不到正文。请把推文正文粘贴到下方再导入。', needPaste: true}};
           }
           text = pasted;
           title = String(body?.title || '').trim() || pasted.split('\n').map(s => s.trim()).find(Boolean) || '公众号文章';
@@ -48,15 +42,28 @@ export async function handleWechat({method, pathname, url, body, dir}) {
         title = title.slice(0, 200);
         let account = body?.accountId ? store.getAccount(body.accountId) : null;
         if (!account && body?.accountName) account = store.addAccount({name: body.accountName, school: body.school || ''});
-        if (!account) account = store.accountByBiz(bizOf(link));
+        if (!account) account = store.accountByBiz(bizOf(got.link || link));
         if (!account) account = store.addAccount({name: '未归类公众号', note: '从文章链接自动创建；请在左侧补名称'});
         const article = store.saveArticle({
-          accountId: account.id, title, url: link, publishedAt,
+          accountId: account.id, title, url: got.link || link, publishedAt,
           summary: text.slice(0, 300), content: text
         });
-        const analysis = analyzeArticle({title, text, url: link});
+        const analysis = analyzeArticle({title, text, url: got.link || link});
         const saved = store.saveAnalysis(article.id, analysis);
         return {json: {article: saved, analysis, draft: analysis.draft, account}};
+      }
+      if (pathname === 'harvest') {
+        const link = String(body?.url || '').trim();
+        const pasted = String(body?.text || '').trim();
+        let sourceText = pasted;
+        if (link) {
+          const res = await fetchText(link, {timeout: 20000, retries: 0, minInterval: 0, checkRobots: false});
+          if (!res.ok) return {status: 400, json: {error: '来源页打不开：' + res.message}};
+          sourceText = res.text;
+        }
+        if (!sourceText) return {status: 400, json: {error: '请提供来源页链接或 HTML/正文'}};
+        const out = await harvestWechat({text: sourceText, dir, school: String(body?.school || ''), limit: Number(body?.limit) || 3});
+        return {json: out};
       }
       if (pathname.startsWith('articles/') && pathname.endsWith('/analyze')) {
         const id = pathname.split('/')[1];

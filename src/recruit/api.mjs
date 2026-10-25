@@ -71,6 +71,14 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
       }
       return {json: {month, days, stats: {events: events.length, projects: events.reduce((n, e) => n + (e.projects?.length || 0), 0)}}};
     }
+    if (pathname.startsWith('projects/')) {
+      const id = pathname.split('/')[1];
+      const data = withStore(dir, store => {
+        const project = store.getProject(id);
+        return project ? {project, event: store.getEvent(project.eventId)} : null;
+      });
+      return data ? {json: data} : {status: 404, json: {error: '招聘项目不存在'}};
+    }
     if (pathname === 'schedule') {
       const {from, to, days} = range(url);
       const events = withStore(dir, store => store.listEvents({from, to, limit: 300}));

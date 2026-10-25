@@ -272,6 +272,18 @@
     btn.onclick = () => { panel.hidden = !panel.hidden; };
     if (project) {
       panel.hidden = false;
+      let projectLoaded = false;
+      const loadProject = async (attempt = 0) => {
+        if (projectLoaded) return;
+        try {
+          const d = await ZX.api('recruit/projects/' + encodeURIComponent(project));
+          if (!d?.project) return;
+          projectLoaded = true;
+          const p = d.project, e = d.event || {};
+          panel.querySelector('b').insertAdjacentHTML('afterend', '<div style="margin-top:6px"><b style="font-size:12px">' + (p.company || '未填单位') + '</b><div style="color:#5f7568">' + (p.title || '现场招聘') + '</div><div style="font-size:10.5px;color:#7b8b80">' + (e.school || '') + ' · ' + (e.title || '') + '</div></div>');
+        } catch { if (attempt < 10) setTimeout(() => loadProject(attempt + 1), 1500); }
+      };
+      loadProject();
       const input = document.querySelector('#input');
       if (input && !input.value.trim()) {
         input.value = '研究这个招聘项目（ID：' + project + '）：先读取项目详情和所属活动，再查公司/行业/岗位要求和薪资，最后对照我的简历给出准备建议。不要从平台登记岗位或投递。';
