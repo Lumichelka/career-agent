@@ -30,6 +30,7 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .toolbar select{padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:#fff;font:13px inherit}
 .sources{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
 .source{border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:#fcfdfb}
+#wx-articles .article{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:6px 0;background:#fcfdfb}#wx-articles .article b{font-size:12.5px}#wx-articles .article .meta{font-size:10.5px;color:var(--muted);margin-top:3px}
 .src-table{grid-column:1/-1;width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
 .src-head,.src-row{display:grid;grid-template-columns:minmax(150px,1.5fr) 92px 82px 52px 78px 145px;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #eef2ec;font-size:11.5px}
 .src-head{background:#f5f8f3;color:#7b8b80;font-size:10px;letter-spacing:.5px}
@@ -149,6 +150,10 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
       <div class="row" style="margin-top:8px"><button id="wx-import">记录并分析</button><button id="wx-harvest">从来源页找公众号</button><span id="wx-status" class="hint"></span></div>
       <div id="wx-result" class="hint" style="margin-top:8px"></div>
     </details>
+    <div class="panel" id="wx-articles-panel" style="margin-top:14px;padding:12px">
+      <h2>最近公众号文章 <span id="wx-articles-count" class="hint"></span></h2>
+      <div id="wx-articles"><div class="empty">还没有文章</div></div>
+    </div>
   </section>
 
   <section class="panel" id="calendar-panel">
@@ -235,6 +240,7 @@ function renderStats(stats,cal){
 
 function renderSources(sources,wechat){
   sourceState=sources;
+  window.__wxAccounts=Object.fromEntries((wechat?.accounts||[]).map(a=>[a.id,a.name]));
   const wxBySchool=new Map();
   for(const a of wechat?.accounts||[]){const key=a.school||'未归类';if(!wxBySchool.has(key))wxBySchool.set(key,[]);wxBySchool.get(key).push(a);}
   const shown=new Set();
@@ -305,7 +311,7 @@ function renderRuns(runs){
 async function loadAll(){
   try{
     const s=await api('sources');
-    catalog=s.catalog||{};renderSources(s.sources,s.wechat);renderRuns(s.runs);window.__stats=s.stats;
+    catalog=s.catalog||{};renderSources(s.sources,s.wechat);renderRuns(s.runs);loadWechatArticles();window.__stats=s.stats;
     await loadCalendar(el('#cal-month').value||monthNow());
   }catch(e){toast(e.message)}
 }
@@ -384,6 +390,14 @@ el('#ms-save').onclick=async()=>{
   try{const r=await api('source-save',{sourceId,html,url:el('#ms-url').value.trim(),confirm:true});el('#ms-status').textContent='已写入：新增 '+r.created+'，更新 '+r.updated;toast('来源页已导入');await loadAll();}
   catch(e){el('#ms-status').textContent=e.message;toast(e.message)}
 };
+async function loadWechatArticles(){
+  try{
+    const r=await fetch('/api/wechat/articles',{headers:{'x-career-token':TOKEN}});
+    const d=await r.json();const list=d.articles||[];
+    el('#wx-articles-count').textContent=list.length+' 篇';
+    el('#wx-articles').innerHTML=list.length?list.map(a=>{let drafts=[];try{drafts=(JSON.parse(a.extractedJson||'{}').projects)||[];}catch{}const names=drafts.slice(0,5).map(p=>p.company).filter(Boolean);return '<article class="article"><b><a href="'+esc(a.url)+'" target="_blank" rel="noopener noreferrer">'+esc(a.title)+'</a></b><div class="meta">'+esc((window.__wxAccounts&&window.__wxAccounts[a.accountId])||'公众号')+' · '+esc(a.hasRecruitment==='yes'?'含招聘信息':a.hasRecruitment==='no'?'未发现招聘':'待确认')+' · '+(a.projectCount||0)+' 个项目草稿 · '+esc(String(a.analyzedAt||a.createdAt||'').slice(0,10))+'</div>'+(names.length?'<div class="hint">草稿：'+esc(names.join('、'))+(drafts.length>5?' 等':'')+'</div>':'')+'<div class="row">'+(a.eventId?'<span class="hint">已关联活动</span>':'<span class="hint">未入库活动</span>')+'</div></article>';}).join(''):'<div class="empty">还没有文章；先粘贴推文链接或从来源页扫描</div>';
+  }catch(e){el('#wx-articles').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
+}
 const manualDialog=el('#manual-dialog');
 let manualPreview='';let wxArticle=null,wxDraft=null;
 el('#manual-open').onclick=()=>{el('#m-status').textContent='';el('#m-draft').hidden=true;manualDialog.showModal()};

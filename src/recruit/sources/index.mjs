@@ -33,10 +33,9 @@ export function sourceHealth(source) {
     category: source.category,
     note: source.note || '',
     fallback: source.fallback || '',
-    capabilities: source.capabilities || {
-      list: source.mode,
-      detail: source.detail ? 'http' : 'none',
-      projects: typeof source.fetchProjects === 'function' ? 'custom' : 'none'
+    capabilities: {
+      ...(source.capabilities || {list: source.mode, detail: source.detail ? 'http' : 'none', projects: typeof source.fetchProjects === 'function' ? 'custom' : 'none'}),
+      manual: typeof source.parseList === 'function'
     }
   };
 }
