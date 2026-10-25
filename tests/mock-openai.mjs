@@ -45,6 +45,14 @@ function decide(body) {
   if (body.tools?.length && /请自动写入缺少幂等键的招聘活动/.test(userText)) {
     return {toolCalls: [{id: 'call_bulk_write_nokey', name: 'career_recruit_bulk_write', args: JSON.stringify({events: [BULK_EVENT]})}]};
   }
+  // 敏感写入确认用例：同一句用户话术按序号生成不同幂等键，便于一次测试里拿到多条待确认。
+  if (body.tools?.length && last.role === 'user' && /长期画像/.test(userText)) {
+    const index = /第二条/.test(userText) ? '2' : /第三条/.test(userText) ? '3' : /第四条/.test(userText) ? '4' : '1';
+    const facts = index === '1'
+      ? [{key: '手机', value: '13800138000'}, {key: '城市偏好', value: '成都'}]
+      : [{key: '期望城市 ' + index, value: '上海'}];
+    return {toolCalls: [{id: 'call_profile_write_' + index, name: 'career_profile_write', args: JSON.stringify({facts, idempotencyKey: 'profile-http-' + index})}]};
+  }
   // 需要草稿的用例：执行与复核阶段都保留 artifact，模拟任务卡上的草稿区块。
   const base = /生成草稿/.test(all) ? {...FINAL, artifact: {title: '双选会草稿', content: '活动与单位待确认'}} : FINAL;
   if (all.includes('规划阶段')) {

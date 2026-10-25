@@ -20,6 +20,8 @@ export class WriteError extends Error {
 }
 
 const SENSITIVE_FIELD = /(phone|mobile|tel|email|mail|wechat|weixin|idcard|id_card|contact|身份证|手机|电话|邮箱|微信|联系人|证件)/i;
+// 字段名看不出来时按值兜底：手机号、邮箱、身份证号出现在预览里一律抹掉。
+const SENSITIVE_VALUE = /(1[3-9]\d{9}|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|(?<!\d)\d{17}[\dXx](?!\d))/;
 
 // 确认预览必须脱敏：联系方式、证件类字段整段抹掉，其余保留可读摘要。
 export function redactPreview(value, depth = 0) {
@@ -32,7 +34,10 @@ export function redactPreview(value, depth = 0) {
     }
     return out;
   }
-  if (typeof value === 'string') return value.length > 500 ? value.slice(0, 500) + '…' : value;
+  if (typeof value === 'string') {
+    if (SENSITIVE_VALUE.test(value)) return '***';
+    return value.length > 500 ? value.slice(0, 500) + '…' : value;
+  }
   return value;
 }
 
@@ -140,6 +145,7 @@ export class WriteGateway {
       status: 'confirm_required',
       tool: row.tool,
       confirmId: row.confirm_id,
+      taskId: row.task_id || '',
       preview: parsePreview(row.preview_summary),
       previewSummary: row.preview_summary,
       expiresAt: row.expires_at,
@@ -174,23 +180,27 @@ export class WriteGateway {
     return {...fresh, decision: 'accepted', consumed_at: at};
   }
 
-  #createConfirmation({tool, fingerprint, key, entity, entityId, action, preview, sourceRef}) {
+  #createConfirmation({tool, fingerprint, key, entity, entityId, action, preview, sourceRef, payloadJson}) {
     const confirmId = this.newId();
     const createdAt = this.#nowIso();
     const expiresAt = this.#expiresAt(createdAt, CONFIRMATION_TTL_MS);
     const summary = JSON.stringify(redactPreview(preview ?? {})).slice(0, 4000);
+    const payload = String(payloadJson || '');
+    // 确认接受时要按原参数重放；payload 超过审计单条上限时拒绝发起，避免确认无法执行。
+    if (Buffer.byteLength(payload) > MAX_AUDIT_EVENT_BYTES) throw new WriteError('AUDIT_EVENT_TOO_LARGE', '这次写入的参数超过 256KB，已拒绝；请拆分或缩小内容。', 413);
     this.db.prepare(`INSERT INTO confirmations(
       confirm_id, user_id, tool, fingerprint, idempotency_key, entity, entity_id, action,
-      preview_summary, source_ref, created_at, expires_at, consumed_at, decision, executed_at
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,NULL,'pending',NULL)`).run(
-      confirmId, this.userId, tool, fingerprint, key, entity || '', entityId || '', action || '', summary, sourceRef || '', createdAt, expiresAt
+      preview_summary, source_ref, payload_json, task_id, created_at, expires_at, consumed_at, decision, executed_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'pending',NULL)`).run(
+      confirmId, this.userId, tool, fingerprint, key, entity || '', entityId || '', action || '', summary, sourceRef || '',
+      payload, this.taskId, createdAt, expiresAt
     );
     return {confirmId, createdAt, expiresAt, summary};
   }
 
   // 敏感写：先挂起确认（同键同指纹重放同一确认），不落业务数据。
   #requestConfirmation(options) {
-    const {tool, fingerprint, key, entity, entityId, action, preview, sourceRef} = options;
+    const {tool, fingerprint, key, entity, entityId, action, preview, sourceRef, payload} = options;
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const existing = this.#idempotency(tool, key);
@@ -215,7 +225,7 @@ export class WriteGateway {
         }
       }
       if (!outcome) {
-        const confirmation = this.#createConfirmation({tool, fingerprint, key, entity, entityId, action, preview, sourceRef});
+        const confirmation = this.#createConfirmation({tool, fingerprint, key, entity, entityId, action, preview, sourceRef, payloadJson: canonicalJson(payload ?? {})});
         const createdAt = this.#nowIso();
         const expiresAt = this.#expiresAt(createdAt, IDEMPOTENCY_TTL_MS);
         this.db.prepare(`INSERT INTO idempotency(user_id,tool,key,fingerprint,status,response_json,confirm_id,audit_batch_id,created_at,expires_at)
@@ -314,7 +324,7 @@ export class WriteGateway {
     const sourceJson = sourceRef === null || sourceRef === undefined ? '' : JSON.stringify(sourceRef);
 
     if (sensitivity === 'sensitive' && !confirm) {
-      return this.#requestConfirmation({tool, fingerprint, key, entity, entityId, action, preview, sourceRef: sourceJson});
+      return this.#requestConfirmation({tool, fingerprint, key, entity, entityId, action, preview, sourceRef: sourceJson, payload: payload ?? {}});
     }
 
     // 事务外的快速判定：已完成直接重放，进行中/指纹冲突直接拒绝。

@@ -24,7 +24,51 @@ const GROUPS = [
   {id: 'failed', label: '失败'}
 ];
 
-const state = {tasks: [], counts: {}, badge: 0, open: false, error: '', loaded: false};
+const state = {tasks: [], confirmations: [], counts: {}, badge: 0, open: false, error: '', confirmError: '', loaded: false};
+
+// 敏感写入确认：待确认区展示脱敏预览与接受/拒绝；已处理记录并入审计区且不可撤销。
+const TOOL_LABELS = {career_profile_write: '写入长期画像'};
+const toolLabel = name => TOOL_LABELS[name] || name || '敏感写入';
+
+function previewText(preview) {
+  if (!preview) return '（没有可预览的内容）';
+  if (Array.isArray(preview.facts)) return preview.facts.map(fact => (fact.key || '要点') + '：' + (fact.value ?? '')).join('\n');
+  return JSON.stringify(preview, null, 1);
+}
+
+function expiryText(expiresAt) {
+  const ms = Date.parse(expiresAt);
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) + ' 前有效';
+}
+
+const pendingFor = task => state.confirmations.filter(item => item.taskId === task.id && item.decision === 'pending' && !item.expired);
+const decidedFor = task => state.confirmations.filter(item => item.taskId === task.id && item.decision !== 'pending');
+
+function confirmationBlock(task) {
+  const items = pendingFor(task);
+  if (!items.length) return '';
+  const rows = items.map(item => {
+    const id = escape(item.confirmId);
+    return '<div class="confirm-item" data-confirm-id="' + id + '">'
+      + '<div class="confirm-head"><span class="confirm-tool">' + escape(toolLabel(item.tool)) + '</span><small class="confirm-expiry">' + escape(expiryText(item.expiresAt)) + '</small></div>'
+      + '<pre class="confirm-preview">' + escape(previewText(item.preview)) + '</pre>'
+      + '<div class="task-actions confirm-actions"><button type="button" data-confirm-action="accept" data-confirm-id="' + id + '">接受</button><button type="button" data-confirm-action="reject" data-confirm-id="' + id + '">拒绝</button></div>'
+      + '</div>';
+  }).join('');
+  return '<section class="task-block task-confirm"><h5>待确认 · 敏感写入</h5>' + rows + '<p class="placeholder">接受后才会写入本机；拒绝不会留下业务数据，但会保留这次确认记录。</p></section>';
+}
+
+function confirmationAuditBlock(task) {
+  const items = decidedFor(task);
+  if (!items.length) return '';
+  const rows = items.map(item => {
+    const accepted = item.decision === 'accepted';
+    const text = accepted ? '已接受 · 写入已记入审计' : '已拒绝 · 未写入';
+    return '<li class="confirm-log-item" data-decision="' + escape(item.decision) + '"><span>' + escape(toolLabel(item.tool)) + '</span><small>' + escape(text) + '</small></li>';
+  }).join('');
+  return '<section class="task-block task-audit"><h5>审计 · 确认记录</h5><ul class="confirm-log">' + rows + '</ul><p class="placeholder">确认记录不可撤销；已写入的数据如需撤回，请在审计审阅层撤销。</p></section>';
+}
 let refreshing = null;
 let pollTimer = null;
 
@@ -97,9 +141,11 @@ function card(task) {
     + '<div class="task-meta">自动写入 ' + (Number(counts.writes) || 0) + ' 条 · 批次 ' + (Number(counts.batches) || 0) + ' · 工具 ' + (Number(counts.tools) || 0) + ' · 证据 ' + (Number(counts.evidence) || 0) + ' · 草稿 ' + (Number(counts.drafts) || 0) + '</div>'
     + error
     + fallbackBlock(task)
+    + confirmationBlock(task)
     + evidenceBlock(task)
     + draftBlock(task)
     + undoBlock(task)
+    + confirmationAuditBlock(task)
     + stop
     + '</article>';
 }
@@ -121,7 +167,8 @@ function render() {
     body.innerHTML = '<p class="workflow-empty">' + escape(state.error || '还没有任务。发起一次对话后，进度、证据与草稿会出现在这里。') + '</p>';
     return;
   }
-  body.innerHTML = GROUPS.map(group => {
+  const confirmError = state.confirmError ? '<p class="task-error" role="alert">' + escape(state.confirmError) + '</p>' : '';
+  body.innerHTML = confirmError + GROUPS.map(group => {
     const tasks = state.tasks.filter(task => groupOf(task) === group.id);
     const cards = tasks.length ? tasks.map(card).join('') : '<p class="placeholder">暂无</p>';
     return '<section class="workflow-group" data-group="' + group.id + '"><div class="workflow-group-head"><b>' + group.label + '</b><span class="workflow-group-count">' + tasks.length + '</span></div>' + cards + '</section>';
@@ -132,7 +179,15 @@ async function refresh() {
   if (refreshing) return refreshing;
   refreshing = (async () => {
     try {
-      const data = await zx.api('tasks');
+      const [data, confirmData] = await Promise.all([
+        zx.api('tasks'),
+        // 确认列表读失败不影响任务卡；待确认区只是少一块，不伪造记录。
+        zx.api('confirmations?state=all').catch(() => null)
+      ]);
+      if (confirmData) {
+        state.confirmations = Array.isArray(confirmData.confirmations) ? confirmData.confirmations : [];
+        state.confirmError = '';
+      }
       state.tasks = Array.isArray(data.tasks) ? data.tasks : [];
       state.counts = data.counts || {};
       state.badge = Number(data.badge) || 0;
@@ -196,6 +251,23 @@ document.addEventListener('click', async event => {
     render();
   } finally {
     button.disabled = false;
+  }
+});
+
+// 待确认区的接受/拒绝：成功后刷新任务卡（任务会从待确认收尾，审计区出现确认记录）。
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-confirm-action]');
+  if (!button || button.disabled) return;
+  const action = button.dataset.confirmAction;
+  if (action !== 'accept' && action !== 'reject') return;
+  button.disabled = true;
+  try {
+    await zx.api('confirmations/' + action, {confirmId: button.dataset.confirmId});
+    state.confirmError = '';
+    await refresh();
+  } catch (error) {
+    state.confirmError = error.message;
+    render();
   }
 });
 

@@ -156,6 +156,38 @@ export const TOOLS = [
     }
   },
   {
+    name: 'career_profile_write',
+    title: '写入长期画像',
+    description: '把用户确认过的长期画像条目（届别/专业/城市偏好/技能/经历要点）写入本机画像库。这是敏感写入：调用后只生成待确认记录、不落库，需用户在任务卡点「接受」后才保存；不接受时不要自己填 confirmId。一次调用 = 一个批次，重试要复用同一个 idempotencyKey。',
+    permission: 'write',
+    sensitivity: 'sensitive',
+    writeDomain: 'profile',
+    handler: 'profile.write',
+    timeoutMs: 15000,
+    parameters: {
+      type: 'object',
+      properties: {
+        facts: {
+          type: 'array',
+          description: '画像条目数组（1-50 条）；每项含 key（要点名，≤40 字）与 value（内容，≤500 字），可选 source',
+          items: {
+            type: 'object',
+            properties: {
+              key: {type: 'string', maxLength: 40},
+              value: {type: 'string', maxLength: 500},
+              source: {type: 'string', maxLength: 80}
+            },
+            required: ['key', 'value']
+          }
+        },
+        idempotencyKey: {type: 'string', maxLength: 200, description: '幂等键：同一次写入重试必须复用'},
+        confirmId: {type: 'string', maxLength: 64, description: '确认接口内部使用；模型不要填写'}
+      },
+      required: ['facts', 'idempotencyKey'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'career_source_health',
     title: '招聘来源健康',
     description: '列出高校就业网/公众号来源的列表、详情、项目能力与最近状态；ok 只在列表解析成功时使用。',

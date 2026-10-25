@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS confirmations(
   action TEXT NOT NULL DEFAULT '',
   preview_summary TEXT NOT NULL DEFAULT '',
   source_ref TEXT NOT NULL DEFAULT '',
+  payload_json TEXT NOT NULL DEFAULT '',
+  task_id TEXT NOT NULL DEFAULT '',
+  decision_reason TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   consumed_at TEXT,
@@ -72,9 +75,24 @@ CREATE TABLE IF NOT EXISTS audit_meta(
 );
 `;
 
+// 旧库迁移：#29 建过 confirmations，但确认要能按原参数重放、按任务卡取，补齐后加的列。
+const CONFIRMATION_COLUMNS = [
+  ['payload_json', "TEXT NOT NULL DEFAULT ''"],
+  ['task_id', "TEXT NOT NULL DEFAULT ''"],
+  ['decision_reason', "TEXT NOT NULL DEFAULT ''"]
+];
+
+export function ensureConfirmationColumns(db) {
+  const names = new Set(db.prepare('PRAGMA table_info(confirmations)').all().map(row => row.name));
+  for (const [name, definition] of CONFIRMATION_COLUMNS) {
+    if (!names.has(name)) db.exec('ALTER TABLE confirmations ADD COLUMN ' + name + ' ' + definition);
+  }
+}
+
 // 建表幂等：网关构造时调用一次；业务库与审计库是同一个文件。
 export function ensureAuditSchema(db, domain = '') {
   db.exec(SCHEMA);
+  ensureConfirmationColumns(db);
   if (domain) {
     db.prepare('INSERT INTO audit_meta(domain, last_cleared_at, updated_at) VALUES(?, NULL, ?) ON CONFLICT(domain) DO NOTHING')
       .run(String(domain), new Date().toISOString());

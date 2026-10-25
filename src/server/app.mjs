@@ -24,6 +24,7 @@ import {createToolExecutor} from '../tools/execute.mjs';
 import {InboundMcp} from '../mcp/inbound.mjs';
 import {createInboundHttp} from './inbound-http.mjs';
 import {handleAudit} from '../writes/audit-api.mjs';
+import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -250,6 +251,17 @@ const server = http.createServer(async (req, res) => {
       const out = await handleAudit({dir, userId: user.id, url});
       return send(res, out.json);
     }
+    // 敏感写入的挂起确认：默认只列本人未处理、未过期的；state=all 供任务卡审计区看已接受/已拒绝记录。
+    if (req.method === 'GET' && url.pathname === '/api/confirmations') {
+      const out = listConfirmations({
+        dir,
+        userId: user.id,
+        taskId: String(url.searchParams.get('taskId') || '').trim(),
+        state: url.searchParams.get('state') === 'all' ? 'all' : 'pending',
+        limit: Number(url.searchParams.get('limit')) || 50
+      });
+      return send(res, out);
+    }
     if (req.method === 'GET' && url.pathname === '/api/mcp') return send(res, (await inboundMcp.status(user.id)).json);
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
@@ -313,6 +325,44 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/mcp/clients/regenerate') {
         const out = await inboundMcp.regenerateClient({userId: user.id, id: String(body.id || '')});
         return send(res, out.json, out.status);
+      }
+
+      // 接受/拒绝敏感写入确认：身份只来自当前登录用户；确认不属于本人时按不存在处理。
+      if (url.pathname === '/api/confirmations/accept' || url.pathname === '/api/confirmations/reject') {
+        const confirmId = String(body.confirmId || '').trim();
+        if (!confirmId) return send(res, {error: '缺少 confirmId', code: 'INVALID_ARGUMENTS'}, 400);
+        try {
+          const accepted = url.pathname.endsWith('/accept');
+          const out = accepted
+            ? await acceptConfirmation({dir, userId: user.id, confirmId})
+            : await rejectConfirmation({dir, userId: user.id, confirmId, reason: body.reason});
+          // 接受时把真实写入条数并进任务卡；没有剩余待确认时才把任务从 waiting_confirmation 收尾。
+          if (out.ok && out.taskId) {
+            const left = listConfirmations({dir, userId: user.id, taskId: out.taskId, state: 'pending'});
+            out.task = await taskManager.applyConfirmation(user.id, out.taskId, {
+              state: 'succeeded',
+              phase: accepted ? '确认已接受，写入完成' : '确认已拒绝，未写入',
+              counts: accepted && !out.duplicate ? out.counts : null,
+              finalize: !left.confirmations.length
+            });
+          }
+          return send(res, out);
+        } catch (error) {
+          if (error && typeof error.status === 'number' && error.code) {
+            // 过期确认无法再处理：把还停在待确认的任务收尾为失败，恢复建议是重新发起。
+            if (error.status === 410 && error.taskId) {
+              const left = listConfirmations({dir, userId: user.id, taskId: error.taskId, state: 'pending'});
+              if (!left.confirmations.length) {
+                await taskManager.applyConfirmation(user.id, error.taskId, {
+                  state: 'failed', phase: '确认已过期',
+                  error: {code: 'CONFIRMATION_EXPIRED', message: '这次确认已过期（10 分钟），写入没有执行。', recovery: '重新发起写入并确认。'}
+                });
+              }
+            }
+            return send(res, {error: error.message, code: error.code}, error.status);
+          }
+          throw error;
+        }
       }
 
       if (url.pathname.startsWith('/api/recruit/')) {
