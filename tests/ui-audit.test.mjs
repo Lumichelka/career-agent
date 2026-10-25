@@ -136,6 +136,30 @@ test('审阅层：任务卡入口、批次 diff、强制撤销二次确认、390
   assert.ok(await page.locator('#audit-detail details.audit-raw').count() >= 1, '每行有可折叠原始 JSON');
   await noOverflow('详情');
 
+  // 桌面：审阅层 1000 宽、两栏（左批次右 diff）。
+  await page.setViewportSize({width: 1280, height: 800});
+  await page.waitForTimeout(150);
+  const desktop = await page.evaluate(() => {
+    const shell = document.querySelector('.audit-shell').getBoundingClientRect();
+    const batches = document.querySelector('#audit-batches');
+    const detail = document.querySelector('#audit-detail');
+    const main = document.querySelector('.audit-main');
+    return {
+      shellWidth: shell.width,
+      columns: getComputedStyle(main).gridTemplateColumns.split(' ').filter(Boolean).length,
+      batchesVisible: batches.getBoundingClientRect().width > 100,
+      detailVisible: detail.getBoundingClientRect().width > 200,
+      scrollWidth: document.documentElement.scrollWidth
+    };
+  });
+  assert.ok(Math.abs(desktop.shellWidth - 1000) <= 2, '桌面审阅层应约 1000 宽，实际 ' + desktop.shellWidth);
+  assert.equal(desktop.columns, 2, '桌面审阅层是两栏');
+  assert.equal(desktop.batchesVisible, true);
+  assert.equal(desktop.detailVisible, true);
+  assert.ok(desktop.scrollWidth <= 1280);
+  await page.setViewportSize({width: 390, height: 844});
+  await page.waitForTimeout(100);
+
   // 返回：先回列表，再关掉审阅层回到抽屉。
   await page.click('#audit-back');
   await page.waitForFunction(() => !document.querySelector('#audit-layer')?.classList.contains('show-detail'), null, {timeout: 10000});
