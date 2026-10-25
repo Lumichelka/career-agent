@@ -22,22 +22,33 @@ import {listTools} from '../tools/registry.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
-const root = fileURLToPath(new URL('../..', import.meta.url));
-const dataDir = await prepareDataDir({root, log: message => console.log(message)});
+// 应用工厂：装配一个可启动的实例，不做进程级的事（环境变量、日志格式归 index.mjs）。
+// 返回 {server, token, dataDir, host, port, origin, close}；port 传 0 时由系统分配，close 幂等。
+export async function createApp({
+  root = fileURLToPath(new URL('../..', import.meta.url)),
+  dataDir: givenDataDir = '',
+  host = '127.0.0.1',
+  port = 0,
+  log = () => {}
+} = {}) {
+const dataDir = givenDataDir || await prepareDataDir({root, log});
+await mkdir(dataDir, {recursive: true});
 const tokenFile = join(dataDir, 'local-session-token');
 let token = await readFile(tokenFile, 'utf8').catch(() => '');
 if (!/^[a-f0-9]{48}$/.test(token)) { token = randomBytes(24).toString('hex'); await writeFile(tokenFile, token, 'utf8'); }
 const running = new Map(), taskEvents = new Map(), loginWaiters = new Map(), loginPrompted = new Set();
-const port = Number(process.env.PORT || 4189);
-const host = process.env.CAREER_HOST || '127.0.0.1';
-const localOrigin = 'http://127.0.0.1:' + port;
-
+let actualPort = Number(port);
+let localOrigin = 'http://127.0.0.1:' + actualPort;
+let allowedHosts = new Set();
 // 多设备访问：默认只监听本机；CAREER_HOST=0.0.0.0 时开放局域网，但保留口令与账号两道门槛。
-const allowedHosts = new Set(['127.0.0.1:' + port, 'localhost:' + port, '[::1]:' + port, '127.0.0.1', 'localhost']);
-if (host !== '127.0.0.1') {
-  for (const list of Object.values(os.networkInterfaces())) for (const net of list || []) if (net.family === 'IPv4' && !net.internal) { allowedHosts.add(net.address + ':' + port); allowedHosts.add(net.address); }
+function buildAllowedHosts(listenPort) {
+  const set = new Set(['127.0.0.1:' + listenPort, 'localhost:' + listenPort, '[::1]:' + listenPort, '127.0.0.1', 'localhost']);
+  if (host !== '127.0.0.1') {
+    for (const list of Object.values(os.networkInterfaces())) for (const net of list || []) if (net.family === 'IPv4' && !net.internal) { set.add(net.address + ':' + listenPort); set.add(net.address); }
+  }
+  for (const extra of String(process.env.CAREER_ALLOWED_HOSTS || '').split(',')) { const h = extra.trim(); if (h) { set.add(h); set.add(h + ':' + listenPort); } }
+  return set;
 }
-for (const extra of String(process.env.CAREER_ALLOWED_HOSTS || '').split(',')) { const h = extra.trim(); if (h) { allowedHosts.add(h); allowedHosts.add(h + ':' + port); } }
 const hostAllowed = h => !!h && (allowedHosts.has(h) || allowedHosts.has(h.split(':')[0]));
 
 const accounts = await new Accounts(dataDir).init(), tenants = new Map(), owners = new Map(), bridgeTokens = new Map();
@@ -60,7 +71,6 @@ async function tenant(user) {
   })());
   return tenants.get(user.id);
 }
-process.env.CAREER_BRIDGE_URL = localOrigin; process.env.CAREER_BRIDGE_TOKEN = token;
 const send = (res, obj, status = 200) => { res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}); res.end(JSON.stringify(obj)); };
 const sendFile = (res, body, type, name) => { res.writeHead(200, {'Content-Type': type, 'Cache-Control': 'no-store', ...(name ? {'Content-Disposition': 'attachment; filename="' + name + '"'} : {})}); res.end(body); };
 const validId = id => typeof id === 'string' && /^[a-f0-9-]{36}$/.test(id);
@@ -87,14 +97,14 @@ async function platformReadForTask(platforms, action, body) {
   return {...result, message: choice === 'skip' ? '用户选择暂不登录。请说明缺少平台来源，使用公开资料完成可行部分。' : choice === 'timeout' ? '等待本人登录超时，本次未取得平台资料。' : '用户已停止任务。'};
 }
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   try {
     const hostHeader = req.headers.host || '';
     if (!hostAllowed(hostHeader)) return send(res, {error: 'Host rejected'}, 403);
     const requestOrigin = 'http://' + hostHeader;
     const url = new URL(req.url, requestOrigin);
 
-    if (req.method === 'GET' && url.pathname === '/health') return send(res, {app: 'career-agent', status: 'ready', host, port});
+    if (req.method === 'GET' && url.pathname === '/health') return send(res, {app: 'career-agent', status: 'ready', host, port: actualPort});
 
     if (req.method === 'GET' && url.pathname === '/') {
       res.writeHead(302, {Location: '/chat'});
@@ -410,9 +420,19 @@ http.createServer(async (req, res) => {
   } catch (e) {
     if (!res.headersSent) send(res, {error: e.message || '请求失败'}, 400); else res.end();
   }
-}).listen(port, host, () => {
-  const lan = host === '0.0.0.0' ? Object.values(os.networkInterfaces()).flat().filter(n => n && n.family === 'IPv4' && !n.internal).map(n => 'http://' + n.address + ':' + port) : [];
-  console.log('职向智能体：http://127.0.0.1:' + port);
-  if (lan.length) console.log('局域网访问（同一 Wi-Fi 的其它设备）：' + lan.join(' '));
-  console.log('只保存本机数据；不会收集招聘平台密码。首次进入请用 ' + join(dataDir, '首次登录.txt') + ' 里的账号登录。');
 });
+await new Promise((resolve, reject) => { server.once('error', reject); server.listen(actualPort, host, resolve); });
+actualPort = server.address().port;
+localOrigin = 'http://127.0.0.1:' + actualPort;
+allowedHosts = buildAllowedHosts(actualPort);
+// 内部任务桥（Codex 子进程）通过这两个变量访问本实例；端口在 listen 之后才确定。
+process.env.CAREER_BRIDGE_URL = localOrigin;
+process.env.CAREER_BRIDGE_TOKEN = token;
+let closing = null;
+const close = () => closing || (closing = new Promise(resolve => {
+  for (const controller of running.values()) controller.abort();
+  if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+  server.close(() => resolve());
+}));
+return {server, token, dataDir, root, host, port: actualPort, origin: localOrigin, close};
+}
