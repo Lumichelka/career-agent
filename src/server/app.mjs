@@ -18,6 +18,9 @@ import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
 import {listTools} from '../tools/registry.mjs';
+import {createToolExecutor} from '../tools/execute.mjs';
+import {InboundMcp} from '../mcp/inbound.mjs';
+import {createInboundHttp} from './inbound-http.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -69,8 +72,27 @@ async function tenant(user) {
   })());
   return tenants.get(user.id);
 }
+// 入站 /mcp：身份只来自自签 bearer，调用落到凭据所属账号的租户目录。
+const inboundMcp = await new InboundMcp({
+  dataDir,
+  accounts,
+  getOrigin: () => localOrigin,
+  callTool: async ({userId, name, args}) => {
+    const user = accounts.users.find(u => u.id === userId);
+    if (!user) return {status: 'error', code: 'ACCOUNT_MISSING', message: '该凭据所属账号已不存在', recovery: '请重新登录网页端并重新签发凭据。'};
+    const t = await tenant(user);
+    const model = t.models.snapshot();
+    return createToolExecutor()(name, args, {
+      taskId: '',
+      config: {searchUrl: model.searchUrl, recruitDir: t.dir, dataDir: t.dir},
+      fetchImpl: fetch,
+      signal: AbortSignal.timeout(180000)
+    });
+  }
+}).init();
 const send = (res, obj, status = 200) => { res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}); res.end(JSON.stringify(obj)); };
 const sendFile = (res, body, type, name) => { res.writeHead(200, {'Content-Type': type, 'Cache-Control': 'no-store', ...(name ? {'Content-Disposition': 'attachment; filename="' + name + '"'} : {})}); res.end(body); };
+const inboundHttp = createInboundHttp({inbound: inboundMcp, send});
 const validId = id => typeof id === 'string' && /^[a-f0-9-]{36}$/.test(id);
 const file = (dir, id) => join(dir, id + '.json');
 async function load(dir, id) { if (!validId(id)) throw new Error('无效会话'); return JSON.parse(await readFile(file(dir, id), 'utf8')); }
@@ -142,8 +164,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/artifact.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -151,6 +173,11 @@ const server = http.createServer(async (req, res) => {
 
     // 跨站请求防护：Origin 必须与当前访问地址一致
     if (req.headers.origin && req.headers.origin !== requestOrigin && req.headers.origin !== localOrigin) return send(res, {error: 'Origin rejected'}, 403);
+
+    // 对外 MCP 入站：现有端口上的 /mcp，自带 bearer 鉴权，不走网页会话口令。
+    // 开关关闭时端点就是不存在（404）；实例口令与登录 cookie 在这里都不是身份。
+    if (url.pathname === '/mcp') return inboundHttp(req, res, url, localOrigin);
+
     if (req.headers['x-career-token'] !== token && !bridgeTokens.has(req.headers['x-career-token'])) return send(res, {error: '会话校验失败，请刷新页面'}, 403);
 
     if (req.method === 'POST' && ['/api/auth/login', '/api/auth/register'].includes(url.pathname)) {
@@ -203,6 +230,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, await buildMemoryPayload(dir, session));
     }
     if (req.method === 'GET' && url.pathname === '/api/capabilities') return send(res, {tools: listTools(), skills: await listSkills(root), memory: await memorySummary(dir)});
+    if (req.method === 'GET' && url.pathname === '/api/mcp') return send(res, (await inboundMcp.status(user.id)).json);
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const items = [];
@@ -246,6 +274,24 @@ const server = http.createServer(async (req, res) => {
       let raw = '';
       for await (const b of req) { raw += b.toString(); if (raw.length > 400000) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
       const body = JSON.parse(raw || '{}');
+
+      // 入站 /mcp 的开关与 client 凭据：任何登录用户都能开，但开启要二次确认。
+      if (url.pathname === '/api/mcp/switch') {
+        const out = await inboundMcp.setEnabled({enabled: body.enabled, confirm: body.confirm === true, user});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients') {
+        const out = await inboundMcp.issueClient({userId: user.id, name: body.name});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients/revoke') {
+        const out = await inboundMcp.revokeClient({userId: user.id, id: String(body.id || '')});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients/regenerate') {
+        const out = await inboundMcp.regenerateClient({userId: user.id, id: String(body.id || '')});
+        return send(res, out.json, out.status);
+      }
 
       if (url.pathname.startsWith('/api/recruit/')) {
         const out = await handleRecruit({method: 'POST', pathname: url.pathname.slice('/api/recruit/'.length), url, body, dir});
@@ -426,6 +472,7 @@ allowedHosts = buildAllowedHosts(actualPort);
 let closing = null;
 const close = () => closing || (closing = new Promise(resolve => {
   for (const controller of running.values()) controller.abort();
+  inboundMcp.close().catch(() => {});
   if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
   server.close(() => resolve());
 }));
