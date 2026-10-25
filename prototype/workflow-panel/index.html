@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原型 · 工作流面板与任务状态（#18）</title>
+<style>
+:root{
+  --green:#176b55;--green-dark:#123c30;--ink:#20332c;--muted:#7e8c85;
+  --line:#e3e9e4;--bg:#f8faf9;--card:#fff;--amber:#a8691f;--red:#a64232;--blue:#2c6390;
+  --shadow:0 18px 50px #172e2722;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;padding-top:40px;color:var(--ink);background:var(--bg);font:14px/1.75 'Segoe UI','Microsoft YaHei',sans-serif}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--green)}
+.app{display:flex;min-height:calc(100dvh - 40px)}
+aside.rail{width:258px;flex:0 0 258px;background:#172e27;color:#e4eee9;padding:26px 18px;display:flex;flex-direction:column;gap:12px;overflow:auto}
+.brand{font-size:26px;letter-spacing:4px;padding:0 10px 14px}
+.brand small{display:block;font-size:9px;letter-spacing:2px;color:#9db9aa;margin-top:4px}
+.rail button.entry{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;border:1px solid #ffffff24;background:#ffffff0c;color:#edf7f1;border-radius:12px;padding:10px 12px;font-size:13px;text-align:left}
+.rail button.entry:hover{background:#ffffff17}
+.rail button.entry.on{background:#ffffff1f;border-color:#ffffff40}
+.rail .group-label{font-size:10px;letter-spacing:2px;color:#9bb0a5;margin:16px 10px 2px}
+.sessions{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.sessions button{border:0;background:transparent;color:#aebfb5;text-align:left;font-size:12px;padding:9px 10px;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sessions button:hover,.sessions button.on{background:#ffffff0e;color:#fff}
+.rail .foot{margin-top:auto;padding-top:16px;border-top:1px solid #ffffff14;font-size:10.5px;line-height:1.9;color:#91aa9c}
+.rail .foot button{border:0;background:none;color:#c9e5d5;padding:0;font-size:11.5px}
+main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:100dvh;background:radial-gradient(ellipse at 50% 0,#e6f0e870,transparent 60%)}
+header{height:70px;flex:0 0 70px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 26px;background:#ffffffb8;border-bottom:1px solid var(--line)}
+header .title{font-size:16px;font-weight:600;display:flex;align-items:center;gap:10px}
+header .title span{font-weight:400;color:var(--muted);font-size:11px}
+header .head-right{display:flex;align-items:center;gap:9px;min-width:0}
+.route{border:1px solid #dce9df;background:#eff6f0;color:#4c7b66;border-radius:30px;padding:4px 11px;font-size:10.5px;white-space:nowrap}
+.route b{font-weight:600;color:#2c5f4a}
+.wf-entry{border:1px solid #cfe0d5;background:#fff;border-radius:30px;padding:4px 11px;font-size:11px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.wf-entry .badge{background:var(--green);color:#fff;border-radius:20px;min-width:17px;height:17px;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;padding:0 4px}
+.mobile-only{display:none;border:0;background:#edf3e9;border-radius:8px;padding:5px 9px;font-size:15px}
+.view{display:flex;flex-direction:column;flex:1;min-height:0}
+#messages{flex:1;overflow:auto;padding:28px max(24px,calc((100% - 760px)/2));display:flex;flex-direction:column;gap:18px}
+.welcome{padding:5vh 0 2vh;max-width:640px}
+.welcome .mark{width:52px;height:52px;border-radius:16px;background:#e4eee6;color:#23775c;font-size:28px;display:grid;place-items:center;margin-bottom:12px}
+h1{font-size:30px;line-height:1.5;font-weight:600;margin:0 0 10px;letter-spacing:0}
+.welcome p{color:var(--muted);font-size:13px}
+.msg{max-width:100%}
+.msg.user{margin-left:auto;width:max-content;max-width:86%;background:#eaf0e4;padding:11px 16px;border-radius:16px;font-size:13.5px}
+.msg.assistant .role{font-size:10.5px;color:var(--muted);margin-bottom:5px}
+.msg.assistant .body{font-size:13.5px;line-height:1.95}
+.msg.assistant .body p{margin:0 0 6px}
+.calls{margin-top:8px;font-size:11px;color:#6f8078;border:1px solid var(--line);background:#fff;border-radius:9px;padding:6px 10px;display:inline-block}
+.trace{font-size:11px;color:#7e8c85}
+.composer-area{flex:0 0 auto;padding:10px max(24px,calc((100% - 760px)/2)) 14px;background:linear-gradient(transparent,#f8faf9 30%)}
+.composer{border:1px solid #dbe5dd;background:#fff;border-radius:16px;padding:10px 12px;box-shadow:0 8px 24px #172e270d}
+.composer .status{font-size:11px;color:#6a7d72;min-height:17px;margin-bottom:4px;white-space:pre-wrap}
+.composer textarea{width:100%;border:0;resize:none;min-height:44px;max-height:120px;background:transparent;outline:none;font-size:13.5px;line-height:1.7}
+.composer .bar{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.composer .bar .side{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.composer .mini{border:1px solid #dbe5dd;background:#fff;border-radius:9px;padding:5px 10px;font-size:11px;color:#4c6a59}
+.composer .send{border:0;width:34px;height:34px;border-radius:50%;background:var(--green);color:#fff;font-size:15px}
+.hint{font-size:10px;color:#93a198;margin-top:7px;padding:0 4px}
+.proto{position:fixed;left:0;right:0;top:0;z-index:200;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:12px;background:#172e27;min-height:40px;padding:4px 12px;box-shadow:0 6px 18px #172e2733}
+.proto .row{display:flex;align-items:center;gap:6px;color:#e8f2ec;font-size:10.5px}
+.proto .row.label small{font-size:8.5px;letter-spacing:1.5px;color:#8fb3a2}
+.proto button.arrow{width:24px;height:24px;border-radius:50%;border:1px solid #ffffff2e;background:#ffffff12;color:#dff0e7;font-size:13px;line-height:1}
+.proto button.arrow:hover{background:#ffffff26}
+.proto .name{min-width:150px;text-align:center;font-size:10.5px;white-space:nowrap}
+.proto .surface{display:flex;gap:2px;margin-left:0;padding-left:0;border-left:0;justify-content:space-between}
+.proto .surface button{border:1px solid transparent;background:transparent;color:#bcd4c7;border-radius:999px;padding:3px 8px;font-size:10.5px}
+.proto .surface button.on{background:#fff;color:#172e27;font-weight:600}
+.proto .surface button[data-help]{color:#9fc2b0;text-decoration:underline}
+.task{border:1px solid #dde7e0;background:#fff;border-radius:14px;padding:13px 15px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.task.running{border-left:3px solid var(--green)}
+.task.confirm{border-left:3px solid var(--amber)}
+.task.done{border-left:3px solid #557f6c}
+.task.failed{border-left:3px solid var(--red)}
+.task-head{display:flex;align-items:flex-start;gap:8px;min-width:0}
+.dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;margin-top:7px;background:var(--green)}
+.dot.pulse{box-shadow:0 0 0 4px #176b5522;animation:pulse 1.8s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 7px #176b550d}}
+.task.confirm .dot{background:var(--amber)}
+.task.done .dot{background:#557f6c}
+.task.failed .dot{background:var(--red)}
+.task-title{font-size:13.5px;font-weight:600;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.task-title small{font-weight:400;color:var(--muted);font-size:11px;margin-left:6px}
+.task-state{margin-left:auto;font-size:10px;color:#5b7a68;background:#eef5ef;border-radius:20px;padding:2px 8px;white-space:nowrap;flex:0 0 auto}
+.task.confirm .task-state{background:#fbf1e0;color:#8a5a17}
+.task.failed .task-state{background:#fbebe7;color:var(--red)}
+.task-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:10.5px;color:#7a8c81;min-width:0}
+.progress{height:5px;border-radius:4px;background:#edf2ee;overflow:hidden}
+.progress i{display:block;height:100%;background:linear-gradient(90deg,#2f8a68,#7bb79b);border-radius:4px}
+.task-line{font-size:11.5px;color:#5c7165;overflow-wrap:anywhere}
+.task-actions{display:flex;gap:6px;flex-wrap:wrap}
+.btn{border:1px solid #cfe0d5;background:#fff;border-radius:8px;padding:5px 10px;font-size:11px;color:#305c47}
+.btn:hover{background:#f2f8f3}
+.btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+.btn.warn{background:#fff;border-color:#e4c9b0;color:#8a5317}
+.btn.ghost{border-color:#e2e8e3;color:#7b8c82;background:transparent}
+.btn:disabled{opacity:.5;cursor:default}
+details.more{border-top:1px dashed #e5ebe6;padding-top:6px}
+details.more summary{cursor:pointer;font-size:11px;color:#6d8176;list-style:none}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary:before{content:'▸ ';color:#93a69a}
+details.more[open] summary:before{content:'▾ '}
+.steps{margin:6px 0 0;padding-left:16px;font-size:11px;color:#607567;line-height:1.9}
+.evidence{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.ev{border:1px solid #dde7e0;background:#fbfdfb;border-radius:8px;padding:4px 8px;font-size:10.5px;color:#4f6d5d;display:flex;gap:5px;align-items:center}
+.ev b{font-weight:600;color:#2f5c47}
+.draft,.undo,.confirm-box,.fail-box,.mrtr{border-radius:10px;padding:10px 12px;font-size:11.5px;line-height:1.75;display:flex;flex-direction:column;gap:6px}
+.draft{background:#f7faf7;border:1px solid #e0eae2}
+.draft b,.undo b,.confirm-box b,.fail-box b,.mrtr b{font-size:12px;color:#274b3b}
+.undo{background:#f6f9f7;border:1px solid #dfe9e2}
+.undo .tally{display:flex;gap:8px;flex-wrap:wrap;font-size:10.5px}
+.undo .ok{color:#2d7150}.undo .warn{color:#8a5317}
+.confirm-box{background:#fdf8ee;border:1px solid #efdcbf}
+.fail-box{background:#fdf3f0;border:1px solid #eed3cb}
+.fail-box code{background:#fff;border:1px solid #eed3cb;border-radius:4px;padding:0 4px;font-size:10.5px}
+.mrtr{background:#f4f8fa;border:1px solid #d9e6ee}
+.muted{color:#8b9a90;font-size:10.5px}
+.scrim{position:fixed;inset:40px 0 0 0;background:#172e2740;z-index:60;opacity:0;pointer-events:none;transition:opacity .18s}
+body.drawer-open .scrim{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:40px;right:0;bottom:0;width:min(400px,92vw);background:#fbfcfb;border-left:1px solid var(--line);z-index:70;transform:translateX(102%);transition:transform .22s ease;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+@media (min-width:751px){
+  body.drawer-open main{margin-right:400px;transition:margin .22s ease}
+  body.drawer-open .scrim{opacity:0;pointer-events:none}
+}
+body.drawer-open .drawer{transform:none}
+.drawer-head{padding:16px 16px 10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.drawer-head .line{display:flex;align-items:center;gap:8px}
+.drawer-head h2{margin:0;font-size:15px}
+.drawer-head .x{margin-left:auto;border:0;background:none;font-size:19px;color:#7d8f83;line-height:1}
+.seg{display:flex;background:#eef3ef;border-radius:9px;padding:2px;gap:2px}
+.seg button{flex:1;border:0;background:transparent;border-radius:7px;padding:4px;font-size:10.5px;color:#6d8075}
+.seg button.on{background:#fff;color:#24483a;font-weight:600;box-shadow:0 1px 3px #172e2714}
+.drawer-body{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.drawer-foot{border-top:1px solid var(--line);padding:9px 14px;font-size:10px;color:#8b9a90}
+.inline-wrap{display:flex;flex-direction:column;gap:10px;margin:2px 0 4px}
+.msg.assistant .inline-wrap .task{width:100%}
+.quick{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:7px}
+.quick button{border:1px solid #d8e4db;background:#fff;border-radius:999px;padding:4px 10px;font-size:10.5px;color:#426b57}
+.quick .note{font-size:9.5px;color:#93a198;margin-left:2px}
+body:not([data-variant="B"]) #inline-zone,body:not([data-variant="B"]) #quick-zone{display:none}
+.wf-link{display:none;margin:6px 0 0}
+body[data-variant="C"] .wf-link{display:block}
+.wf-link a{font-size:11px;color:#2f6b53;text-decoration:none;border-bottom:1px dashed #b9cfc2}
+.wf{flex:1;min-height:0;overflow:auto;padding:22px max(22px,calc((100% - 1060px)/2))}
+.wf-head{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.wf-head h1{font-size:22px;margin:0}
+.wf-head .muted{font-size:11px}
+.wf-grid{display:grid;grid-template-columns:minmax(230px,300px) minmax(0,1fr);gap:16px;align-items:start}
+.queue{border:1px solid var(--line);background:#fff;border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:5px;position:sticky;top:0}
+.queue h2{font-size:10px;letter-spacing:1.5px;color:#8b9a90;margin:9px 6px 4px;font-weight:600;display:flex;justify-content:space-between}
+.queue h2 span{color:#b3c0b7}
+.q-item{border:1px solid transparent;background:#f8faf8;border-radius:9px;padding:8px 9px;text-align:left;display:flex;flex-direction:column;gap:2px;min-width:0}
+.q-item:hover{border-color:#d8e5dc;background:#fff}
+.q-item.on{border-color:#bcd7c7;background:#f2f8f4}
+.q-item b{font-size:11.5px;font-weight:600;overflow-wrap:anywhere}
+.q-item small{font-size:10px;color:#8b9a90;overflow-wrap:anywhere}
+.wf-detail{border:1px solid var(--line);background:#fff;border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.wf-detail .detail-head{display:flex;flex-direction:column;gap:3px;border-bottom:1px solid var(--line);padding-bottom:10px}
+.wf-detail .detail-head h2{margin:0;font-size:17px;overflow-wrap:anywhere}
+.wf-detail .detail-head .muted{font-size:11px}
+.wf-detail .task{border-top:0;border-right:0;border-bottom:0;border-radius:0;padding:0 0 0 12px;gap:10px}
+
+.audit-link{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#7c8d82;text-decoration:none;border-bottom:1px dashed #c8d5cc;align-self:flex-start}
+.recruit{flex:1;min-height:0;overflow:auto;padding:22px max(22px,calc((100% - 1060px)/2))}
+.recruit h1{font-size:22px;margin:0 0 4px}
+.recruit .lede{font-size:11.5px;color:#7e8c85;margin:0 0 14px}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px;overflow:auto}
+.tabs button{border:0;background:none;padding:8px 12px;font-size:12px;color:#7d8e83;border-bottom:2px solid transparent;white-space:nowrap}
+.tabs button.on{color:#24503e;border-bottom-color:var(--green);font-weight:600}
+.source-table{border:1px solid var(--line);background:#fff;border-radius:14px;overflow:hidden}
+.source-row{display:grid;grid-template-columns:minmax(140px,1.2fr) minmax(160px,1.4fr) 90px minmax(190px,auto);gap:10px;align-items:center;padding:11px 14px;border-bottom:1px solid #eef2ef}
+.source-row:last-child{border-bottom:0}
+.source-row.head{background:#f4f8f5;font-size:10px;letter-spacing:1px;color:#8b9a90}
+.source-row .name{font-size:12.5px;font-weight:600;overflow-wrap:anywhere}
+.source-row .name small{display:block;font-weight:400;color:#93a198;font-size:10px}
+.pill{display:inline-block;border-radius:20px;padding:2px 8px;font-size:10px;background:#eef5ef;color:#4c7b66;white-space:nowrap}
+.pill.warn{background:#fbf1e0;color:#8a5a17}
+.pill.bad{background:#fbebe7;color:var(--red)}
+.pill.calm{background:#eef1f3;color:#63727b}
+.row-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.toast{position:fixed;left:50%;top:150px;transform:translate(-50%,-10px);background:#172e27;color:#e9f3ec;border-radius:10px;padding:9px 14px;font-size:11.5px;z-index:130;opacity:0;pointer-events:none;transition:.22s;max-width:min(92vw,460px);text-align:center}
+body.toasting .toast{opacity:1;transform:translate(-50%,0)}
+dialog{border:0;border-radius:16px;padding:0;max-width:min(94vw,560px);box-shadow:var(--shadow)}
+dialog::backdrop{background:#172e2766}
+.help{padding:20px 22px;font-size:12px;line-height:1.85}
+.help h2{margin:0 0 8px;font-size:16px}
+.help h3{margin:14px 0 4px;font-size:12px;color:#2f5c47}
+.help ul,.help ol{margin:4px 0;padding-left:18px}
+.help .close{margin-top:14px;width:100%}
+@media (max-width:900px){
+  .wf-grid{grid-template-columns:1fr}
+  .queue{position:static}
+  .wf-detail{display:none}
+  body[data-variant="C"] .wf.open-detail .wf-detail{display:flex;position:fixed;inset:0;z-index:80;border-radius:0;overflow:auto;padding-bottom:76px}
+  body[data-variant="C"] .wf.open-detail .wf-detail .back{display:inline-flex}
+}
+.back{display:none;border:0;background:#eef4ef;border-radius:8px;padding:5px 10px;font-size:11px;color:#3d6351;align-self:flex-start}
+.only-small{display:none}
+@media (max-width:750px){.only-small{display:inline}.wf-head .muted:not(.only-small){display:none}}
+@media (max-width:750px){
+  aside.rail{position:fixed;inset:0 auto 0 0;z-index:90;transform:translateX(-102%);transition:transform .2s;width:min(84vw,300px);box-shadow:0 0 50px #172e2755}
+  body.rail-open aside.rail{transform:none}
+  .mobile-only{display:inline-block}
+  main{width:100%}
+  header{padding:0 14px;height:62px;flex-basis:62px;gap:8px}
+  header .title{font-size:14px;gap:6px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header .title span{display:none}
+  .route{font-size:9.5px;padding:3px 8px;overflow:hidden;text-overflow:ellipsis;max-width:34vw}
+  .route .cost,.route .lock{display:none}
+  .wf-entry{font-size:10px;padding:3px 9px}
+  #messages{padding:16px 12px 8px;gap:14px}
+  .composer-area{padding:6px 10px 10px}
+  .composer .bar .side{gap:6px}
+  .hint{display:none}
+  .proto{min-height:44px;gap:6px;padding:4px 8px;justify-content:space-between}
+  .proto .row{flex:1;gap:4px;flex-wrap:nowrap}
+  .proto .row.label{display:none}
+  .proto .name{min-width:0;flex:1;font-size:9.5px;text-align:left}
+  .proto .surface button{padding:2px 5px;font-size:9px}
+  .proto .arrow{width:21px;height:21px;font-size:12px}
+  .proto .row{font-size:10px;padding:5px 8px}
+  .proto .name{min-width:96px;font-size:10.5px}
+  .proto .surface{margin-left:2px;padding-left:6px}
+  .toast{top:132px}
+  .recruit,.wf{padding:16px 12px}
+  .recruit h1,.wf-head h1{font-size:19px}
+  .source-table{overflow:auto}
+  .source-row{grid-template-columns:1fr;gap:6px;padding:12px}
+  .source-row.head{display:none}
+  .row-actions{justify-content:flex-start}
+  .drawer{top:auto;bottom:0;right:0;left:0;width:100%;max-height:72vh;border-radius:18px 18px 0 0;border-left:0;border-top:1px solid var(--line);transform:translateY(102%)}
+  body.drawer-open .drawer{transform:none}
+  .drawer-head{padding-top:10px}
+  .drawer-head:before{content:'';display:block;width:38px;height:4px;border-radius:4px;background:#d6e2da;margin:0 auto}
+  .drawer-body{padding:10px 10px 16px}
+  .task{padding:11px 12px}
+  .task-meta{font-size:10px;gap:7px}
+  .btn{padding:6px 10px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+body.no-anim *{animation:none!important;transition:none!important}
+</style>
+</head>
+
+<body data-variant="A" data-surface="chat">
+
+<div class="app">
+  <aside class="rail" id="rail">
+    <div class="brand">✧ 职向<small>YOUR CAREER AGENT</small></div>
+    <button class="entry" id="new-chat">＋ 新的求职对话</button>
+    <button class="entry" data-nav="workflows" id="nav-workflows" hidden>▦ 工作流 <span class="badge">2</span></button>
+    <button class="entry" data-nav="platforms">⇄ 登录型网站</button>
+    <button class="entry" data-nav="resume">▥ 简历与投递</button>
+    <button class="entry" data-nav="recruit">▤ 数据与日历</button>
+    <div class="group-label">你的求职对话</div>
+    <div class="sessions">
+      <button class="on">双选会 · 西南财大准备</button>
+      <button>简历修改 · 产品实习</button>
+      <button>确定求职方向</button>
+      <button>公司调研 · 成都游戏行业</button>
+    </div>
+    <div class="foot">
+      当前驱动：本机 Codex<br>
+      <button data-nav="settings">模型与接口设置</button><br>
+      <button data-nav="memory">本次对话记忆</button><br>
+      资料保存在本机；任务内容会发送至你选择的模型服务。
+    </div>
+  </aside>
+
+  <main>
+    <header>
+      <div class="title">
+        <button class="mobile-only" id="rail-toggle" aria-label="打开侧栏">☰</button>
+        职向 <span>求职智能体</span>
+      </div>
+      <div class="head-right">
+        <span class="route" title="手动选路；本轮内锁定">当前：<b>本机 Codex</b><span class="cost"> · 本轮 ≈¥0.8</span><span class="lock"> · 🔒 本次锁定</span></span>
+        <button class="wf-entry" id="wf-entry" hidden>工作流 <span class="badge" id="wf-badge">2</span></button>
+      </div>
+    </header>
+
+    <div class="view" id="view-chat">
+      <div id="messages">
+        <div class="welcome" id="welcome" hidden>
+          <div class="mark">✧</div>
+          <h1>下一步，走向更适合你的机会。</h1>
+          <p>告诉我你想做什么。我会追问必要信息，查资料、看岗位，或帮你修改简历。</p>
+        </div>
+
+        <article class="msg user">帮我把西南财大 11 月 8 日双选会的参会单位整理进采集库，顺手核对一下为什么就业网抓不到。</article>
+
+        <article class="msg assistant">
+          <div class="role">✧ 职向</div>
+          <div class="body">
+            <p>这次要走视觉：西南财大就业网 robots 禁止自动抓取，只能用你之前存的页面截图和公众号原文。我会先校对 7 个来源，再整理成草稿给你确认。</p>
+            <p class="trace">计划：截图识别 → 逐条核对单位名/岗位/日期 → 生成草稿 → 你确认后写入（自动写入会进审计，可整批撤销）。</p>
+          </div>
+          <span class="calls">本次调用（2 次 · ≈¥0.8 · 12,345 tok）▾</span>
+        </article>
+
+        <div id="inline-zone" class="inline-wrap" aria-label="任务卡（内联变体）"></div>
+
+        <article class="msg assistant" id="tail-msg">
+          <div class="role">✧ 职向</div>
+          <div class="body">
+            <p>校对完我先把草稿发你看，别急着写库。撤销上次导入时发现的 2 条冲突还没处理，需要的话可以强制撤销。</p>
+            <p class="wf-link"><a href="#" data-action="open-wf">这次任务在工作流里 →</a></p>
+          </div>
+        </article>
+
+        <div class="msg assistant" id="mrtr-zone"></div>
+      </div>
+
+      <div class="composer-area">
+        <div class="composer">
+          <div class="status" id="status">✧ 来源校对进行中 · 3/7 · 心跳 12 秒前</div>
+          <div class="quick" id="quick-zone" aria-label="快捷任务入口（内联变体）"></div>
+          <form onsubmit="return false">
+            <textarea id="input" placeholder="告诉我你的求职需求，或上传简历开始……" aria-label="向职向提问"></textarea>
+            <div class="bar">
+              <div class="side">
+                <button type="button" class="mini">＋ 资料</button>
+                <button type="button" class="mini" data-action="source-proof">来源校对</button>
+              </div>
+              <div class="side">
+                <button type="button" class="mini" data-action="stop-task">■ 停止</button>
+                <button class="send" aria-label="发送">↑</button>
+              </div>
+            </div>
+          </form>
+          <div class="hint">会主动检索公开资料，读取结果后继续处理。岗位和简历内容请核对来源与事实。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="view-recruit" hidden>
+      <div class="recruit">
+        <h1>数据与日历</h1>
+        <p class="lede">来源只来自高校 / 公众号；平台只用于研究岗位要求与薪资。抓不到时从「来源校对」发起一次带证据的任务。</p>
+        <p class="trace" style="margin:-6px 0 14px">原型示意：真实的「数据与日历」是独立页面（招聘日历：日历 / 来源 / 手动导入 / 运行记录）。这里只截取来源列表，用来判断「来源校对」发起后任务落在哪、人要不要离开这一页。</p>
+        <div class="tabs">
+          <button>概览</button><button class="on">来源</button><button>招聘项目</button><button>活动日历</button>
+        </div>
+        <div class="source-table">
+          <div class="source-row head"><span>来源</span><span>状态</span><span>最近采集</span><span style="text-align:right">操作</span></div>
+          <div class="source-row" data-source="西南财经大学">
+            <div class="name">西南财经大学<small>就业网 · robots 禁止自动抓取</small></div>
+            <div><span class="pill bad">需人工</span> 只能读截图 / 公众号</div>
+            <div class="trace">10-24</div>
+            <div class="row-actions">
+              <button class="btn primary" data-action="source-proof" data-source="西南财经大学">来源校对</button>
+              <button class="btn">打开公众号</button>
+            </div>
+          </div>
+          <div class="source-row" data-source="中央财经大学">
+            <div class="name">中央财经大学<small>就业信息网</small></div>
+            <div><span class="pill warn">超时</span> 网络不可达</div>
+            <div class="trace">10-20</div>
+            <div class="row-actions"><button class="btn" data-action="source-proof" data-source="中央财经大学">来源校对</button><button class="btn">换网络重试</button></div>
+          </div>
+          <div class="source-row" data-source="四川大学">
+            <div class="name">四川大学<small>就业网 · 双选会详情 483</small></div>
+            <div><span class="pill">正常</span> 单位走 POST 接口</div>
+            <div class="trace">今天</div>
+            <div class="row-actions"><button class="btn" data-action="source-proof" data-source="四川大学">来源校对</button><button class="btn ghost">查看 2 场活动</button></div>
+          </div>
+          <div class="source-row" data-source="西南石油大学">
+            <div class="name">西南石油大学<small>双选会列表 + 参会单位两个接口</small></div>
+            <div><span class="pill">正常</span> 分页读取 3 页</div>
+            <div class="trace">今天</div>
+            <div class="row-actions"><button class="btn" data-action="source-proof" data-source="西南石油大学">来源校对</button><button class="btn ghost">查看活动</button></div>
+          </div>
+          <div class="source-row" data-source="公众号「西财校招」">
+            <div class="name">公众号「西财校招」<small>文章正文可读；账号主页常跳微信</small></div>
+            <div><span class="pill warn">环境异常</span> 需粘贴正文</div>
+            <div class="trace">10-22</div>
+            <div class="row-actions"><button class="btn" data-action="source-proof" data-source="公众号「西财校招」">来源校对</button><button class="btn ghost">粘贴正文</button></div>
+          </div>
+        </div>
+        <p class="trace" style="margin-top:10px">「来源校对」会把任务发到对话里跑：证据（截图 / DOM / 原文）跟着任务走，草稿确认后才写库；写库的批次可在审计里整批撤销。</p>
+      </div>
+    </div>
+
+    <div class="view" id="view-workflow" hidden>
+      <div class="wf" id="wf">
+        <div class="wf-head"><h1>工作流</h1><span class="muted">本对话 2 个 · 全部 4 个 · 自动写入都带批次撤销</span><span class="muted only-small">点一行看证据 / 草稿 / 撤销</span></div>
+        <div class="wf-grid">
+          <section class="queue" id="queue"></section>
+          <section class="wf-detail" id="wf-detail"></section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="工作流面板">
+  <div class="drawer-head">
+    <div class="line"><h2>工作流</h2><button class="x" id="drawer-close" aria-label="关闭">×</button></div>
+    <div class="seg"><button class="on">本对话 2</button><button>全部 4</button></div>
+  </div>
+  <div class="drawer-body" id="drawer-list"></div>
+  <div class="drawer-foot">撤销明细、批次 diff 与强制撤销的二次确认在审计面板（另票 #23）。</div>
+</aside>
+
+<div class="toast" id="toast" role="status"></div>
+
+<div class="proto" role="group" aria-label="原型切换">
+  <div class="row">
+    <button class="arrow" data-proto="prev" aria-label="上一个变体">‹</button>
+    <span class="name" id="proto-name">A · 右侧工作流抽屉</span>
+    <button class="arrow" data-proto="next" aria-label="下一个变体">›</button>
+    <div class="surface">
+      <button data-surface="chat" class="on">对话</button>
+      <button data-surface="recruit">数据与日历</button>
+      <button data-surface="workflow" hidden>工作流页</button>
+    </div>
+    <button class="arrow" data-help aria-label="原型说明">?</button>
+  </div>
+  <div class="row label"><small>PROTOTYPE · #18 · 静态 mock</small></div>
+</div>
+
+<dialog id="help">
+  <div class="help">
+    <h2>这张原型在问什么</h2>
+    <p>网页端的「工作流 / 外部 AI」入口和任务状态应该怎么呈现？<b>不做正式代码</b>，只用来挑结构。</p>
+    <h3>三个变体（底栏 / ← → 切换）</h3>
+    <ul>
+      <li><b>A · 右侧抽屉</b>：对话页常驻入口，任务状态在右抽屉；手机上变底部抽屉。</li>
+      <li><b>B · 消息内联</b>：任务就是对话里的一张卡；没有独立面板，手机上天然退化。</li>
+      <li><b>C · 独立工作流页</b>：侧栏新增一级入口，队列 + 任务详情；对话里只留链接。</li>
+    </ul>
+    <h3>要看的地方</h3>
+    <ul>
+      <li>数据与日历页点「来源校对」：任务落到哪里，人还留在原页还是被带走。</li>
+      <li>同一组状态：运行中（进度/心跳/停止）、敏感写确认、证据、草稿、已写入后的撤销结果、失败恢复。</li>
+      <li>390px 宽的手机：入口、任务卡、按钮换行、是否横向溢出。</li>
+    </ul>
+    <h3>已遵守的边界</h3>
+    <ul>
+      <li>调用记录只挂在助手消息下（#17），不进工作流任务详情。</li>
+      <li>审计列表 / diff / 强制撤销二次确认归 #23；外部 Agent 配置归 #24。这里只留入口和一行摘要。</li>
+      <li>顶栏常驻后端、本轮 ≈¥、本次锁定（#17）。</li>
+    </ul>
+    <button class="btn primary close" data-action="close-help">继续看</button>
+  </div>
+</dialog>
+
+<script>
+(function(){
+  var $ = function(s, r){ return (r || document).querySelector(s); };
+  var $$ = function(s, r){ return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var body = document.body;
+  var VARIANT_NAMES = {A:'A · 右侧工作流抽屉', B:'B · 消息内任务卡', C:'C · 独立工作流页'};
+  var SURFACE_NAMES = {chat:'对话', recruit:'数据与日历', workflow:'工作流页'};
+  var q = new URLSearchParams(location.search);
+  var variant = (q.get('variant') || 'A').toUpperCase();
+  if (!VARIANT_NAMES[variant]) variant = 'A';
+  var surface = q.get('surface') || 'chat';
+  var toastTimer;
+  if (q.get('still')) body.classList.add('no-anim');
+
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function toast(text){ var t = $('#toast'); t.textContent = text; body.classList.add('toasting'); clearTimeout(toastTimer); toastTimer = setTimeout(function(){ body.classList.remove('toasting'); }, 2600); }
+
+  function runningCard(compact){
+    var h = '<article class="task running" data-task="running">';
+    h += '<div class="task-head"><span class="dot pulse"></span>';
+    h += '<div class="task-title">来源校对 · 西南财大双选会<small>7 个来源</small></div>';
+    h += '<span class="task-state">运行中</span></div>';
+    h += '<div class="task-meta"><span>本机 Codex</span><span>01:12</span><span>心跳 12 秒前</span></div>';
+    h += '<div class="progress"><i style="width:43%"></i></div>';
+    h += '<div class="task-line">正在识别：西南财大就业网截图（3/7）</div>';
+    h += '<div class="task-actions"><button class="btn" data-action="stop-task">停止</button><button class="btn ghost" data-action="toggle-more">步骤与证据</button></div>';
+    if (!compact) {
+      h += '<details class="more"><summary>步骤</summary><ol class="steps">';
+      h += '<li>读取来源列表 → 7 个来源</li>';
+      h += '<li>西南财大：robots 禁止自动抓取，改用截图 + 公众号</li>';
+      h += '<li>识别截图中的参会单位（3/7）</li>';
+      h += '<li>未完成：合并重复单位、核对日期</li>';
+      h += '</ol></details>';
+    }
+    return h + '</article>';
+  }
+
+  function confirmCard(){
+    var h = '<article class="task confirm">';
+    h += '<div class="task-head"><span class="dot"></span>';
+    h += '<div class="task-title">写入长期记忆<small>敏感写 · 需要你确认</small></div>';
+    h += '<span class="task-state">待确认</span></div>';
+    h += '<div class="confirm-box"><b>模型想记住这两件事</b>';
+    h += '<div>目标岗位：产品经理（互联网）<br>求职城市：成都</div>';
+    h += '<div class="task-actions"><button class="btn primary" data-action="confirm-write">确认写入</button><button class="btn">只写本次</button><button class="btn ghost">跳过</button></div>';
+    h += '<small class="muted">确认只对这次确切调用有效；内容或参数变了会重新问。确认记录进审计。</small>';
+    h += '</div></article>';
+    return h;
+  }
+
+  function evidenceHtml(){
+    var h = '<div class="evidence">';
+    h += '<span class="ev">🖼 <b>就业网首页截图</b> · 09:41 · 412KB</span>';
+    h += '<span class="ev">📄 <b>DOM 快照</b> · 42KB</span>';
+    h += '<span class="ev">📰 <b>公众号原文</b> · 已截断 64KB</span>';
+    h += '</div><div class="trace">证据跟着任务走；模型只看到占位符，原图不上传。</div>';
+    return h;
+  }
+
+  function doneCard(compact){
+    var h = '<article class="task done">';
+    h += '<div class="task-head"><span class="dot"></span>';
+    h += '<div class="task-title">来源校对 + 写入草稿<small>证据 3 · 草稿 12 条</small></div>';
+    h += '<span class="task-state">已完成</span></div>';
+    h += '<div class="task-meta"><span>本机 Codex</span><span>02:36</span><span>自动写入 12 条</span></div>';
+    h += '<details class="more" open><summary>证据</summary>' + evidenceHtml() + '</details>';
+    h += '<div class="draft"><b>草稿 · 12 条招聘项目（未写入）</b>';
+    h += '<div class="trace">成都 · 产品类 8 条 · 技术类 4 条；2 条单位名重复已合并，1 条日期缺失留空待你补。</div>';
+    h += '<div class="task-actions"><button class="btn">预览</button><button class="btn primary" data-action="save-draft">保存到采集库</button><button class="btn ghost">丢弃</button></div>';
+    h += '</div>';
+    h += '<div class="undo"><b>本任务自动写入 12 条</b>';
+    h += '<div class="tally"><span class="ok">已撤销 12</span><span class="warn">冲突 2（跳过，未覆盖）</span></div>';
+    h += '<div class="trace">撤销按批次执行：一次工具调用 = 一个批次，任务可整撤。回滚值只来自旧值快照。</div>';
+    h += '<div class="task-actions"><button class="btn warn" data-action="force-undo">强制撤销冲突 2 条</button><button class="btn ghost" data-action="audit">查看审计明细</button></div>';
+    h += '<span class="muted">审计列表、diff 展开与强制撤销二次确认在 #23；这里只放结果与入口。</span>';
+    h += '</div></article>';
+    return h;
+  }
+
+  function failedCard(){
+    var h = '<article class="task failed">';
+    h += '<div class="task-head"><span class="dot"></span>';
+    h += '<div class="task-title">外部 Agent · Claude Code<small>出站任务</small></div>';
+    h += '<span class="task-state">失败</span></div>';
+    h += '<div class="fail-box"><b>CONNECT_FAILED</b>';
+    h += '<div>连接在 60 秒内没有建立。本任务<b>没有写入任何数据</b>，也没有发出工具调用。</div>';
+    h += '<div class="trace">恢复建议：确认 <code>claude mcp serve</code> 可执行；或改成本机 Codex 跑这一步。</div>';
+    h += '<div class="task-actions"><button class="btn primary">重试连接</button><button class="btn">换成本机 Codex</button><button class="btn ghost">查看日志</button></div>';
+    h += '</div></article>';
+    return h;
+  }
+
+  function renderDrawer(){ $('#drawer-list').innerHTML = runningCard() + confirmCard() + doneCard() + failedCard(); }
+
+  function renderInline(){
+    $('#inline-zone').innerHTML = runningCard() + confirmCard() + doneCard() + failedCard();
+    $('#quick-zone').innerHTML = '<button data-action="source-proof">＋ 来源校对</button><button data-action="vision">读截图</button><button data-action="agent">外部 Agent</button><span class="note">任务会作为消息卡留在对话里</span>';
+  }
+
+  function queueRow(id, title, meta, on){
+    return '<button class="q-item' + (on ? ' on' : '') + '" data-q="' + id + '"><b>' + esc(title) + '</b><small>' + esc(meta) + '</small></button>';
+  }
+
+  function renderWorkflow(){
+    var h = '';
+    h += '<h2>运行中<span>1</span></h2>' + queueRow('running', '来源校对 · 西南财大双选会', '本机 Codex · 01:12', true);
+    h += '<h2>待确认<span>1</span></h2>' + queueRow('confirm', '写入长期记忆', '敏感写 · 00:41', false);
+    h += '<h2>草稿<span>1</span></h2>' + queueRow('done', '来源校对 + 写入草稿', '本机 Codex · 02:36', false);
+    h += '<h2>失败<span>1</span></h2>' + queueRow('failed', '外部 Agent · Claude Code', 'CONNECT_FAILED', false);
+    $('#queue').innerHTML = h;
+
+    var d = '';
+    d += '<button class="back" data-action="close-detail">← 返回列表</button>';
+    d += '<div class="detail-head"><h2>来源校对 · 西南财大双选会</h2><span class="muted">本机 Codex · 7 个来源 · 开始于 09:41 · 证据 3 · 草稿 12 · 自动写入 12（已撤销）</span></div>';
+    d += runningCard(true);
+    d += '<details class="more" open><summary>步骤</summary><ol class="steps">';
+    d += '<li>读取来源列表 → 7 个来源</li>';
+    d += '<li>西南财大：robots 禁止自动抓取，改用截图 + 公众号</li>';
+    d += '<li>识别截图中的参会单位（3/7）· 正在处理</li>';
+    d += '</ol></details>';
+    d += confirmCard() + doneCard(true) + failedCard();
+    d += '<a class="audit-link" href="#" data-action="audit">撤销明细、diff 与强制撤销二次确认 → 审计面板（#23）</a>';
+    $('#wf-detail').innerHTML = d;
+  }
+
+  function renderMrtr(){
+    var h = '<div class="role">✧ 职向</div><div class="body"><div class="mrtr"><b>来自 Claude Code 的请求</b>';
+    h += '<div>它需要你补一个字段才能继续，只用于这次调用。</div>';
+    h += '<label class="trace"><input type="radio" name="city" checked> 成都（来自长期记忆）</label>';
+    h += '<label class="trace"><input type="radio" name="city"> 其他城市，我来说</label>';
+    h += '<div class="task-actions"><button class="btn primary">提交</button><button class="btn ghost">拒绝</button></div>';
+    h += '<small class="muted">表单只收集这次需要的最小字段；提交内容算任务数据，不是给外部 Agent 的指令。</small>';
+    h += '</div></div>';
+    $('#mrtr-zone').innerHTML = h;
+  }
+
+  function renderAll(){ renderDrawer(); renderInline(); renderWorkflow(); renderMrtr(); }
+
+  function openDrawer(){ if (variant === 'A') body.classList.add('drawer-open'); }
+  function closeDrawer(){ body.classList.remove('drawer-open'); }
+  function openRail(){ body.classList.add('rail-open'); }
+  function closeRail(){ body.classList.remove('rail-open'); }
+
+  function syncUrl(){
+    q.set('variant', variant); q.set('surface', surface);
+    history.replaceState(null, '', '?' + q.toString());
+  }
+
+  function setVariant(next, push){
+    if (!VARIANT_NAMES[next]) return;
+    variant = next;
+    body.dataset.variant = next;
+    $('#proto-name').textContent = VARIANT_NAMES[next];
+    $('#nav-workflows').hidden = next !== 'C';
+    $('#wf-entry').hidden = next !== 'A';
+    $$('.proto [data-surface]').forEach(function(b){
+      b.classList.toggle('on', b.dataset.surface === surface);
+      if (b.dataset.surface === 'workflow') b.hidden = next !== 'C';
+    });
+    if (next !== 'A') closeDrawer();
+    if (surface === 'workflow' && next !== 'C') setSurface('chat');
+    renderAll();
+    if (push !== false) syncUrl();
+    if (next === 'A' && window.innerWidth > 750) openDrawer();
+  }
+
+  function setSurface(next){
+    if (!SURFACE_NAMES[next]) return;
+    if (next === 'workflow' && variant !== 'C') return;
+    surface = next;
+    body.dataset.surface = next;
+    $('#view-chat').hidden = next !== 'chat';
+    $('#view-recruit').hidden = next !== 'recruit';
+    $('#view-workflow').hidden = next !== 'workflow';
+    $$('.proto [data-surface]').forEach(function(b){ b.classList.toggle('on', b.dataset.surface === next); });
+    $$('#rail [data-nav]').forEach(function(b){ b.classList.toggle('on', b.dataset.nav === next && next !== 'chat'); });
+    if (next !== 'chat') closeRail();
+    syncUrl();
+  }
+
+  function startTask(source){
+    var label = source ? '来源校对 · ' + source : '来源校对';
+    toast('已发起「' + label + '」，证据会跟着任务走。');
+    $('#drawer-list').insertAdjacentHTML('afterbegin', runningCard());
+    $('#inline-zone').insertAdjacentHTML('afterbegin', runningCard());
+    if (variant === 'A') { setSurface('chat'); openDrawer(); $('#status').textContent = '✧ ' + label + ' · 0/7 · 刚发起'; }
+    else if (variant === 'B') { setSurface('chat'); }
+    else { setSurface('workflow'); }
+  }
+
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('button, a');
+    if (!b) return;
+    if (b.dataset.proto === 'prev' || b.dataset.proto === 'next') {
+      var keys = Object.keys(VARIANT_NAMES);
+      var delta = b.dataset.proto === 'next' ? 1 : -1;
+      setVariant(keys[(keys.indexOf(variant) + delta + keys.length) % keys.length]);
+      return;
+    }
+    if (b.dataset.surface) { setSurface(b.dataset.surface); return; }
+    if (b.dataset.help !== undefined) { $('#help').showModal(); return; }
+
+    if (b.dataset.action === 'source-proof') { startTask(b.dataset.source); return; }
+    if (b.dataset.action === 'vision') { toast('选择一张截图，稍后接视觉模型（原型未实现）。'); return; }
+    if (b.dataset.action === 'agent') { toast('外部 Agent 配置在设置页（另票 #24）。'); return; }
+    if (b.dataset.action === 'stop-task') {
+      var task = b.closest('.task');
+      if (task) { task.querySelector('.task-state').textContent = '已停止'; task.classList.remove('running'); }
+      toast('已停止；未写入的数据不会被保留。');
+      return;
+    }
+    if (b.dataset.action === 'confirm-write') {
+      b.closest('.confirm-box').innerHTML = '<b>已确认写入</b><div class="trace">这次确认绑定到确切调用；审计里能看到谁、何时、对哪次批准。</div>';
+      return;
+    }
+    if (b.dataset.action === 'save-draft') {
+      b.closest('.draft').innerHTML = '<b>已保存 12 条到采集库</b><div class="trace">一个批次；可在审计里整批撤销。</div>';
+      return;
+    }
+    if (b.dataset.action === 'force-undo') {
+      b.closest('.undo').querySelector('.tally').innerHTML = '<span class="ok">已强制撤销 2 条</span><span class="warn">原值已覆盖，审计保留两份快照</span>';
+      toast('已强制撤销冲突 2 条（原型演示）。');
+      return;
+    }
+    if (b.dataset.action === 'audit') { toast('审计面板是另一张票（#23）；这里只留入口。'); return; }
+    if (b.dataset.action === 'open-wf') { setSurface('workflow'); return; }
+    if (b.dataset.action === 'close-detail') { $('#wf').classList.remove('open-detail'); return; }
+    if (b.dataset.action === 'close-help') { $('#help').close(); return; }
+    if (b.dataset.action === 'toggle-more') {
+      var d = b.closest('.task').querySelector('details.more');
+      if (d) { d.open = !d.open; }
+      return;
+    }
+    if (b.id === 'drawer-close') { closeDrawer(); return; }
+    if (b.id === 'wf-entry') { body.classList.contains('drawer-open') ? closeDrawer() : openDrawer(); return; }
+    if (b.id === 'rail-toggle') { openRail(); return; }
+    if (b.id === 'new-chat') { setSurface('chat'); closeRail(); toast('原型：新对话未接线。'); return; }
+    if (b.dataset.q) {
+      $$('#queue .q-item').forEach(function(x){ x.classList.toggle('on', x === b); });
+      $('#wf').classList.add('open-detail');
+      return;
+    }
+    if (b.dataset.nav) {
+      var nav = b.dataset.nav;
+      if (nav === 'recruit') setSurface('recruit');
+      else if (nav === 'workflows') setSurface('workflow');
+      else toast('原型未接这个页面：' + nav);
+      closeRail();
+      return;
+    }
+    if (b.closest('.drawer-head .seg')) {
+      $$('.drawer-head .seg button').forEach(function(x){ x.classList.toggle('on', x === b); });
+    }
+  });
+
+  $('#scrim').addEventListener('click', function(){ closeDrawer(); closeRail(); });
+
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') { closeDrawer(); closeRail(); return; }
+    var tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (['INPUT','TEXTAREA','SELECT'].indexOf(tag) > -1 || (document.activeElement && document.activeElement.isContentEditable) || $('#help').open) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      var keys = Object.keys(VARIANT_NAMES);
+      var delta = e.key === 'ArrowRight' ? 1 : -1;
+      setVariant(keys[(keys.indexOf(variant) + delta + keys.length) % keys.length]);
+    }
+  });
+
+  if (q.get('debug')) {
+    setTimeout(function(){
+      var el = document.documentElement, out = [];
+      out.push('inner=' + window.innerWidth + ' client=' + el.clientWidth + ' scroll=' + el.scrollWidth);
+      out.push('main=' + Math.round(document.querySelector('main').getBoundingClientRect().width));
+      out.push('msgs=' + Math.round(document.querySelector('#messages').getBoundingClientRect().width));
+      out.push('scrimOp=' + getComputedStyle(document.querySelector('#scrim')).opacity + ' bodyClass=' + body.className);
+      var worst = [];
+      Array.prototype.forEach.call(document.querySelectorAll('body *'), function(n){
+        var r = n.getBoundingClientRect();
+        if (r.right > el.clientWidth + 1) worst.push(n.tagName + '.' + (n.className || '') + '@' + Math.round(r.right));
+      });
+      out.push('overflow=' + worst.slice(0, 8).join(' | '));
+      var d = document.createElement('div'); d.id = 'debug'; d.textContent = out.join(' ;; ');
+      document.body.appendChild(d);
+    }, 100);
+  }
+  if (!SURFACE_NAMES[surface] || (surface === 'workflow' && variant !== 'C')) surface = 'chat';
+  setVariant(variant, false);
+  setSurface(surface);
+  if (q.get('drawer') === '1') openDrawer();
+  if (variant === 'A' && (window.innerWidth > 750 || q.get('drawer') === '1')) openDrawer();
+})();
+</script>
+</body>
+</html>
