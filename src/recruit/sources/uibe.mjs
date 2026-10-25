@@ -8,7 +8,8 @@ export default {
   channel: '就业信息网',
   kind: '宣讲会',
   mode: 'static',
+  capabilities: {list: 'static', detail: 'http', projects: 'none'},
   enabled: false,
   listUrl: 'https://career.uibe.edu.cn/',
-  note: '站点可达，栏目结构待适配。'
+  note: "站点可达；招聘活动栏目待适配，未适配前不产生活动。"
 };

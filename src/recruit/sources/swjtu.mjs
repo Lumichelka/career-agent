@@ -12,6 +12,7 @@ export default {
   channel: '就业信息网（日历接口）',
   kind: '宣讲会',
   mode: 'json',
+  capabilities: {list: 'json', detail: 'http', projects: 'none'},
   enabled: true,
   listUrl: 'https://jiuye.swjtu.edu.cn/career/index/common/jyrl',
   request: {
@@ -19,7 +20,7 @@ export default {
     headers: {'content-type': 'application/x-www-form-urlencoded; charset=UTF-8', 'x-requested-with': 'XMLHttpRequest'},
     body: () => 'date=' + todayChina()
   },
-  note: '一次请求返回当月宣讲会/双选会，含时间、校区教室、详情页；日期参数取当天。',
+  note: "双选会详情“已报名单位”在前端被注释；项目暂不支持，公众号兜底。",
   parseList(_html, source, json) {
     const today = todayChina();
     const out = [];

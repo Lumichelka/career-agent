@@ -8,7 +8,8 @@ export default {
   channel: '就业信息网',
   kind: '宣讲会',
   mode: 'browser',
+  capabilities: {list: 'browser', detail: 'none', projects: 'none'},
   enabled: false,
   listUrl: 'https://jiuye.uestc.edu.cn/career/',
-  note: '单页应用，需浏览器渲染；列表为空不代表没有活动。'
+  note: "SPA；需要浏览器渲染与站内路由发现，未登录/未适配前不产生活动。"
 };

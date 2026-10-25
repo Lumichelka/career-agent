@@ -9,10 +9,11 @@ export default {
   channel: '就业信息网',
   kind: '双选会',
   mode: 'static',
+  capabilities: {list: 'static', detail: 'http', projects: 'none'},
   enabled: true,
   listUrl: 'https://career.nankai.edu.cn/recruitment/index.html',
   detail: true,
-  note: '列表给日期，详情页含"时间/地点"，需要再抓一次详情。',
+  note: "双选会详情是邀请函，无参会单位表；项目暂不支持。",
   parseList(html, source) {
     const out = [];
     const re = /<li>\s*<a href="([^"]+)"[^>]*>([\s\S]{0,160}?)<\/a>\s*<span>([^<]*)<\/span>/g;
