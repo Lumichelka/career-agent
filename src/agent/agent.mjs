@@ -72,7 +72,8 @@ export async function runAgent({root,session,message,attachments=[],profile=[],s
   const deadline=new AbortController();
   const stop=()=>deadline.abort();signal?.addEventListener('abort',stop,{once:true});
   if(signal?.aborted)deadline.abort();
-  const timer=setTimeout(stop,600000);
+  // 整任务上限统一 15 分钟（原 10 分钟）；Codex 单次调用仍另有 8 分钟上限。
+  const timer=setTimeout(stop,900000);
   const phase=text=>onEvent({type:'status',text});
   try{
     if(skill)phase('使用技能：'+skill.name);

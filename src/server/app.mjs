@@ -18,6 +18,7 @@ import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
 import {listTools} from '../tools/registry.mjs';
+import {TaskManager, TaskGate} from './tasks.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -27,7 +28,8 @@ export async function createApp({
   dataDir,
   root = fileURLToPath(new URL('../..', import.meta.url)),
   host = '127.0.0.1',
-  port = 0
+  port = 0,
+  taskLimits = {}
 } = {}) {
 if (!dataDir) throw new Error('createApp 需要 dataDir：准备数据目录是进程级入口（index.mjs）的职责');
 await mkdir(dataDir, {recursive: true});
@@ -35,6 +37,8 @@ const tokenFile = join(dataDir, 'local-session-token');
 let token = await readFile(tokenFile, 'utf8').catch(() => '');
 if (!/^[a-f0-9]{48}$/.test(token)) { token = randomBytes(24).toString('hex'); await writeFile(tokenFile, token, 'utf8'); }
 const running = new Map(), taskEvents = new Map(), loginWaiters = new Map(), loginPrompted = new Set();
+// 任务闸与任务记录：每用户 2 / 全局 8 / 排队 120s；记录落在 users/<id>/tasks/，供抽屉刷新。
+const taskManager = new TaskManager({dataDir, gate: new TaskGate(taskLimits), maxDurationMs: taskLimits.maxDurationMs});
 let actualPort = Number(port);
 let localOrigin = 'http://127.0.0.1:' + actualPort;
 let allowedHosts = new Set();
@@ -142,8 +146,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/artifact.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -203,6 +207,9 @@ const server = http.createServer(async (req, res) => {
       return send(res, await buildMemoryPayload(dir, session));
     }
     if (req.method === 'GET' && url.pathname === '/api/capabilities') return send(res, {tools: listTools(), skills: await listSkills(root), memory: await memorySummary(dir)});
+    if (req.method === 'GET' && url.pathname === '/api/tasks') {
+      return send(res, await taskManager.summary(user.id, {sessionId: url.searchParams.get('session') || undefined}));
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const items = [];
@@ -337,6 +344,16 @@ const server = http.createServer(async (req, res) => {
         await unlink(file(dir, id));
         return send(res, {ok: true});
       }
+      if (url.pathname === '/api/tasks/stop') {
+        const out = await taskManager.stop(user.id, String(body.taskId || ''));
+        if (!out.ok) return send(res, {error: out.reason === 'finished' ? '任务已结束' : '没有这个任务'}, out.reason === 'finished' ? 409 : 404);
+        return send(res, {ok: true, task: out.task});
+      }
+      if (url.pathname === '/api/tasks/draft') {
+        const out = await taskManager.setDraft(user.id, {taskId: body.taskId, draftId: body.draftId, action: body.action});
+        if (!out.ok) return send(res, {error: out.reason === 'invalid-action' ? '未知的草稿动作' : '没有这个草稿'}, out.reason === 'invalid-action' ? 400 : 404);
+        return send(res, {ok: true, task: out.task});
+      }
       if (url.pathname === '/api/chat') {
         const s = await load(dir, body.id);
         if (running.has(s.id)) return send(res, {error: '当前对话正在执行任务'}, 409);
@@ -363,38 +380,60 @@ const server = http.createServer(async (req, res) => {
         res.on('close', () => { if (!res.writableEnded) controller.abort(); });
         try {
           const modelConfig = models.snapshot();
-          if (modelConfig.mode === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
-          const profile = (await loadProfile(dir)).facts;
-          const skill = await selectSkill(root, text).catch(() => null);
-          const result = await runAgent({
-            root,
-            modelCall: options => modelConfig.mode === 'codex'
-              ? runModel({...options, taskBridgeToken})
-              : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir}}),
-            session: s,
-            message: text || '请阅读附件并询问我希望完成什么任务。',
-            attachments,
-            profile,
-            skill,
-            onEvent: emit,
-            signal: controller.signal
+          // 任务生命周期（排队/运行/终态、15 分钟上限、证据与草稿）交给 TaskManager；执行体仍是原来的 runAgent。
+          const outcome = await taskManager.run({
+            userId: user.id,
+            sessionId: s.id,
+            title: s.title === '新的求职对话' ? (text || attachments[0]?.name || '求职对话') : s.title,
+            sourceName: attachments[0]?.name || '对话',
+            signal: controller.signal,
+            emit,
+            describeError: e => decorateChatError(e.message, !!modelConfig.apiKey),
+            execute: async ({signal, emit: runEmit, addDraft}) => {
+              if (modelConfig.mode === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
+              const profile = (await loadProfile(dir)).facts;
+              const skill = await selectSkill(root, text).catch(() => null);
+              const result = await runAgent({
+                root,
+                modelCall: options => modelConfig.mode === 'codex'
+                  ? runModel({...options, taskBridgeToken})
+                  : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir}}),
+                session: s,
+                message: text || '请阅读附件并询问我希望完成什么任务。',
+                attachments,
+                profile,
+                skill,
+                onEvent: runEmit,
+                signal
+              });
+              if (result.artifact.content.trim()) addDraft({title: result.artifact.title || '求职文稿', content: result.artifact.content});
+              return result;
+            }
           });
-          s.messages.push({role: 'user', content: text, attachments}, {role: 'assistant', backend: backendLabel(modelConfig), content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
-          s.memory = result.memory.slice(0, 5000);
-          s.lastTask = {...s.lastTask, status: 'complete', quality: result.quality, durationMs: result.durationMs, finishedAt: new Date().toISOString()};
-          if (result.artifact.content.trim()) s.artifacts.push({id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()});
-          if (s.title === '新的求职对话') s.title = (text || attachments[0]?.name || '求职对话').slice(0, 25);
-          s.updatedAt = new Date().toISOString();
-          await save(dir, s);
-          await recordTask(dir, {
-            sessionId: s.id, title: s.title, status: 'complete',
-            steps: result.plan?.steps || [],
-            tools: (result.trace || []).map(t => t.label || t.type).filter(Boolean),
-            artifact: result.artifact?.title || '',
-            skill: result.skill?.name || '',
-            durationMs: result.durationMs
-          }).catch(() => {});
-          emit({type: 'done', session: s});
+          if (outcome.error) {
+            // 排队超时/执行失败/取消：TaskManager 已经写过 error 事件，这里只收尾会话与任务记录。
+            s.lastTask = {...s.lastTask, status: outcome.task.state === 'cancelled' ? 'stopped' : 'failed', error: outcome.task.error?.message || outcome.error.message, taskId: outcome.task.id};
+            await save(dir, s);
+            await recordTask(dir, {sessionId: s.id, title: s.title, status: 'failed', error: s.lastTask.error}).catch(() => {});
+          } else {
+            const result = outcome.result;
+            s.messages.push({role: 'user', content: text, attachments}, {role: 'assistant', backend: backendLabel(modelConfig), content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
+            s.memory = result.memory.slice(0, 5000);
+            s.lastTask = {...s.lastTask, status: 'complete', taskId: outcome.task.id, quality: result.quality, durationMs: result.durationMs, finishedAt: new Date().toISOString()};
+            if (result.artifact.content.trim()) s.artifacts.push({id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()});
+            if (s.title === '新的求职对话') s.title = (text || attachments[0]?.name || '求职对话').slice(0, 25);
+            s.updatedAt = new Date().toISOString();
+            await save(dir, s);
+            await recordTask(dir, {
+              sessionId: s.id, title: s.title, status: 'complete',
+              steps: result.plan?.steps || [],
+              tools: (result.trace || []).map(t => t.label || t.type).filter(Boolean),
+              artifact: result.artifact?.title || '',
+              skill: result.skill?.name || '',
+              durationMs: result.durationMs
+            }).catch(() => {});
+            emit({type: 'done', session: s});
+          }
         } catch (e) {
           const friendly = decorateChatError(e.message, !!models.snapshot().apiKey);
           s.lastTask = {...s.lastTask, status: controller.signal.aborted ? 'stopped' : 'failed', error: friendly};
@@ -429,5 +468,5 @@ const close = () => closing || (closing = new Promise(resolve => {
   if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
   server.close(() => resolve());
 }));
-return {server, token, dataDir, root, host, port: actualPort, origin: localOrigin, close};
+return {server, token, dataDir, root, host, port: actualPort, origin: localOrigin, close, tasks: taskManager};
 }
