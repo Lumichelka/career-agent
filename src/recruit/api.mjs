@@ -2,7 +2,7 @@
 // 这里只负责"算出结果"，写响应的细节交给 server.mjs。
 import {join} from 'node:path';
 import {RecruitStore} from './store.mjs';
-import {SOURCES} from './sources/index.mjs';
+import {SOURCES, sourceById} from './sources/index.mjs';
 import {runCollection, htmlToText, normalize} from './collect.mjs';
 import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
@@ -100,6 +100,42 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   }
 
   if (method === 'POST') {
+    if (pathname === 'source-parse' || pathname === 'source-save') {
+      let source;
+      try { source = sourceById(String(body?.sourceId || '')); } catch { source = null; }
+      if (!source) return {status: 400, json: {error: '未知信息源'}};
+      if (typeof source.parseList !== 'function') return {status: 400, json: {error: '该源还没有可用的解析器；请改用公众号/手动活动导入'}};
+      const raw = String(body?.html || body?.text || '');
+      if (raw.trim().length < 20) return {status: 400, json: {error: '请粘贴来源页 HTML 或正文'}};
+      let json = null;
+      if (source.mode === 'json') {
+        try { json = JSON.parse(raw); } catch { return {status: 400, json: {error: '该源是 JSON 接口，请粘贴接口返回的 JSON'}}; }
+      }
+      let items;
+      try { items = source.parseList(source.mode === 'json' ? '' : raw, source, json) || []; }
+      catch (e) { return {status: 400, json: {error: '解析失败：' + e.message}}; }
+      const preview = [];
+      for (const item of items.slice(0, 80)) {
+        if (!item?.url && body?.url) item.url = String(body.url);
+        const event = normalize(item, source);
+        if (event) preview.push(event);
+      }
+      if (!preview.length) return {status: 400, json: {error: '没有解析到活动；请确认页面结构或换用正文手动导入'}};
+      if (pathname === 'source-parse') {
+        return {json: {ok: true, count: preview.length, preview: preview.slice(0, 20).map(e => ({title: e.title, startAt: e.startAt, venue: e.venue, url: e.sourceUrl}))}};
+      }
+      if (!body?.confirm) return {status: 400, json: {error: '需要确认后写入'}};
+      let created = 0, updated = 0;
+      withStore(dir, store => {
+        for (const event of preview) {
+          event.confidence = 0.62;
+          event.notes = [event.notes, '手动粘贴来源页'].filter(Boolean).join('；');
+          const action = store.upsertEvent(event);
+          if (action === 'created') created++; else updated++;
+        }
+      });
+      return {json: {ok: true, count: preview.length, created, updated}};
+    }
     if (pathname === 'projects/bulk') {
       const eventId = String(body?.eventId || '');
       const text = String(body?.text || '');

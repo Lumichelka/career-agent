@@ -12,7 +12,7 @@ import {handleCompany} from '../company/api.mjs';
 import {handleWechat} from '../wechat/api.mjs';
 import http from 'node:http';
 import os from 'node:os';
-import {readFile, mkdir, writeFile, readdir, copyFile} from 'node:fs/promises';
+import {readFile, mkdir, writeFile, readdir, copyFile, unlink} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
@@ -130,9 +130,8 @@ http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/companies') {
-      const html = (await readFile(join(root, 'src', 'web', 'companies.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
-      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
-      return res.end(html);
+      res.writeHead(302, {Location: '/chat'});
+      return res.end();
     }
 
     if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/artifact.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
@@ -314,6 +313,22 @@ http.createServer(async (req, res) => {
         return send(res, s);
       }
       if (url.pathname === '/api/stop') { await load(dir, body.id); running.get(body.id)?.abort(); return send(res, {ok: true}); }
+      if (url.pathname === '/api/session/rename') {
+        const s = await load(dir, String(body.id || ''));
+        const title = String(body.title || '').trim().slice(0, 80);
+        if (!title) return send(res, {error: '标题不能为空'}, 400);
+        s.title = title;
+        s.updatedAt = new Date().toISOString();
+        await save(dir, s);
+        return send(res, {ok: true, session: {id: s.id, title: s.title, updatedAt: s.updatedAt}});
+      }
+      if (url.pathname === '/api/session/delete') {
+        const id = String(body.id || '');
+        await load(dir, id);
+        if (running.has(id)) return send(res, {error: '当前对话正在执行任务，先停止再删除'}, 409);
+        await unlink(file(dir, id));
+        return send(res, {ok: true});
+      }
       if (url.pathname === '/api/chat') {
         const s = await load(dir, body.id);
         if (running.has(s.id)) return send(res, {error: '当前对话正在执行任务'}, 409);

@@ -184,23 +184,7 @@
   // 侧栏加入口：工作台 / 招聘日历
   try {
     const anchor = $('#platforms');
-    if (anchor && !$('#today-entry')) {
-      const t = document.createElement('button');
-      t.id = 'today-entry';
-      t.className = 'new platform-launch';
-      t.textContent = '▦ 今天 / 工作台';
-      t.onclick = () => { location.href = '/'; };
-      anchor.before(t);
-    }
-    if (anchor && !$('#recruit-entry')) {
-      const b = document.createElement('button');
-      b.id = 'recruit-entry';
-      b.className = 'new platform-launch';
-      b.textContent = '▤ 招聘日历 / 行程表';
-      b.onclick = () => { location.href = '/recruit'; };
-      anchor.after(b);
-    }
-    const recruit = $('#recruit-entry');
+    const recruit = anchor;
     if (recruit && !$('#resume-entry')) {
       const r = document.createElement('button');
       r.id = 'resume-entry';
@@ -208,15 +192,6 @@
       r.textContent = '▥ 简历与投递';
       r.onclick = () => { location.href = '/resume'; };
       recruit.after(r);
-    }
-    const resumeBtn = $('#resume-entry');
-    if (resumeBtn && !$('#company-entry')) {
-      const c = document.createElement('button');
-      c.id = 'company-entry';
-      c.className = 'new platform-launch';
-      c.textContent = '▦ 公司档案';
-      c.onclick = () => { location.href = '/companies'; };
-      resumeBtn.after(c);
     }
     const platformsBtn = $('#platforms');
     if (platformsBtn && !$('#data-root-link')) {
@@ -243,15 +218,34 @@
       };
       q.addEventListener('input', filter);
       new MutationObserver(filter).observe(sessionsEl, {childList: true});
-    }
-    const companyBtn = $('#company-entry');
-    if (companyBtn && !$('#wechat-entry')) {
-      const x = document.createElement('button');
-      x.id = 'wechat-entry';
-      x.className = 'new platform-launch';
-      x.textContent = '✉ 公众号文章';
-      x.onclick = () => { location.href = '/wechat'; };
-      companyBtn.after(x);
+      const actions = document.createElement('div');
+      actions.id = 'session-actions';
+      actions.style.cssText = 'display:flex;gap:5px;margin:0 0 8px';
+      actions.innerHTML = '<button type="button" id="session-rename" style="flex:1;padding:5px;font-size:10.5px;border:1px solid #dce7df;border-radius:6px;background:#fff;color:#3d5c4b">重命名</button><button type="button" id="session-export" style="flex:1;padding:5px;font-size:10.5px;border:1px solid #dce7df;border-radius:6px;background:#fff;color:#3d5c4b">保存</button><button type="button" id="session-delete" style="flex:1;padding:5px;font-size:10.5px;border:1px solid #dce7df;border-radius:6px;background:#fff;color:#9a4a3a">删除</button>';
+      q.after(actions);
+      const cur = () => (ZX.currentSession ? ZX.currentSession() : null);
+      actions.querySelector('#session-rename').onclick = async () => {
+        const s = cur(); if (!s) return;
+        const title = prompt('对话名称', s.title || '新的求职对话');
+        if (!title || !title.trim()) return;
+        try { await ZX.api('session/rename', {id: s.id, title: title.trim()}); s.title = title.trim(); const b = sessionsEl.querySelector('button[data-session="' + s.id + '"]'); if (b) b.textContent = s.title; } catch (e) { alert(e.message); }
+      };
+      actions.querySelector('#session-delete').onclick = async () => {
+        const s = cur(); if (!s) return;
+        if (!confirm('删除这个对话？')) return;
+        try { await ZX.api('session/delete', {id: s.id}); location.href = '/chat'; } catch (e) { alert(e.message); }
+      };
+      actions.querySelector('#session-export').onclick = async () => {
+        const s = cur(); if (!s) return;
+        try {
+          const d = await ZX.api('session/' + encodeURIComponent(s.id));
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], {type: 'application/json'}));
+          a.download = (s.title || 'conversation').replace(/[\\/:*?"<>|]/g, '_') + '.json';
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        } catch (e) { alert(e.message); }
+      };
     }
   } catch { /* 侧栏结构变化时忽略 */ }
   function setupContextPanel() {

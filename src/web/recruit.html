@@ -30,7 +30,7 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .toolbar select{padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:#fff;font:13px inherit}
 .sources{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
 .source{border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:#fcfdfb}
-.src-table{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+.src-table{grid-column:1/-1;width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
 .src-head,.src-row{display:grid;grid-template-columns:minmax(150px,1.5fr) 92px 82px 52px 78px 145px;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #eef2ec;font-size:11.5px}
 .src-head{background:#f5f8f3;color:#7b8b80;font-size:10px;letter-spacing:.5px}
 .src-row:last-child{border-bottom:0}
@@ -73,8 +73,8 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .toast.show{opacity:1}
 .note{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.8}
 .cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:8px 0 4px;font-size:10px;color:var(--muted);text-align:center}
-.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-.cal-cell{min-height:104px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;text-align:left;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:.12s}
+.calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;width:100%}
+.cal-cell{min-width:0;overflow:hidden;min-height:104px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;text-align:left;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:.12s}
 .cal-cell:hover{border-color:#b9cdbd;background:#fbfdfb}
 .cal-cell.selected{border-color:var(--green);box-shadow:0 0 0 1px var(--green) inset}
 .cal-cell.today .cal-date{background:var(--green);color:#fff}
@@ -110,7 +110,6 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
   <a href="/">← 今天</a>
   <a href="/chat">对话</a>
   <a href="/resume">简历</a>
-  <a href="/wechat">公众号</a>
   <button id="refresh">刷新</button>
 </header>
 <main>
@@ -130,6 +129,17 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
       <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。</span>
     </div>
     <div class="sources" id="sources"><div class="empty">正在读取信息源…</div></div>
+    <details class="panel" style="margin-top:14px;padding:12px">
+      <summary style="cursor:pointer;font-size:13px">手工导入来源页（网络/登录被阻断时）</summary>
+      <div class="hint">在普通浏览器打开高校页面，复制 HTML 或正文；选择对应源，先预览再确认写入。不会绕过 robots/登录。</div>
+      <div class="grid2" style="margin-top:10px">
+        <label>来源<select id="ms-source"><option value="">选择信息源</option></select></label>
+        <label>来源链接<input id="ms-url" placeholder="可选：活动/来源页 URL"></label>
+      </div>
+      <label style="margin-top:8px">粘贴 HTML / 正文<textarea id="ms-html" style="min-height:90px" placeholder="HTML 或接口返回的 JSON"></textarea></label>
+      <div class="row" style="margin-top:8px"><button id="ms-preview">预览解析</button><button id="ms-save" class="primary">确认写入</button><span id="ms-status" class="hint"></span></div>
+      <div id="ms-preview-list" class="hint" style="margin-top:8px"></div>
+    </details>
     <details class="panel" style="margin-top:14px;padding:12px" open>
       <summary style="cursor:pointer;font-size:13px">公众号文章：粘贴推文，判断是否含招聘</summary>
       <div class="grid2" style="margin-top:10px">
@@ -249,6 +259,7 @@ function renderSources(sources,wechat){
   }
   const rest=[];for(const [school,list] of wxBySchool)if(!shown.has(school))rest.push(...list);
   if(rest.length){rows.push('<div class="src-cat">公众号</div>');rows.push(...rest.map(accountRow));}
+  const sel=el('#ms-source');if(sel&&sel.options.length<=1)sel.innerHTML='<option value="">选择信息源</option>'+sources.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>').join('');
   el('#sources').innerHTML='<div class="src-table"><div class="src-head"><span>来源 / 状态</span><span>方式</span><span>学校</span><span>最近</span><span>项目</span><span>操作</span></div>'+rows.join('')+'</div>';
 }
 function fmtTime(iso){
@@ -354,6 +365,24 @@ el('#wx-harvest').onclick=async()=>{
     el('#wx-result').innerHTML='发现 '+d.links+' 个链接，入库 '+d.imported+' 篇'+(d.articles?.length?'<br>'+d.articles.map(a=>esc(a.title)+' · '+esc(a.hasRecruitment)+' · '+a.projects+' 项目草稿').join('<br>'):'');
     el('#wx-status').textContent='';await loadAll();
   }catch(e){el('#wx-status').textContent=e.message;toast(e.message)}
+};
+function renderManualPreview(list){
+  el('#ms-preview-list').innerHTML=list?.length?list.map(e=>'<div>'+esc(e.title)+' · '+esc(String(e.startAt||'').slice(0,16).replace('T',' '))+(e.venue?' · '+esc(e.venue):'')+'</div>').join(''):'';
+}
+el('#ms-preview').onclick=async()=>{
+  const sourceId=el('#ms-source').value,html=el('#ms-html').value;
+  if(!sourceId||!html.trim()){toast('请选择来源并粘贴内容');return}
+  el('#ms-status').textContent='解析中…';
+  try{const r=await api('source-parse',{sourceId,html,url:el('#ms-url').value.trim()});renderManualPreview(r.preview);el('#ms-status').textContent='解析到 '+r.count+' 条，确认后写入';}
+  catch(e){el('#ms-status').textContent=e.message;toast(e.message)}
+};
+el('#ms-save').onclick=async()=>{
+  const sourceId=el('#ms-source').value,html=el('#ms-html').value;
+  if(!sourceId||!html.trim()){toast('请选择来源并粘贴内容');return}
+  if(!confirm('确认把这些活动写入招聘库？'))return;
+  el('#ms-status').textContent='写入中…';
+  try{const r=await api('source-save',{sourceId,html,url:el('#ms-url').value.trim(),confirm:true});el('#ms-status').textContent='已写入：新增 '+r.created+'，更新 '+r.updated;toast('来源页已导入');await loadAll();}
+  catch(e){el('#ms-status').textContent=e.message;toast(e.message)}
 };
 const manualDialog=el('#manual-dialog');
 let manualPreview='';let wxArticle=null,wxDraft=null;
