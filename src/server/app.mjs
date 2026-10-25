@@ -18,6 +18,8 @@ import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
 import {listTools} from '../tools/registry.mjs';
+import {createToolExecutor} from '../tools/execute.mjs';
+import {InboundMcp, requestFromNode, writeNodeResponse} from '../mcp/inbound.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -69,6 +71,19 @@ async function tenant(user) {
   })());
   return tenants.get(user.id);
 }
+// 入站 /mcp：身份只来自自签 bearer，调用落到凭据所属账号的租户目录。
+const inboundMcp = await new InboundMcp({
+  dataDir,
+  accounts,
+  getOrigin: () => localOrigin,
+  callTool: async ({userId, name, args}) => {
+    const user = accounts.users.find(u => u.id === userId);
+    if (!user) return {status: 'error', code: 'ACCOUNT_MISSING', message: '该凭据所属账号已不存在', recovery: '请重新登录网页端并重新签发凭据。'};
+    const t = await tenant(user);
+    const model = t.models.snapshot();
+    return createToolExecutor()(name, args, {taskId: '', config: {searchUrl: model.searchUrl, recruitDir: t.dir, dataDir: t.dir}, signal: AbortSignal.timeout(180000)});
+  }
+}).init();
 const send = (res, obj, status = 200) => { res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}); res.end(JSON.stringify(obj)); };
 const sendFile = (res, body, type, name) => { res.writeHead(200, {'Content-Type': type, 'Cache-Control': 'no-store', ...(name ? {'Content-Disposition': 'attachment; filename="' + name + '"'} : {})}); res.end(body); };
 const validId = id => typeof id === 'string' && /^[a-f0-9-]{36}$/.test(id);
@@ -151,6 +166,20 @@ const server = http.createServer(async (req, res) => {
 
     // 跨站请求防护：Origin 必须与当前访问地址一致
     if (req.headers.origin && req.headers.origin !== requestOrigin && req.headers.origin !== localOrigin) return send(res, {error: 'Origin rejected'}, 403);
+
+    // 对外 MCP 入站：现有端口上的 /mcp，自带 bearer 鉴权，不走网页会话口令。
+    if (url.pathname === '/mcp') {
+      if (!['POST', 'GET', 'DELETE'].includes(req.method)) return send(res, {error: 'Method not allowed'}, 405);
+      // 实例开关关闭时端点不存在：即使带着有效凭据也回 404。
+      if (!inboundMcp.enabled) return send(res, {error: 'Not found'}, 404);
+      let webRequest;
+      try { webRequest = await requestFromNode(req, localOrigin); }
+      catch (error) { if (error.status === 413) return send(res, {error: error.message}, 413); throw error; }
+      const response = await inboundMcp.handle(webRequest);
+      if (!response) return send(res, {error: 'Not found'}, 404);
+      return writeNodeResponse(res, response);
+    }
+
     if (req.headers['x-career-token'] !== token && !bridgeTokens.has(req.headers['x-career-token'])) return send(res, {error: '会话校验失败，请刷新页面'}, 403);
 
     if (req.method === 'POST' && ['/api/auth/login', '/api/auth/register'].includes(url.pathname)) {
@@ -203,6 +232,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, await buildMemoryPayload(dir, session));
     }
     if (req.method === 'GET' && url.pathname === '/api/capabilities') return send(res, {tools: listTools(), skills: await listSkills(root), memory: await memorySummary(dir)});
+    if (req.method === 'GET' && url.pathname === '/api/mcp') return send(res, (await inboundMcp.status(user.id)).json);
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const items = [];
@@ -247,6 +277,23 @@ const server = http.createServer(async (req, res) => {
       for await (const b of req) { raw += b.toString(); if (raw.length > 400000) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
       const body = JSON.parse(raw || '{}');
 
+      // 入站 /mcp 的开关与 client 凭据：任何登录用户都能开，但开启要二次确认。
+      if (url.pathname === '/api/mcp/switch') {
+        const out = await inboundMcp.setEnabled({enabled: body.enabled, confirm: body.confirm === true, user});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients') {
+        const out = await inboundMcp.issueClient({userId: user.id, name: body.name});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients/revoke') {
+        const out = await inboundMcp.revokeClient({userId: user.id, id: String(body.id || '')});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients/regenerate') {
+        const out = await inboundMcp.regenerateClient({userId: user.id, id: String(body.id || '')});
+        return send(res, out.json, out.status);
+      }
       if (url.pathname.startsWith('/api/recruit/')) {
         const out = await handleRecruit({method: 'POST', pathname: url.pathname.slice('/api/recruit/'.length), url, body, dir});
         if (!out) return send(res, {error: '未知的招聘信息接口'}, 404);
@@ -426,6 +473,7 @@ allowedHosts = buildAllowedHosts(actualPort);
 let closing = null;
 const close = () => closing || (closing = new Promise(resolve => {
   for (const controller of running.values()) controller.abort();
+  inboundMcp.close().catch(() => {});
   if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
   server.close(() => resolve());
 }));
