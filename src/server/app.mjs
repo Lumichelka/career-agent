@@ -23,6 +23,9 @@ import {TaskManager, TaskGate} from './tasks.mjs';
 import {createToolExecutor} from '../tools/execute.mjs';
 import {InboundMcp} from '../mcp/inbound.mjs';
 import {createInboundHttp} from './inbound-http.mjs';
+import {AgentConfig} from '../agents/config.mjs';
+import {AgentConnectionManager, createSdkConnection} from '../mcp/client.mjs';
+import {handleAgents} from '../agents/api.mjs';
 import {handleAudit} from '../writes/audit-api.mjs';
 import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
@@ -35,7 +38,10 @@ export async function createApp({
   root = fileURLToPath(new URL('../..', import.meta.url)),
   host = '127.0.0.1',
   port = 0,
-  taskLimits = {}
+  taskLimits = {},
+  // 测试注入：外部 Agent 连接用假 transport，绝不启动真实进程或联网；时钟可注入以验证空闲回收。
+  agentClientFactory = null,
+  agentNow = null
 } = {}) {
 if (!dataDir) throw new Error('createApp 需要 dataDir：准备数据目录是进程级入口（index.mjs）的职责');
 await mkdir(dataDir, {recursive: true});
@@ -78,7 +84,12 @@ async function tenant(user) {
     const model = await new ModelSettings(home, vault).load();
     model.allowEnvironmentKey = false; // 不继承服务器环境变量里的 Key，避免账号之间串用
     const backends = await new BackendChoice(tenantData).load();
-    return {dir: tenantData, models: model, backends, platforms: new PlatformBrowser(home), vault};
+    const agentConfig = await new AgentConfig(home, vault).load();
+    const managerOptions = {home, config: agentConfig};
+    if (agentClientFactory) managerOptions.createConnection = agentClientFactory;
+    else managerOptions.createConnection = createSdkConnection;
+    if (agentNow) managerOptions.now = agentNow;
+    return {dir: tenantData, models: model, backends, platforms: new PlatformBrowser(home), vault, agents: agentConfig, connections: new AgentConnectionManager(managerOptions)};
   })());
   return tenants.get(user.id);
 }
@@ -174,8 +185,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/backends.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/backends.js': 'src/web/backends.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/backends.js', '/agents.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/backends.js': 'src/web/backends.js', '/agents.js': 'src/web/agents.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -213,7 +224,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (!user) return send(res, {error: '请先登录自己的测试账号'}, 401);
 
-    const {dir, models, backends, platforms} = await tenant(user);
+    const {dir, models, backends, platforms, agents, connections} = await tenant(user);
 
     if (url.pathname === '/api/auth/me') return send(res, {user: {name: user.name, id: user.id}});
     if (req.method === 'GET' && url.pathname.startsWith('/api/platform/screenshot/')) {
@@ -263,6 +274,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, out);
     }
     if (req.method === 'GET' && url.pathname === '/api/mcp') return send(res, (await inboundMcp.status(user.id)).json);
+    // 外部 Agent：配置、连接状态与工具列表；全部作用在当前登录用户自己的 users/<id>/.data 上。
+    if (req.method === 'GET' && ['/api/agents', '/api/agents/'].includes(url.pathname)) {
+      const t = await tenant(user);
+      const out = await handleAgents({method: 'GET', pathname: '/api/agents', url, user, agents: t.agents, connections: t.connections});
+      return send(res, out.json, out.status);
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const items = [];
@@ -302,12 +319,30 @@ const server = http.createServer(async (req, res) => {
       return send(res, out.json, out.status || 200);
     }
 
+    // Agent 配置的局部更新与删除：PATCH / DELETE 与 POST 共用同一个请求体上限。
+    if (req.method === 'PATCH' || req.method === 'DELETE') {
+      let raw = '';
+      for await (const b of req) { raw += b.toString(); if (raw.length > 400000) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch { return send(res, {error: '请求体不是合法 JSON', code: 'INVALID_JSON'}, 400); }
+      const t = await tenant(user);
+      const out = await handleAgents({method: req.method, pathname: url.pathname, url, body, user, agents: t.agents, connections: t.connections});
+      if (!out) return send(res, {error: 'Not found'}, 404);
+      return send(res, out.json, out.status);
+    }
+
     if (req.method === 'POST') {
       let raw = '';
       // 聊天允许带图片：base64 后约 10.7MB；其他接口维持原有 400KB 上限。
       const bodyLimit = url.pathname === '/api/chat' ? 12 * 1024 * 1024 : 400000;
       for await (const b of req) { raw += b.toString(); if (raw.length > bodyLimit) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
       const body = JSON.parse(raw || '{}');
+
+      if (url.pathname.startsWith('/api/agents')) {
+        const out = await handleAgents({method: 'POST', pathname: url.pathname, url, body, user, agents, connections});
+        if (!out) return send(res, {error: 'Not found'}, 404);
+        return send(res, out.json, out.status);
+      }
 
       // 入站 /mcp 的开关与 client 凭据：任何登录用户都能开，但开启要二次确认。
       if (url.pathname === '/api/mcp/switch') {
@@ -663,11 +698,13 @@ actualPort = server.address().port;
 localOrigin = 'http://127.0.0.1:' + actualPort;
 allowedHosts = buildAllowedHosts(actualPort);
 let closing = null;
-const close = () => closing || (closing = new Promise(resolve => {
+const close = () => closing || (closing = (async () => {
   for (const controller of running.values()) controller.abort();
+  // 外部 Agent 的常驻连接与子进程走同一回收路径；租户还没建起来时跳过。
+  await Promise.allSettled([...tenants.values()].map(promise => promise.then(t => t.connections.closeAll()).catch(() => {})));
   inboundMcp.close().catch(() => {});
   if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
-  server.close(() => resolve());
-}));
+  await new Promise(resolve => server.close(() => resolve()));
+})());
 return {server, token, dataDir, root, host, port: actualPort, origin: localOrigin, close, tasks: taskManager};
 }
