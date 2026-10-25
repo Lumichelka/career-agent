@@ -68,7 +68,7 @@ test('Playwright UI：登录、发消息，抽屉里出现任务卡（证据与�
   await page.waitForSelector('#wf-entry', {timeout: 15000});
   assert.equal((await page.textContent('#wf-badge')).trim(), '0', '没有运行时徽标为 0');
 
-  await page.fill('#input', '研究这个招聘项目，并整理成草稿。');
+  await page.fill('#input', '请检查招聘来源，并整理成草稿。');
   await page.click('#send');
 
   // 运行中徽标应为 1（只计运行中 + 待确认）
@@ -116,5 +116,53 @@ test('Playwright UI：登录、发消息，抽屉里出现任务卡（证据与�
   assert.ok(Math.abs(mobile.height - mobile.innerHeight * 0.72) < 2, '手机抽屉应为 72vh，实际 ' + mobile.height);
   assert.ok(mobile.scrollWidth <= 390, '390 宽不应横向溢出，实际 scrollWidth=' + mobile.scrollWidth);
   assert.ok(Math.abs(mobile.bottom) < 1, '底部抽屉应贴底：' + JSON.stringify(mobile));
+
+  // 遮罩：手机上点抽屉外面应关闭
+  await page.click('#wf-scrim', {position: {x: 20, y: 20}});
+  assert.equal(await page.evaluate(() => document.body.classList.contains('wf-open')), false, '点遮罩应关闭抽屉');
+  await page.click('#wf-entry');
+  await page.waitForTimeout(300);
+
+  // 逐状态断言 390 宽不横向溢出：用真实渲染函数把每种状态灌进抽屉，同一帧取宽度。
+  const tasks = ['queued', 'running', 'waiting_confirmation', 'blocked', 'succeeded', 'failed', 'cancelled', 'undone'].map(state => ({
+    id: 'state-' + state,
+    sessionId: 's',
+    title: '状态覆盖：' + state + '，可能是一个很长很长很长很长很长的任务标题',
+    backend: 'API · mock-model',
+    sourceName: state === 'queued' ? '西南财经大学' : '',
+    state,
+    createdAt: '2026-10-26T02:00:00.000Z',
+    startedAt: '2026-10-26T02:00:01.000Z',
+    finishedAt: ['succeeded', 'failed', 'cancelled', 'undone'].includes(state) ? '2026-10-26T02:00:30.000Z' : '',
+    durationMs: 30000,
+    progress: {percent: 55, text: '正在处理这个状态的布局'},
+    evidence: [
+      {id: 'e1', kind: 'source', name: '招聘来源健康', count: 12, at: '2026-10-26T02:00:02.000Z'},
+      {id: 'e2', kind: 'screenshot', name: '就业网首页截图', url: 'https://example.com/a.png', at: '2026-10-26T02:00:03.000Z'}
+    ],
+    draft: {title: '双选会参会单位草稿', chars: 128, artifactId: 'a1'},
+    error: state === 'failed' ? {code: 'CONNECT_FAILED', message: '连接在 60 秒内没有建立，本任务没有写入任何数据。', recovery: '确认上游可执行，或改成本机 Codex 跑这一步。'} : null,
+    stopReason: state === 'cancelled' ? 'user' : '',
+    events: [],
+    seq: 3
+  }));
+  const widths = await page.evaluate(async fixtures => {
+    const mod = await import('/workflow.js');
+    const drawerBody = document.querySelector('#wf-drawer-body');
+    const result = {};
+    for (const fixture of fixtures) {
+      drawerBody.innerHTML = mod.renderDrawer([fixture]);
+      result[fixture.state] = {
+        found: Boolean(drawerBody.querySelector('.task[data-state="' + fixture.state + '"]')),
+        width: document.documentElement.scrollWidth
+      };
+    }
+    return result;
+  }, tasks);
+  for (const [state, measured] of Object.entries(widths)) {
+    assert.ok(measured.found, state + ' 状态应渲染出任务卡');
+    assert.ok(measured.width <= 390, state + ' 状态下 390 宽横向溢出：' + measured.width);
+  }
+
   assert.equal(pageErrors.length, 0, '页面不应有脚本错误：' + pageErrors.join(' | '));
 });

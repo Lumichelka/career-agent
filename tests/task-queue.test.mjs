@@ -85,18 +85,18 @@ test('排队中中止：拒绝并让出位置，后面的任务不受影响', as
   assert.equal(queue.stats().active, 0);
 });
 
-test('队首用户已满时，后面还能跑的用户不必等它', async () => {
+test('严格 FIFO：队首用户已满时，后面有空位的用户也要等', async () => {
   const queue = new TaskQueue({userLimit: 1, globalLimit: 4, waitLimitMs: 1000});
   const a1 = await queue.acquire('A');
   const served = [];
   const a2 = queue.acquire('A').then(release => { served.push('A2'); return release; });
   const b1 = queue.acquire('B').then(release => { served.push('B1'); return release; });
   await tick();
-  assert.deepEqual(served, ['B1'], 'A 的用户名额已满，B1 不应被队首的 A2 挡住');
+  assert.deepEqual(served, [], 'B 有空位也不能越过排在前面的 A2');
 
   a1();
   await tick();
-  assert.deepEqual(served, ['B1', 'A2'], 'A 释放后 A2 放行');
+  assert.deepEqual(served, ['A2', 'B1'], 'A 释放后按到达顺序放行');
 
   const releases = await Promise.all([a2, b1]);
   for (const release of releases) release();

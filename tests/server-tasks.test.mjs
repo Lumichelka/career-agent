@@ -148,7 +148,7 @@ test('工具证据与文稿草稿落进同一张任务卡', async t => {
   await setMockModel(app, cookie, mock);
   const session = await newSession(app, cookie);
 
-  const {promise} = chat(app, cookie, session.id, '研究这个招聘项目，并整理成草稿。');
+  const {promise} = chat(app, cookie, session.id, '请检查招聘来源，并整理成草稿。');
   const stream = feed(await promise);
   await stream.pump;
 

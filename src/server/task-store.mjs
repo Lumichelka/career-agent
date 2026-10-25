@@ -8,6 +8,7 @@ export const TASK_STATES = Object.freeze({
   QUEUED: 'queued',
   RUNNING: 'running',
   WAITING_CONFIRMATION: 'waiting_confirmation',
+  BLOCKED: 'blocked',
   SUCCEEDED: 'succeeded',
   FAILED: 'failed',
   CANCELLED: 'cancelled',
@@ -18,8 +19,9 @@ export const TERMINAL_STATES = new Set([TASK_STATES.SUCCEEDED, TASK_STATES.FAILE
 
 const TRANSITIONS = Object.freeze({
   queued: new Set(['running', 'failed', 'cancelled']),
-  running: new Set(['waiting_confirmation', 'succeeded', 'failed', 'cancelled', 'undone']),
+  running: new Set(['waiting_confirmation', 'blocked', 'succeeded', 'failed', 'cancelled', 'undone']),
   waiting_confirmation: new Set(['running', 'failed', 'cancelled']),
+  blocked: new Set(['running', 'failed', 'cancelled']),
   succeeded: new Set(),
   failed: new Set(),
   cancelled: new Set(),
@@ -152,10 +154,6 @@ export class TaskStore {
 
   list({sessionId = ''} = {}) {
     return this.tasks.filter(task => !sessionId || task.sessionId === sessionId).map(publicTask);
-  }
-
-  snapshot(task) {
-    return publicTask(task);
   }
 
   transition(task, state, {reason = ''} = {}) {

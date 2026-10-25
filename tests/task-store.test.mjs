@@ -30,6 +30,8 @@ test('状态机：queued → running → succeeded，终态不能再变', async 
     store.transition(task, 'succeeded');
     assert.ok(task.finishedAt, '终态应记录 finishedAt');
     assert.equal(canTransition('succeeded', 'running'), false);
+    assert.equal(canTransition('running', 'blocked'), true);
+    assert.equal(canTransition('blocked', 'running'), true);
     assert.throws(() => store.transition(task, 'running'), /任务状态不能/);
   });
 });

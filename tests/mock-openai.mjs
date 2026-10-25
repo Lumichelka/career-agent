@@ -27,6 +27,9 @@ function decide(body) {
   if (body.tools?.length && /请调用 career_platform_status/.test(userText)) {
     return {toolCalls: [{id: 'call_career_platform_status', name: 'career_platform_status', args: '{}'}]};
   }
+  if (body.tools?.length && /请检查招聘来源/.test(userText)) {
+    return {toolCalls: [{id: 'call_career_source_health', name: 'career_source_health', args: '{}'}]};
+  }
   if (all.includes('规划阶段')) {
     return {text: JSON.stringify({goal: '回答测试问题', steps: ['理解需求', '给出答复'], needsSearch: false, deliverable: '一段文字'})};
   }

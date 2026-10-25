@@ -22,11 +22,10 @@ function abortError() {
 }
 
 export class TaskQueue {
-  constructor({userLimit = 2, globalLimit = 8, waitLimitMs = 120000, timers = null} = {}) {
+  constructor({userLimit = 2, globalLimit = 8, waitLimitMs = 120000} = {}) {
     this.userLimit = Math.max(1, Number(userLimit) || 2);
     this.globalLimit = Math.max(1, Number(globalLimit) || 8);
     this.waitLimitMs = Math.max(0, Number(waitLimitMs) || 0);
-    this.timers = timers || {set: (fn, ms) => setTimeout(fn, ms), clear: timer => clearTimeout(timer)};
     this.total = 0;
     this.perUser = new Map();
     this.waiters = [];
@@ -50,14 +49,14 @@ export class TaskQueue {
     return this.total < this.globalLimit && this.activeFor(userId) < this.userLimit;
   }
 
-  // 有空位立刻返回已解决的 Promise；否则排队，signal 中止或等待超时都会把名额还回去。
+  // 严格 FIFO：即使本用户有空位，只要前面还有人在排队，也不插队。
+  // signal 中止或等待超时都会把自己从队列里摘掉，不影响后面的人。
   acquire(userId, {signal} = {}) {
     const key = String(userId || '');
     if (signal?.aborted) return Promise.reject(abortError());
-    if (this.canStart(key)) return Promise.resolve(this.grant(key));
     return new Promise((resolve, reject) => {
       const waiter = {userId: key, resolve, reject, signal: signal || null, timer: null, onAbort: null};
-      waiter.timer = this.timers.set(() => {
+      waiter.timer = setTimeout(() => {
         if (this.drop(waiter)) reject(new QueueTimeoutError(this.waitLimitMs));
       }, this.waitLimitMs);
       if (signal) {
@@ -65,6 +64,7 @@ export class TaskQueue {
         signal.addEventListener('abort', waiter.onAbort, {once: true});
       }
       this.waiters.push(waiter);
+      this.drain();
     });
   }
 
@@ -82,11 +82,12 @@ export class TaskQueue {
     };
   }
 
-  // 从队首往后放行；队首用户已满时跳过，避免一个人把整条队列堵死。
+  // 严格 FIFO：只看队首；队首用户已满就整条队列等，绝不让后到的越过。
   drain() {
-    for (const waiter of [...this.waiters]) {
-      if (!this.canStart(waiter.userId)) continue;
-      if (!this.drop(waiter)) continue;
+    while (this.waiters.length) {
+      const waiter = this.waiters[0];
+      if (!this.canStart(waiter.userId)) return;
+      this.drop(waiter);
       waiter.resolve(this.grant(waiter.userId));
     }
   }
@@ -95,7 +96,7 @@ export class TaskQueue {
     const index = this.waiters.indexOf(waiter);
     if (index < 0) return false;
     this.waiters.splice(index, 1);
-    if (waiter.timer) this.timers.clear(waiter.timer);
+    if (waiter.timer) clearTimeout(waiter.timer);
     if (waiter.signal && waiter.onAbort) waiter.signal.removeEventListener('abort', waiter.onAbort);
     return true;
   }

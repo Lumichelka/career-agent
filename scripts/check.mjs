@@ -60,11 +60,15 @@ if (major >= 23) {
   }
 }
 
-// 5. 自动化测试
+// 5. 自动化测试：测试清单只维护在 package.json，避免自检和 npm test 各写一份、慢慢漂移。
 if (!args.includes('--no-test')) {
   console.log('\n运行自动化测试…');
-  const files = ['tests/core.test.mjs', 'tests/api-model.test.mjs', 'tests/isolation.test.mjs', 'tests/recruit.test.mjs', 'tests/paths.test.mjs', 'tests/tools.test.mjs', 'tests/memory.test.mjs', 'tests/skills.test.mjs', 'tests/sources.test.mjs', 'tests/lifecycle.test.mjs', 'tests/resume.test.mjs', 'tests/backup.test.mjs', 'tests/manual.test.mjs', 'tests/company.test.mjs', 'tests/docx.test.mjs', 'tests/platform.test.mjs', 'tests/projects.test.mjs', 'tests/wechat.test.mjs', 'tests/swpu-jobfair.test.mjs', 'tests/collect-projects.test.mjs', 'tests/scu-jobfair.test.mjs', 'tests/uestc.test.mjs', 'tests/project-workflow.test.mjs', 'tests/wechat-harvest.test.mjs', 'tests/source-manual.test.mjs', 'tests/server-app.test.mjs', 'tests/platform-bridge.test.mjs', 'tests/mcp-inbound.test.mjs'];
-  const run = spawnSync(process.execPath, ['--test', ...files], {cwd: root, stdio: 'inherit'});
+  const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  const files = String(pkg.scripts?.test || '').replace(/^node\s+--test\s+/, '').split(/\s+/).filter(Boolean);
+  const run = files.length
+    ? spawnSync(process.execPath, ['--test', ...files], {cwd: root, stdio: 'inherit'})
+    : {status: 1};
+  if (!files.length) console.error('package.json 里没有可用的 test 清单');
   record('自动化测试', run.status === 0, run.status === 0 ? '全部通过' : '存在失败，见上方输出');
 } else {
   record('自动化测试', true, '已跳过（--no-test）', true);

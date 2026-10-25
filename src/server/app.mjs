@@ -18,7 +18,7 @@ import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
 import {TaskQueue} from './task-queue.mjs';
-import {TaskStore} from './task-store.mjs';
+import {TaskStore, publicTask} from './task-store.mjs';
 import {listTools} from '../tools/registry.mjs';
 import {createToolExecutor} from '../tools/execute.mjs';
 import {InboundMcp, requestFromNode, writeNodeResponse} from '../mcp/inbound.mjs';
@@ -270,7 +270,7 @@ const server = http.createServer(async (req, res) => {
       const store = (await tenant(user)).tasks;
       const task = store.find(decodeURIComponent(url.pathname.slice('/api/tasks/'.length)));
       if (!task) return send(res, {error: '任务不存在'}, 404);
-      return send(res, {task: {...store.snapshot(task), events: task.events}});
+      return send(res, {task: {...publicTask(task), events: task.events}});
     }
 
     if (req.method === 'GET' && (url.pathname.startsWith('/api/resumes') || url.pathname.startsWith('/api/applications') || url.pathname.startsWith('/api/interviews'))) {
@@ -448,9 +448,9 @@ const server = http.createServer(async (req, res) => {
 
         res.writeHead(200, {'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'});
         const write = payload => { if (!res.destroyed) res.write(JSON.stringify(payload) + '\n'); };
-        const snapshot = () => store.snapshot(task);
-        const initial = task.events[task.events.length - 1];
-        write({...initial, taskId: task.id, task: snapshot()});
+        const snapshot = () => publicTask(task);
+        const initialEvent = task.events[task.events.length - 1];
+        write({...initialEvent, taskId: task.id, task: snapshot()});
         const push = event => {
           const stored = store.record(task, event);
           if (event.type === 'status') s.lastTask.phase = event.text;
@@ -467,6 +467,12 @@ const server = http.createServer(async (req, res) => {
         const progress = (label, next) => {
           percent = typeof next === 'number' ? Math.max(percent, Math.min(100, next)) : Math.min(92, percent + 8);
           push({type: 'progress', percent, text: label || ''});
+        };
+        // 三种结束方式共用一条收尾：写错误事件、推进状态、同步 lastTask。
+        const finishWithFailure = ({state, code, text: message, recovery, reason = ''}) => {
+          push({type: 'error', text: message, code, recovery});
+          setState(state, {reason});
+          s.lastTask = {...s.lastTask, status: state === 'cancelled' ? 'stopped' : 'failed', error: message};
         };
         taskControls.set(s.id, {taskId: task.id, setState, progress});
         taskEvents.set(s.id, push);
@@ -557,22 +563,18 @@ const server = http.createServer(async (req, res) => {
           write({type: 'done', session: s, taskId: task.id, task: snapshot()});
         } catch (e) {
           const timedOut = e.code === 'TASK_TIMEOUT';
-          const friendly = timedOut ? e.message : decorateChatError(e.message, !!models.snapshot().apiKey);
           if (timedOut) {
             run.stopReason = 'time_limit';
-            push({type: 'error', text: friendly, code: 'TASK_TIMEOUT', recovery: '把任务拆小再试，或在设置里换更快的接口。'});
-            setState('failed', {reason: 'time_limit'});
-            s.lastTask = {...s.lastTask, status: 'failed', error: friendly};
+            finishWithFailure({state: 'failed', code: 'TASK_TIMEOUT', text: e.message, reason: 'time_limit', recovery: '把任务拆小再试，或在设置里换更快的接口。'});
           } else if (run.stopReason || controller.signal.aborted) {
             const reason = run.stopReason || 'user';
-            const stopText = reason === 'client_closed' ? '连接已断开，任务停止。' : '已停止本次任务。';
-            push({type: 'error', text: stopText, code: 'CANCELLED', recovery: '重新发送即可重试。'});
-            setState('cancelled', {reason});
-            s.lastTask = {...s.lastTask, status: 'stopped', error: stopText};
+            finishWithFailure({
+              state: 'cancelled', code: 'CANCELLED', reason,
+              text: reason === 'client_closed' ? '连接已断开，任务停止。' : '已停止本次任务。',
+              recovery: '重新发送即可重试。'
+            });
           } else {
-            push({type: 'error', text: friendly, code: 'TASK_FAILED', recovery: '检查错误后重试，或换一个可用的执行后端。'});
-            setState('failed');
-            s.lastTask = {...s.lastTask, status: 'failed', error: friendly};
+            finishWithFailure({state: 'failed', code: 'TASK_FAILED', text: decorateChatError(e.message, !!models.snapshot().apiKey), recovery: '检查错误后重试，或换一个可用的执行后端。'});
           }
           await save(dir, s);
           await recordTask(dir, {sessionId: s.id, title: s.title, status: s.lastTask.status === 'stopped' ? 'stopped' : 'failed', error: s.lastTask.error}).catch(() => {});

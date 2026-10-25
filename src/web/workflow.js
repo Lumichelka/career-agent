@@ -1,12 +1,13 @@
 // 工作流抽屉：顶栏「工作流 · N」徽标 + 右侧抽屉（手机底部 72vh）。
 // 渲染函数不碰 document，可以直接在 Node 里测；mount() 才在浏览器里接管页面元素。
 //
-// 与页面其它模块一样用运行时注入，不改 index.html：ui-model.js 也是这么加侧栏入口的。
+// 与页面其它模块一样在运行时注入 DOM，不重写 index.html 的结构（ui-model.js 也是这么加侧栏入口的）。
 
 export const STATE_LABELS = {
   queued: '排队中',
   running: '运行中',
   waiting_confirmation: '待确认',
+  blocked: '已阻塞',
   succeeded: '已完成',
   failed: '失败',
   cancelled: '已取消',
@@ -16,12 +17,12 @@ export const STATE_LABELS = {
 export const GROUPS = [
   {key: 'running', label: '运行中', states: ['running']},
   {key: 'queued', label: '排队中', states: ['queued']},
-  {key: 'confirm', label: '待确认', states: ['waiting_confirmation']},
+  {key: 'confirm', label: '待确认', states: ['waiting_confirmation', 'blocked']},
   {key: 'done', label: '已完成', states: ['succeeded', 'undone']},
   {key: 'failed', label: '失败与取消', states: ['failed', 'cancelled']}
 ];
 
-export const ACTIVE_STATES = new Set(['queued', 'running', 'waiting_confirmation']);
+export const ACTIVE_STATES = new Set(['queued', 'running', 'waiting_confirmation', 'blocked']);
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
@@ -58,7 +59,7 @@ export function groupTasks(tasks) {
 
 function toneOf(state) {
   if (state === 'running') return 'running';
-  if (state === 'queued' || state === 'waiting_confirmation') return 'confirm';
+  if (state === 'queued' || state === 'waiting_confirmation' || state === 'blocked') return 'confirm';
   if (state === 'succeeded' || state === 'undone') return 'done';
   return 'failed';
 }
@@ -155,7 +156,6 @@ const CSS = `
 body.wf-open .wf-scrim{opacity:1;pointer-events:auto}
 .wf-drawer{position:fixed;top:0;right:0;bottom:0;width:400px;max-width:100%;background:#fbfcfb;border-left:1px solid #e4e8e5;z-index:70;transform:translateX(102%);transition:transform .22s ease;display:flex;flex-direction:column;box-shadow:-18px 0 50px #172e2722;overflow:hidden}
 body.wf-open .wf-drawer{transform:none}
-body.wf-open .wf-scrim{opacity:0;pointer-events:none}
 .wf-drawer-head{padding:16px 16px 10px;border-bottom:1px solid #e4e8e5;display:flex;flex-direction:column;gap:6px}
 .wf-drawer-head .line{display:flex;align-items:center;gap:8px}
 .wf-drawer-head h2{margin:0;font-size:15px}
@@ -204,7 +204,10 @@ details.more[open] summary:before{content:'▾ '}
 .draft b{font-size:12px;color:#274b3b}
 .fail-box{background:#fdf3f0;border:1px solid #eed3cb;border-radius:10px;padding:10px 12px;font-size:11.5px;line-height:1.75;display:flex;flex-direction:column;gap:6px}
 .fail-box b{font-size:12px;color:#8f3d2e}
-@media(min-width:751px){body.wf-open main{margin-right:400px;transition:margin-right .22s ease}}
+@media(min-width:751px){
+  body.wf-open main{margin-right:400px;transition:margin-right .22s ease}
+  body.wf-open .wf-scrim{opacity:0;pointer-events:none}
+}
 @media(max-width:750px){
   header>div>span{display:none}
   .wf-head-right .wf-tag{display:none}
@@ -360,7 +363,6 @@ function mount() {
     if (document.visibilityState !== 'hidden') refresh();
   }, 1500);
   window.addEventListener('beforeunload', () => clearInterval(timer), {once: true});
-  window.__workflow = {refresh, badgeCount: () => badgeCount(tasks), tasks: () => tasks};
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {

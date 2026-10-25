@@ -31,11 +31,12 @@ test('按状态分组：运行中 / 排队中 / 待确认 / 已完成 / 失败�
     task({id: '2', state: 'running'}),
     task({id: '3', state: 'succeeded'}),
     task({id: '4', state: 'queued'}),
-    task({id: '5', state: 'cancelled'})
+    task({id: '5', state: 'cancelled'}),
+    task({id: '6', state: 'blocked'})
   ];
   const groups = groupTasks(tasks);
-  assert.deepEqual(groups.map(group => group.label), ['运行中', '排队中', '已完成', '失败与取消']);
-  assert.deepEqual(groups.map(group => group.tasks.length), [1, 1, 1, 2]);
+  assert.deepEqual(groups.map(group => group.label), ['运行中', '排队中', '待确认', '已完成', '失败与取消']);
+  assert.deepEqual(groups.map(group => group.tasks.length), [1, 1, 1, 1, 2]);
   assert.deepEqual(groupTasks([]), []);
 });
 
@@ -102,6 +103,7 @@ test('抽屉：空状态与分组标题', () => {
 
 test('状态中文名与时长格式', () => {
   assert.equal(STATE_LABELS.waiting_confirmation, '待确认');
+  assert.equal(STATE_LABELS.blocked, '已阻塞');
   assert.equal(formatDuration(0), '0 秒');
   assert.equal(formatDuration(65000), '1 分 05 秒');
 });
