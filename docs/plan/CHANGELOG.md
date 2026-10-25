@@ -3,6 +3,21 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.2.0 · 2026-10-25
+
+**双选会项目主线、公众号并入来源、对话优先**
+
+- 采集器新增项目阶段：源声明 capabilities/fetchProjects，活动入库后自动同步单位项目。
+- SWPU 双选会：`getjobfairs` + `list_jobfair_company`；实测 5 场 → 500 单位。
+- SCU 双选会：详情 483 不影响 `getjobfaircorporationlistdata` POST；单场 15 单位。
+- UESTC：用 Nuxt `onSiteCalendar` API 替换浏览器空壳，实测 5 场。
+- 逐源状态矩阵写入 `docs/10`；UIBE/CUFE/SWJTU 等无项目源标注原因/替代。
+- 公众号并入来源：9 账号、文章分析、`/wechat` 302、数据页导入/确认。
+- 新工具 `career_recruit_projects/project/source_health`；平台只做研究，不登记/投递。
+- UI：`/` 对话优先、数据页日历/来源 tab、紧凑来源表、会话搜索、上下文抽屉、移动抽屉。
+- 测试 125 项；文档改写 01/00/06/10/15/18/19/20，不新增 plan 21。
+- 回退：`git reset --hard v3.1.2`
+
 ## v3.1.2 · 2026-10-25
 
 **批量粘贴招聘项目**
