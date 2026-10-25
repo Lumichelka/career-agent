@@ -1,7 +1,8 @@
 // 来源校对任务：来源卡发起 → 应用内浏览器读列表与一场详情各一次并截图 →
 // 视觉模型 API 只依据截图抽取 → 写网关只写 events / event_projects → 审计。
 // 不调用采集器、不向目标站发直连 HTTP 请求、不写公司档案库；失败即整体回滚（fail closed）。
-// 外部 Agent 文本复核（#40）不在本票内：复核作为后续步骤接在抽取之后、写入之前。
+// 外部 Agent 文本复核（#40）不在本票内；复核接缝留在抽取之后、写入之前：
+// reviewer({extraction, screenshots, source, signal}) 的结果只进证据，不修改写入集。
 import {mkdir, writeFile, readFile} from 'node:fs/promises';
 import {join, basename} from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -211,11 +212,14 @@ export function createSourceCheckService({dataDir, taskManager, browserReader = 
           });
           return result;
         } finally {
-          recordManualRead({
-            dataDir, userId: user.id, sourceId: source.id, taskId: task.id, sessionId: session.id,
-            status: result?.blocked ? 'blocked' : result ? 'succeeded' : 'failed',
-            reason: SOURCE_CHECK_REASON
-          });
+          // 来源卡记录失败不能反过来把已完成的写入判成失败。
+          try {
+            recordManualRead({
+              dataDir, userId: user.id, sourceId: source.id, taskId: task.id, sessionId: session.id,
+              status: result?.blocked ? 'blocked' : result ? 'succeeded' : 'failed',
+              reason: SOURCE_CHECK_REASON
+            });
+          } catch { /* 最近手动读取只是展示信息 */ }
         }
       }
     });
