@@ -13,6 +13,7 @@ export const HANDLERS = {
   'recruit.projects': recruit.projects,
   'recruit.project': recruit.project,
   'recruit.sources': recruit.sourceStates,
+  'recruit.bulkWrite': recruit.bulkWrite,
   'search.public': search.publicSearch,
   'search.company': search.companyResearch,
   'platform.status': platform.status,
@@ -38,7 +39,9 @@ export function createToolExecutor({runner = null} = {}) {
     if (seen.has(key)) {
       return {status: 'blocked', code: 'DUPLICATE_CALL', message: '本次任务已执行过相同请求，未再次访问平台。', previousStatus: seen.get(key), recovery: '使用先前结果；无结果时更换关键词或说明所需操作，不要原样重试。'};
     }
-    if (tool.permission === 'write' && !ctx.confirmed) {
+    // 写工具的确认由写网关按 sensitivity 判定（auto 直接写、sensitive 返回 confirm_required）；
+    // 只有没有声明 sensitivity 的旧写工具仍沿用 ctx.confirmed 这一道。
+    if (tool.permission === 'write' && !tool.sensitivity && !ctx.confirmed) {
       return {status: 'confirm_required', code: 'NEEDS_CONFIRMATION', message: '该工具会写入数据，需要用户确认后执行。'};
     }
     const handler = runner || HANDLERS[tool.handler];

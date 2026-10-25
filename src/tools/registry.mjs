@@ -125,6 +125,37 @@ export const TOOLS = [
     }
   },
   {
+    name: 'career_recruit_bulk_write',
+    title: '批量写入招聘活动与项目',
+    description: '把从页面或截图核对出的活动与参会单位一次写入本机招聘库（自动写入，带审计与幂等）。只写 events / event_projects，不写公司档案、不投递。events 每条需 title 与 startAt；projects 用 eventIndex（从 0 开始）或 eventId 指向同批活动；source.sourceId=manual 表示手动/浏览器读取。同一次调用共用一个 idempotencyKey，重试不会重复写入。',
+    permission: 'write',
+    sensitivity: 'auto',
+    writeDomain: 'recruit',
+    handler: 'recruit.bulkWrite',
+    timeoutMs: 15000,
+    parameters: {
+      type: 'object',
+      properties: {
+        events: {type: 'array', description: '活动数组（最多 50 条），每项含 title、startAt，可选 school/city/kind/venue/company/positions/requirements/applyMode/applyUrl/sourceUrl/sourceKey/notes'},
+        projects: {type: 'array', description: '招聘项目数组（最多 200 条），用 eventIndex（从 0 开始）或 eventId 关联本批活动'},
+        source: {
+          type: 'object',
+          description: '来源元数据：sourceId（manual=手动/浏览器读取）、sourceUrl、notes',
+          properties: {
+            sourceId: {type: 'string', maxLength: 80},
+            sourceUrl: {type: 'string', maxLength: 500},
+            notes: {type: 'string', maxLength: 2000}
+          },
+          additionalProperties: false
+        },
+        idempotencyKey: {type: 'string', maxLength: 200, description: '幂等键：同一次写入重试必须复用'},
+        confirmId: {type: 'string', maxLength: 64, description: '敏感写入的确认 id，可选'}
+      },
+      required: ['events'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'career_source_health',
     title: '招聘来源健康',
     description: '列出高校就业网/公众号来源的列表、详情、项目能力与最近状态；ok 只在列表解析成功时使用。',
@@ -211,7 +242,8 @@ export function getTool(name) {
 }
 
 export function listTools() {
-  return TOOLS.map(({handler, ...rest}) => rest);
+  // 自动/敏感分级与写入域随注册表一起给能力面板；旧工具没有显式声明时按自动只读处理。
+  return TOOLS.map(({handler, ...rest}) => ({...rest, sensitivity: rest.sensitivity || 'auto', writeDomain: rest.writeDomain || ''}));
 }
 
 export function toolsForModel() {
@@ -222,10 +254,11 @@ export function platformTools() {
   return TOOLS.filter(t => t.handler.startsWith('platform.'));
 }
 
-// 入站 /mcp 暴露的工具：注册表里除平台工具以外的全部本地工具。
+// 入站 /mcp 暴露的工具：注册表里除平台工具以外的本地只读工具。
 // 平台工具是任务内的登录型浏览器操作，靠内部任务桥与 taskId 鉴权；入站连接没有任务，因此不暴露。
+// 写工具在入站确认链路（#30/#38）接好前不暴露：入站调用没有本应用的 confirm_id 身份，不能绕过确认直接写库。
 export function inboundTools() {
-  return TOOLS.filter(t => !t.handler.startsWith('platform.'));
+  return TOOLS.filter(t => !t.handler.startsWith('platform.') && t.permission !== 'write');
 }
 
 export function toolNames() {

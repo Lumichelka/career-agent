@@ -175,7 +175,7 @@ export class TaskManager {
       sourceName: String(sourceName || '对话').slice(0, 80),
       state: 'queued',
       phase: '排队等待执行',
-      counts: {tools: 0, steps: 0, evidence: 0, batches: 0, drafts: 0},
+      counts: {tools: 0, steps: 0, evidence: 0, writes: 0, batches: 0, drafts: 0},
       plan: null,
       evidence: [],
       drafts: [],
@@ -364,6 +364,15 @@ export class TaskManager {
           case 'tool_progress':
             emitProgress({progress: event.progress, total: event.total, message: event.message});
             break;
+          case 'writes': {
+            // 一次批量写 = 一个批次；重放的幂等结果不发 writes 事件，因此不会被算成新写入。
+            const rows = Number(event.counts?.rows ?? event.counts?.total ?? 0);
+            if (Number.isFinite(rows) && rows > 0) task.counts.writes = (Number(task.counts.writes) || 0) + rows;
+            if (event.batchId) task.counts.batches = (Number(task.counts.batches) || 0) + 1;
+            touch();
+            emitProgress();
+            break;
+          }
           case 'evidence':
             if (event.evidence) void addEvidence(event.evidence);
             break;

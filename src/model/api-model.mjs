@@ -236,6 +236,11 @@ async function runOnce({root, prompt, schema, search, onEvent, signal, taskId, c
       try { args = typeof t.args === 'string' ? JSON.parse(t.args) : (t.args || {}); } catch { args = null; }
       onEvent?.({type: 'tool', toolType: 'mcp_tool_call', text: t.name === 'career_public_search' ? '正在检索公开信息' : '正在调用平台工具'});
       const value = await executeTool(t.name, args, {taskId, config, fetchImpl: doFetch, signal});
+      // 写网关的结果带给任务卡：真实写入一个批次发一次 writes；待确认的敏感写发 confirm_required。
+      if (value && typeof value === 'object') {
+        if (value.writeEvent) onEvent?.({type: 'writes', taskId: config.taskId || taskId, tool: t.name, batchId: value.writeEvent.batchId, counts: value.writeEvent.counts});
+        if (value.status === 'confirm_required') onEvent?.({type: 'confirm_required', taskId: config.taskId || taskId, tool: t.name, confirmId: value.confirmId, preview: value.preview, expiresAt: value.expiresAt});
+      }
       const content = JSON.stringify(value).slice(0, 24000);
       trace.push({type: 'mcp_tool_call', label: t.name});
       toolEvidence.push(JSON.stringify({tool: t.name, result: value}).slice(0, 10000));

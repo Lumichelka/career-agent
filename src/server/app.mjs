@@ -22,6 +22,7 @@ import {TaskManager, TaskGate} from './tasks.mjs';
 import {createToolExecutor} from '../tools/execute.mjs';
 import {InboundMcp} from '../mcp/inbound.mjs';
 import {createInboundHttp} from './inbound-http.mjs';
+import {handleAudit} from '../writes/audit-api.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -237,6 +238,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/tasks') {
       return send(res, await taskManager.summary(user.id, {sessionId: url.searchParams.get('session') || undefined}));
     }
+    // 自动写入审计：只读当前用户自己的库；按任务/批次分组，响应形状供审阅层（#31/#41）复用。
+    if (req.method === 'GET' && url.pathname === '/api/audit') {
+      const out = await handleAudit({dir, userId: user.id, url});
+      return send(res, out.json);
+    }
     if (req.method === 'GET' && url.pathname === '/api/mcp') return send(res, (await inboundMcp.status(user.id)).json);
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
@@ -435,7 +441,7 @@ const server = http.createServer(async (req, res) => {
             signal: controller.signal,
             emit,
             describeError: e => decorateChatError(e.message, !!modelConfig.apiKey),
-            execute: async ({signal, emit: runEmit, addDraft}) => {
+            execute: async ({task, signal, emit: runEmit, addDraft}) => {
               if (modelConfig.mode === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
               const profile = (await loadProfile(dir)).facts;
               const skill = await selectSkill(root, text).catch(() => null);
@@ -443,7 +449,7 @@ const server = http.createServer(async (req, res) => {
                 root,
                 modelCall: options => modelConfig.mode === 'codex'
                   ? runModel({...options, taskBridgeToken})
-                  : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir}}),
+                  : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir, userId: user.id, taskId: task.id, actorRef: backendLabel(modelConfig)}}),
                 session: s,
                 message: text || '请阅读附件并询问我希望完成什么任务。',
                 attachments,
