@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {findWechatLinks} from '../src/wechat/harvest.mjs';
 import {analyzeArticle} from '../src/wechat/analyze.mjs';
 import {fetchWechatArticle} from '../src/wechat/fetch-article.mjs';
@@ -10,6 +11,15 @@ test('来源页：发现并规范化公众号文章链接', () => {
   assert.equal(links.length, 2);
   assert.ok(links.every(l => l.startsWith('https://mp.weixin.qq.com/s')));
   assert.ok(links.every(l => !l.includes('&amp;')));
+});
+
+test('文章分析：真实双选会推文抽出 26 家参会单位', () => {
+  const text = readFileSync(new URL('./fixtures/wechat-jobfair-article.txt', import.meta.url), 'utf8');
+  const a = analyzeArticle({title: '线下双选 | 5月8日 | “周五职通车”——2027届实习专场', text, url: 'https://mp.weixin.qq.com/s/jobfair'});
+  assert.equal(a.hasRecruitment, 'yes');
+  assert.equal(a.projects.length, 26);
+  assert.ok(a.projects.some(p => p.company.includes('德州仪器')));
+  assert.equal(a.summary, '线下双选 | 5月8日 | “周五职通车”——2027届实习专场');
 });
 
 test('文章分析：月历/邀请函噪声不产生假项目', () => {

@@ -1,11 +1,12 @@
 // 公众号种子：来自公开搜索结果；biz 是文章链接里的公众号标识，没有 biz 的标为“待确认”。
 export const SEED_ACCOUNTS = [
   {
-    name: '西财就业',
+    name: '西财校招',
     school: '西南财经大学',
     category: '财经强校',
-    biz: 'MzA4ODgzNjg2NQ==',
-    note: '“西财就业”与“西财校招”已合并；以官方最新通知为准。'
+    biz: 'MjM5MDAxMzM4MQ==',
+    legacyNames: ['西财就业'],
+    note: '原“西财就业”已迁移/合并到“西财校招”；旧 biz 可能仍可打开历史文章。'
   },
   {
     name: '西南交通大学就业',

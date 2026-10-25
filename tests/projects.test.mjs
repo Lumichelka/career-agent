@@ -131,6 +131,6 @@ test('Agent 工具：项目列表/详情/来源健康', async () => {
     assert.equal(detail.event.id, 'a'.repeat(24));
     const health = await callTool('career_source_health', {}, ctx);
     assert.equal(health.status, 'readable');
-    assert.ok(health.count >= 15);
+    assert.ok(health.count >= 13);
   });
 });

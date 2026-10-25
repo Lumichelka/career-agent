@@ -3,6 +3,17 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.2.6 · 2026-10-25
+
+**来源收口与真实公众号校验**
+
+- 移除南开大学、中山大学数据源；历史活动归档，不再采集。
+- “西财就业”迁移为“西财校招”，既有账号自动迁移。
+- 新增 `source-reading` 技能：逐站 DOM/浏览器/截图/OCR/人工登录分诊，含各站读取方案。
+- 用 BrowserSkill 实测 15 个来源；记录 SWJTU/SUFE POST、CUFE 超时、UIBE 全屏 banner、SWUFE robots。
+- 用真实川大双选会推文校验：26 家参会单位可抽取；加入 fixture 测试。
+- 测试 132；回退 `v3.2.5`。
+
 ## v3.2.5 · 2026-10-25
 
 **手工来源页通用 fallback**

@@ -105,6 +105,13 @@ export class RecruitStore {
         category=excluded.category,channel=excluded.channel,list_url=excluded.list_url,mode=excluded.mode,
         enabled=excluded.enabled,note=excluded.note`);
     for (const s of sources) stmt.run(s.id, s.name, s.school, s.city, s.category, s.channel || '', s.listUrl, s.mode, s.enabled ? 1 : 0, s.note || '');
+    const ids = sources.map(s => s.id);
+    const removed = ['nankai-recruitment', 'sysu-home'];
+    if (removed.length) {
+      const marks = removed.map(() => '?').join(',');
+      this.db.prepare('DELETE FROM sources WHERE id IN (' + marks + ')').run(...removed);
+      this.db.prepare("UPDATE events SET status='archived' WHERE status NOT IN ('archived','cancelled') AND source_id IN (" + marks + ')').run(...removed);
+    }
   }
 
   sourceStates() {
@@ -183,7 +190,7 @@ export class RecruitStore {
     if (to) { where.push('start_at <= ?'); args.push(to); }
     if (school) { where.push('school = ?'); args.push(school); }
     if (kind) { where.push('kind = ?'); args.push(kind); }
-    if (!includeCancelled) where.push("status != 'cancelled'");
+    if (includeCancelled) where.push("status != 'archived'"); else where.push("status NOT IN ('cancelled','archived')");
     const sql = 'SELECT * FROM events' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY start_at ASC LIMIT ?';
     const events = this.db.prepare(sql).all(...args, limit).map(rowToEvent);
     if (withProjects && events.length) {
@@ -307,10 +314,10 @@ export class RecruitStore {
 
   stats() {
     const day = new Date().toISOString().slice(0, 10);
-    const total = this.db.prepare("SELECT COUNT(*) c FROM events WHERE status != 'cancelled'").get().c;
-    const upcoming = this.db.prepare("SELECT COUNT(*) c FROM events WHERE start_at >= ? AND status != 'cancelled'").get(day).c;
-    const bySchool = this.db.prepare("SELECT school, COUNT(*) c FROM events WHERE status != 'cancelled' GROUP BY school ORDER BY c DESC").all();
-    const byKind = this.db.prepare("SELECT kind, COUNT(*) c FROM events WHERE status != 'cancelled' GROUP BY kind ORDER BY c DESC").all();
+    const total = this.db.prepare("SELECT COUNT(*) c FROM events WHERE status NOT IN ('cancelled','archived')").get().c;
+    const upcoming = this.db.prepare("SELECT COUNT(*) c FROM events WHERE start_at >= ? AND status NOT IN ('cancelled','archived')").get(day).c;
+    const bySchool = this.db.prepare("SELECT school, COUNT(*) c FROM events WHERE status NOT IN ('cancelled','archived') GROUP BY school ORDER BY c DESC").all();
+    const byKind = this.db.prepare("SELECT kind, COUNT(*) c FROM events WHERE status NOT IN ('cancelled','archived') GROUP BY kind ORDER BY c DESC").all();
     const byStatus = Object.fromEntries(this.db.prepare('SELECT status, COUNT(*) c FROM events GROUP BY status').all().map(r => [r.status, r.c]));
     const projects = this.db.prepare('SELECT COUNT(*) c FROM event_projects').get().c;
     return {total, upcoming, bySchool, byKind, byStatus, projects};

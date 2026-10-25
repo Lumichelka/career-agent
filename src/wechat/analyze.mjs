@@ -44,7 +44,8 @@ export function analyzeArticle({title = '', text = '', url = ''}) {
   const hasRecruitment = strong ? 'yes' : weak ? 'uncertain' : 'no';
   const lines = body.split(/\n+/).map(s => s.trim()).filter(Boolean);
   const relevant = lines.find(l => /双选会|宣讲会|招聘会|招聘|岗位|投递/.test(l)) || lines[0] || '';
-  const summary = (relevant || title).slice(0, 300);
+  const titleLike = /双选|宣讲|招聘会|专场|招聘/.test(title) ? title : '';
+  const summary = (titleLike || relevant || title).slice(0, 300);
   const draft = extractDraft({text: body, title, url});
   const projects = extractProjects(body);
 

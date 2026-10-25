@@ -10,11 +10,11 @@ import {runAgent} from '../src/agent/agent.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
-test('技能清单：三个技能，字段完整，工具都存在于注册表', async () => {
+test('技能清单：四个技能，字段完整，工具都存在于注册表', async () => {
   const skills = await listSkills(root);
-  assert.equal(skills.length, 3);
+  assert.equal(skills.length, 4);
   const ids = skills.map(s => s.id).sort();
-  assert.deepEqual(ids, ['company-research', 'interview-prep', 'resume-tailoring']);
+  assert.deepEqual(ids, ['company-research', 'interview-prep', 'resume-tailoring', 'source-reading']);
   for (const skill of skills) {
     assert.ok(skill.name, skill.id + ' 缺名称');
     assert.ok(skill.triggers.length > 0, skill.id + ' 缺触发词');
@@ -37,6 +37,7 @@ test('技能路由：按最长触发词选择', async () => {
   assert.equal((await selectSkill(root, '帮我把简历改一下，贴了 JD')).id, 'resume-tailoring');
   assert.equal((await selectSkill(root, '这家公司怎么样，待遇如何')).id, 'company-research');
   assert.equal((await selectSkill(root, '下周要面试了，帮我准备')).id, 'interview-prep');
+  assert.equal((await selectSkill(root, '这个就业网抓取失败，帮我校对来源结构')).id, 'source-reading');
   assert.equal(await selectSkill(root, '今天天气不错'), null);
   assert.equal(await selectSkill(root, ''), null);
 });

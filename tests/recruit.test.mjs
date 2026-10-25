@@ -25,14 +25,6 @@ const scuJobfair = `<ul>
 <li><span class="list1_time">2026-10-23 14:00</span><a href="/index/index/jobfairdetail.html?data=xyz">周五职通车—江安校区综合场（二）</a></li>
 </ul>`;
 
-const nankaiList = `<ul>
-<li><a href="/recruitment/content/type/1/id/387.html" target="_blank">南开大学2027届毕业生秋季校园双选会（综合类第三场）</a> <span>2026-11-13</span></li>
-<li><a href="/recruitment/content/type/1/id/388.html" target="_blank">南开大学商学院2026年秋季实习就业双选会</a> <span>2026-10-29</span></li>
-</ul>`;
-
-const nankaiDetail = `时间：2026-11-13 14:00 地点：南开大学津南校区大通学生中心一楼
-一、活动时间地点 1.时间：2026年11月13日（星期五）14:00-17:00`;
-
 test('日期与时段解析', () => {
   assert.equal(parseDateText('2026年11月13日'), '2026-11-13');
   assert.equal(parseDateText('2026/1/5'), '2026-01-05');
@@ -66,17 +58,6 @@ test('四川大学双选会解析', () => {
   assert.equal(items[0].kind, '双选会');
   assert.equal(items[0].venue, '四川大学江安校区');
   assert.equal(items[0].startAt, '2026-10-23T14:00:00+08:00');
-});
-
-test('南开列表 + 详情补全地点与结束时间', () => {
-  const source = sourceById('nankai-recruitment');
-  const items = source.parseList(nankaiList, source);
-  assert.equal(items.length, 2);
-  assert.equal(items[0].startAt.slice(0, 10), '2026-11-13');
-  const detail = source.parseDetail(nankaiDetail, items[0]);
-  assert.equal(detail.venue, '南开大学津南校区大通学生中心一楼');
-  assert.equal(detail.startTime, '14:00');
-  assert.equal(detail.endTime, '17:00');
 });
 
 test('上海财经大学 JSON 解析', () => {

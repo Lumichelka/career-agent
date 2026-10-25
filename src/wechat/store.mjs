@@ -46,12 +46,18 @@ export class WeChatStore {
   }
 
   seed() {
-    const count = this.db.prepare('SELECT COUNT(*) c FROM wechat_accounts').get().c;
-    if (count) return;
     const now = new Date().toISOString();
-    const stmt = this.db.prepare(`INSERT OR IGNORE INTO wechat_accounts(id,name,school,category,biz,home_url,note,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?)`);
-    for (const a of SEED_ACCOUNTS) stmt.run(randomUUID(), a.name, a.school || '', a.category || '', a.biz || '', a.home_url || '', a.note || '', now, now);
+    for (const a of SEED_ACCOUNTS) {
+      const names = [a.name, ...(a.legacyNames || [])];
+      const existing = this.db.prepare(`SELECT id FROM wechat_accounts WHERE name IN (${names.map(() => '?').join(',')})`).get(...names);
+      if (existing) {
+        this.db.prepare('UPDATE wechat_accounts SET name=?,school=?,category=?,biz=?,note=?,updated_at=? WHERE id=?')
+          .run(a.name, a.school || '', a.category || '', a.biz || '', a.note || '', now, existing.id);
+      } else {
+        this.db.prepare(`INSERT INTO wechat_accounts(id,name,school,category,biz,home_url,note,created_at,updated_at)
+          VALUES(?,?,?,?,?,?,?,?,?)`).run(randomUUID(), a.name, a.school || '', a.category || '', a.biz || '', a.home_url || '', a.note || '', now, now);
+      }
+    }
   }
 
   listAccounts() {
