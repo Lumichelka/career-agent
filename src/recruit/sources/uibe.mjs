@@ -11,5 +11,5 @@ export default {
   capabilities: {list: 'static', detail: 'http', projects: 'none'},
   enabled: false,
   listUrl: 'https://career.uibe.edu.cn/',
-  note: "站点可达；招聘活动栏目待适配，未适配前不产生活动。"
+  note: "首页可开但被全屏国聘 banner 覆盖，无结构化活动；使用手工粘贴 HTML/正文或公众号。"
 };
