@@ -211,7 +211,11 @@ function normalizeTools(result) {
     name: tool.name,
     title: tool.title || '',
     description: tool.description || '',
-    readOnly: tool.annotations?.readOnlyHint === true
+    // 分级只认 readOnlyHint === true，其余（含缺省）都按写；注解不参与授权。
+    readOnly: tool.annotations?.readOnlyHint === true,
+    // #35 的工具面需要上游 inputSchema（参数校验、幂等键字段探测）与原始注解快照。
+    inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object' ? tool.inputSchema : null,
+    annotations: tool.annotations && typeof tool.annotations === 'object' ? {...tool.annotations} : null
   }));
 }
 

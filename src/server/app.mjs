@@ -25,6 +25,7 @@ import {InboundMcp} from '../mcp/inbound.mjs';
 import {createInboundHttp} from './inbound-http.mjs';
 import {AgentConfig} from '../agents/config.mjs';
 import {AgentConnectionManager, createSdkConnection} from '../mcp/client.mjs';
+import {ExternalToolset, externalToolsSupported, OUTBOUND_WARNING} from '../agents/tools.mjs';
 import {handleAgents} from '../agents/api.mjs';
 import {handleAudit} from '../writes/audit-api.mjs';
 import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
@@ -52,6 +53,8 @@ const tokenFile = join(dataDir, 'local-session-token');
 let token = await readFile(tokenFile, 'utf8').catch(() => '');
 if (!/^[a-f0-9]{48}$/.test(token)) { token = randomBytes(24).toString('hex'); await writeFile(tokenFile, token, 'utf8'); }
 const running = new Map(), taskEvents = new Map(), loginWaiters = new Map(), loginPrompted = new Set();
+// 首次出网确认等待中的选择：confirmId -> {userId, finish(decision)}。身份只来自登录 cookie。
+const outboundWaits = new Map();
 // 服务端兜底的连续失败计数：客户端不老实递增 fallbackDepth 时，换后端建议仍然封顶 3 次。
 const failureStreaks = new Map();
 // 任务闸与任务记录：每用户 2 / 全局 8 / 排队 120s；记录落在 users/<id>/tasks/，供抽屉刷新。
@@ -147,6 +150,52 @@ async function platformReadForTask(platforms, action, body) {
   emit({type: 'platform_resolved', platform: body.platform});
   if (choice === 'resume') return execute();
   return {...result, message: choice === 'skip' ? '用户选择暂不登录。请说明缺少平台来源，使用公开资料完成可行部分。' : choice === 'timeout' ? '等待本人登录超时，本次未取得平台资料。' : '用户已停止任务。'};
+}
+
+// 首次出网确认（按 (user, agent)）：任务在等待期间是 waiting_confirmation，接受后本轮继续；拒绝则不发内容。
+const OUTBOUND_TIMEOUT_MS = 300000;
+function askOutboundConsent({userId, taskId, agent, emit, signal}) {
+  const confirmId = randomUUID();
+  const timeoutMs = OUTBOUND_TIMEOUT_MS;
+  emit({
+    type: 'external_confirm_required',
+    taskId,
+    confirmId,
+    agentId: agent.id,
+    agentName: agent.name,
+    title: '首次向外部 Agent 发送内容',
+    message: agent.name + '：' + OUTBOUND_WARNING,
+    warning: OUTBOUND_WARNING,
+    options: [{value: 'once', label: '仅本次'}, {value: 'always', label: '以后不再问'}, {value: 'reject', label: '拒绝'}],
+    timeoutMs,
+    at: new Date().toISOString()
+  });
+  return new Promise(resolve => {
+    let settled = false;
+    const done = decision => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      outboundWaits.delete(confirmId);
+      emit({type: 'external_confirm_resolved', taskId, confirmId, agentId: agent.id, decision});
+      resolve({decision});
+    };
+    const onAbort = () => done('reject');
+    const timer = setTimeout(() => done('reject'), timeoutMs);
+    outboundWaits.set(confirmId, {userId, finish: done});
+    if (signal?.aborted) done('reject');
+    else signal?.addEventListener('abort', onAbort, {once: true});
+  });
+}
+
+function resolveOutbound({userId, confirmId, decision}) {
+  const waiter = outboundWaits.get(String(confirmId || ''));
+  if (!waiter || waiter.userId !== userId) return null;
+  const value = ['once', 'always', 'reject'].includes(decision) ? decision : '';
+  if (!value) return {invalid: true};
+  waiter.finish(value);
+  return {ok: true, decision: value};
 }
 
 const server = http.createServer(async (req, res) => {
@@ -360,6 +409,14 @@ const server = http.createServer(async (req, res) => {
       const bodyLimit = url.pathname === '/api/chat' ? 12 * 1024 * 1024 : 400000;
       for await (const b of req) { raw += b.toString(); if (raw.length > bodyLimit) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
       const body = JSON.parse(raw || '{}');
+
+      // 首次出网确认的选择：仅本次 / 以后不再问（落该用户 Agent 配置）/ 拒绝；确认不属于本人按不存在处理。
+      if (url.pathname === '/api/agents/outbound') {
+        const out = resolveOutbound({userId: user.id, confirmId: body.confirmId, decision: String(body.decision || '')});
+        if (!out) return send(res, {error: '没有等待中的出网确认（可能已超时或已处理）', code: 'CONFIRM_NOT_PENDING'}, 404);
+        if (out.invalid) return send(res, {error: '确认选项无效', code: 'INVALID_DECISION'}, 400);
+        return send(res, {ok: true, decision: out.decision});
+      }
 
       if (url.pathname.startsWith('/api/agents')) {
         const out = await handleAgents({method: 'POST', pathname: url.pathname, url, body, user, agents, connections});
@@ -671,6 +728,31 @@ const server = http.createServer(async (req, res) => {
               if (backend.kind === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
               const profile = (await loadProfile(dir)).facts;
               const skill = await selectSkill(root, text).catch(() => null);
+              // 外部 Agent 工具：任务开始时 pin 一份快照（任务内不随上游增删漂移），模型把它们当本地工具用。
+              let externalTools = [];
+              let externalCaller = null;
+              const support = externalToolsSupported(backend.kind);
+              const hasExternalAgent = agents.list().some(agent => agent.enabled !== false);
+              if (hasExternalAgent && support.supported) {
+                const toolset = new ExternalToolset({
+                  userId: user.id,
+                  taskId: task.id,
+                  home: join(dataDir, 'users', user.id),
+                  evidenceDir: join(dataDir, 'users', user.id, 'tasks', task.id, 'evidence'),
+                  config: agents,
+                  connections,
+                  emit: runEmit,
+                  askConsent: ({agentId, agentName}) => askOutboundConsent({userId: user.id, taskId: task.id, agent: {id: agentId, name: agentName}, emit: runEmit, signal}),
+                  signal,
+                  now: agentNow || Date.now
+                });
+                const surface = await toolset.pin();
+                externalTools = surface.tools;
+                externalCaller = (tool, args, ctx) => toolset.callTool(tool, args, ctx);
+              } else if (hasExternalAgent && !support.supported) {
+                // Codex 执行体不能动态注入外部工具：明确说明限制，不静默假装这些工具可用。
+                runEmit({type: 'status', text: support.message});
+              }
               const result = await runAgent({
                 root,
                 modelCall: options => backend.kind === 'codex'
@@ -683,6 +765,8 @@ const server = http.createServer(async (req, res) => {
                 attachments: historyAttachments,
                 profile,
                 skill,
+                externalTools,
+                externalCaller,
                 onEvent: runEmit,
                 signal,
                 fallback: isFallbackTurn
@@ -748,6 +832,9 @@ allowedHosts = buildAllowedHosts(actualPort);
 let closing = null;
 const close = () => closing || (closing = (async () => {
   for (const controller of running.values()) controller.abort();
+  // 关服务时把还在等出网确认的任务一律按拒绝收尾，绝不偷偷把内容发出去。
+  for (const waiter of [...outboundWaits.values()]) { try { waiter.finish('reject'); } catch { /* 已收尾 */ } }
+  outboundWaits.clear();
   // 外部 Agent 的常驻连接与子进程走同一回收路径；租户还没建起来时跳过。
   await Promise.allSettled([...tenants.values()].map(promise => promise.then(t => t.connections.closeAll()).catch(() => {})));
   inboundMcp.close().catch(() => {});

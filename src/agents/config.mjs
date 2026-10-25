@@ -166,6 +166,8 @@ export class AgentConfig {
       lastConnectedAt: agent.lastConnectedAt || '',
       lastEra: agent.lastEra || '',
       lastError: agent.lastError || null,
+      // 首次出网确认的选择：#35 记「以后不再问」，界面与调用链共用。
+      outbound: {neverAsk: agent.outbound?.neverAsk === true, confirmedAt: agent.outbound?.confirmedAt || ''},
       hasCredentials: false
     };
     if (agent.transport === 'stdio') {
@@ -233,7 +235,9 @@ export class AgentConfig {
       createdAt: existing?.createdAt || new Date().toISOString(),
       lastConnectedAt: existing?.lastConnectedAt || '',
       lastEra: existing?.lastEra || '',
-      lastError: existing?.lastError || null
+      lastError: existing?.lastError || null,
+      // 出网同意跟 (user, agent) 绑定，改名字/地址/开关都不能把它清掉。
+      outbound: existing?.outbound ? {...existing.outbound} : null
     };
     if (transport === 'stdio') {
       const command = String(input.command ?? existing?.stdio?.command ?? '').trim();
@@ -365,6 +369,22 @@ export class AgentConfig {
       agent.lastEra = era || agent.lastEra || '';
       agent.lastError = null;
       await this.#save();
+    });
+  }
+
+  // 首次出网确认的结果：只有「以后不再问」需要持久化；「仅本次」留在本次任务内存里。
+  outboundConsent(id) {
+    const agent = this.#find(id);
+    return {neverAsk: agent?.outbound?.neverAsk === true, confirmedAt: agent?.outbound?.confirmedAt || ''};
+  }
+
+  async approveOutbound(id, {neverAsk = false, at = new Date().toISOString()} = {}) {
+    return this.#queue(async () => {
+      const agent = this.#find(id);
+      if (!agent) return null;
+      agent.outbound = {neverAsk: neverAsk === true, confirmedAt: at};
+      await this.#save();
+      return {...agent.outbound};
     });
   }
 
