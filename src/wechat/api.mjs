@@ -57,7 +57,7 @@ export async function handleWechat({method, pathname, url, body, dir}) {
         const pasted = String(body?.text || '').trim();
         let sourceText = pasted;
         if (link) {
-          const res = await fetchText(link, {timeout: 20000, retries: 0, minInterval: 0, checkRobots: false});
+          const res = await fetchText(link, {timeout: 20000, retries: 0, minInterval: 0});
           if (!res.ok) return {status: 400, json: {error: '来源页打不开：' + res.message}};
           sourceText = res.text;
         }
