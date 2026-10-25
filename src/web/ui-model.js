@@ -218,6 +218,17 @@
       c.onclick = () => { location.href = '/companies'; };
       resumeBtn.after(c);
     }
+    const platformsBtn = $('#platforms');
+    if (platformsBtn && !$('#data-root-link')) {
+      const d = document.createElement('a');
+      d.id = 'data-root-link';
+      d.href = '/recruit';
+      d.className = 'new';
+      d.textContent = '▤ 数据与日历';
+      d.style.display = 'block';
+      d.style.textDecoration = 'none';
+      platformsBtn.after(d);
+    }
     const companyBtn = $('#company-entry');
     if (companyBtn && !$('#wechat-entry')) {
       const x = document.createElement('button');

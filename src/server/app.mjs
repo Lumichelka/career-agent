@@ -96,7 +96,12 @@ http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/health') return send(res, {app: 'career-agent', status: 'ready', host, port});
 
-    if (req.method === 'GET' && ['/', '/today', '/index.html'].includes(url.pathname)) {
+    if (req.method === 'GET' && url.pathname === '/') {
+      res.writeHead(302, {Location: '/chat'});
+      return res.end();
+    }
+
+    if (req.method === 'GET' && ['/today', '/index.html'].includes(url.pathname)) {
       const html = (await readFile(join(root, 'src', 'web', 'workbench.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src 'self' https://esm.sh; worker-src blob: https://esm.sh; img-src 'self' data:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff'});
       return res.end(html);
