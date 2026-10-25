@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {toolsForModel} from '../tools/registry.mjs';
 import {createToolExecutor, callTool} from '../tools/execute.mjs';
+import {evidenceFromToolResult} from '../tools/evidence.mjs';
 import {endpointFor, explainError} from './providers.mjs';
 import {makeFetch} from './proxy-fetch.mjs';
 
@@ -236,6 +237,8 @@ async function runOnce({root, prompt, schema, search, onEvent, signal, taskId, c
       try { args = typeof t.args === 'string' ? JSON.parse(t.args) : (t.args || {}); } catch { args = null; }
       onEvent?.({type: 'tool', toolType: 'mcp_tool_call', text: t.name === 'career_public_search' ? '正在检索公开信息' : '正在调用平台工具'});
       const value = await executeTool(t.name, args, {taskId, config, fetchImpl: doFetch, signal});
+      const evidence = evidenceFromToolResult(t.name, value);
+      if (evidence) onEvent?.({type: 'evidence', evidence});
       const content = JSON.stringify(value).slice(0, 24000);
       trace.push({type: 'mcp_tool_call', label: t.name});
       toolEvidence.push(JSON.stringify({tool: t.name, result: value}).slice(0, 10000));

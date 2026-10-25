@@ -17,6 +17,8 @@ import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
+import {TaskQueue} from './task-queue.mjs';
+import {TaskStore} from './task-store.mjs';
 import {listTools} from '../tools/registry.mjs';
 import {createToolExecutor} from '../tools/execute.mjs';
 import {InboundMcp, requestFromNode, writeNodeResponse} from '../mcp/inbound.mjs';
@@ -29,14 +31,18 @@ export async function createApp({
   dataDir,
   root = fileURLToPath(new URL('../..', import.meta.url)),
   host = '127.0.0.1',
-  port = 0
+  port = 0,
+  limits = {}
 } = {}) {
 if (!dataDir) throw new Error('createApp 需要 dataDir：准备数据目录是进程级入口（index.mjs）的职责');
 await mkdir(dataDir, {recursive: true});
 const tokenFile = join(dataDir, 'local-session-token');
 let token = await readFile(tokenFile, 'utf8').catch(() => '');
 if (!/^[a-f0-9]{48}$/.test(token)) { token = randomBytes(24).toString('hex'); await writeFile(tokenFile, token, 'utf8'); }
-const running = new Map(), taskEvents = new Map(), loginWaiters = new Map(), loginPrompted = new Set();
+// 任务闸与任务记录的默认值；测试用 limits 调小，正式运行保持规格里的数字。
+const lim = {userTaskLimit: 2, globalTaskLimit: 8, queueTimeoutMs: 120000, taskTimeLimitMs: 15 * 60 * 1000, heartbeatMs: 15000, ...limits};
+const queue = new TaskQueue({userLimit: lim.userTaskLimit, globalLimit: lim.globalTaskLimit, waitLimitMs: lim.queueTimeoutMs});
+const runs = new Map(), taskControls = new Map(), taskEvents = new Map(), loginWaiters = new Map(), loginPrompted = new Set();
 let actualPort = Number(port);
 let localOrigin = 'http://127.0.0.1:' + actualPort;
 let allowedHosts = new Set();
@@ -67,7 +73,7 @@ async function tenant(user) {
     const vault = await new KeyVault(tenantData).init();
     const model = await new ModelSettings(home, vault).load();
     model.allowEnvironmentKey = false; // 不继承服务器环境变量里的 Key，避免账号之间串用
-    return {dir: tenantData, models: model, platforms: new PlatformBrowser(home), vault};
+    return {dir: tenantData, models: model, platforms: new PlatformBrowser(home), vault, tasks: await new TaskStore(tenantData).load()};
   })());
   return tenants.get(user.id);
 }
@@ -94,18 +100,26 @@ async function save(dir, s) { await writeFile(file(dir, s.id), JSON.stringify(s,
 async function platformReadForTask(platforms, action, body) {
   const execute = () => action === 'search' ? platforms.search(body.platform, body.query) : action === 'open-result' ? platforms.openResult(body.platform) : platforms.read(body.platform);
   const result = await execute();
-  const emit = taskEvents.get(body.taskId), controller = running.get(body.taskId), key = body.taskId + ':' + body.platform;
-  if (!emit || !controller || !['needs_connection', 'needs_login', 'needs_user', 'needs_verification', 'unconfirmed', 'load_failed'].includes(result.status) || loginPrompted.has(key)) return result;
+  const emit = taskEvents.get(body.taskId), run = runs.get(body.taskId), key = body.taskId + ':' + body.platform;
+  if (!emit || !run || !['needs_connection', 'needs_login', 'needs_user', 'needs_verification', 'unconfirmed', 'load_failed'].includes(result.status) || loginPrompted.has(key)) return result;
   loginPrompted.add(key);
+  // 等本人登录也是「等你操作」：任务卡进待确认，顶栏徽标会计数；继续或跳过后回到运行中。
+  const control = taskControls.get(body.taskId);
+  const move = state => {
+    if (!control) return;
+    try { control.setState(state); control.progress(state === 'waiting_confirmation' ? '等待你在页面上确认平台登录' : '已继续执行'); } catch { /* 任务已结束时忽略 */ }
+  };
   emit({type: 'platform_required', platform: body.platform, platformName: PLATFORM_SITES[body.platform]?.name || body.platform, reason: result.message, taskId: body.taskId});
+  move('waiting_confirmation');
   const choice = await new Promise(resolve => {
     let settled = false;
-    const finish = value => { if (settled) return; settled = true; clearTimeout(timer); controller.signal.removeEventListener('abort', abort); loginWaiters.delete(body.taskId); resolve(value); };
+    const finish = value => { if (settled) return; settled = true; clearTimeout(timer); run.controller.signal.removeEventListener('abort', abort); loginWaiters.delete(body.taskId); resolve(value); };
     const abort = () => finish('cancel');
     const timer = setTimeout(() => finish('timeout'), 300000);
-    loginWaiters.set(body.taskId, finish); controller.signal.addEventListener('abort', abort, {once: true}); if (controller.signal.aborted) abort();
+    loginWaiters.set(body.taskId, finish); run.controller.signal.addEventListener('abort', abort, {once: true}); if (run.controller.signal.aborted) abort();
   });
   emit({type: 'platform_resolved', platform: body.platform});
+  move('running');
   if (choice === 'resume') return execute();
   return {...result, message: choice === 'skip' ? '用户选择暂不登录。请说明缺少平台来源，使用公开资料完成可行部分。' : choice === 'timeout' ? '等待本人登录超时，本次未取得平台资料。' : '用户已停止任务。'};
 }
@@ -157,8 +171,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/artifact.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -199,7 +213,7 @@ const server = http.createServer(async (req, res) => {
       for await (const b of req) { raw += b; if (raw.length > 4096) return send(res, {error: '请求过长'}, 413); }
       const b = JSON.parse(raw || '{}');
       user = owners.get(b.taskId);
-      if (bridgeTokens.get(req.headers['x-career-token']) !== b.taskId || !user || !running.has(b.taskId)) return send(res, {error: '任务无权访问'}, 403);
+      if (bridgeTokens.get(req.headers['x-career-token']) !== b.taskId || !user || !runs.has(b.taskId)) return send(res, {error: '任务无权访问'}, 403);
       const t = await tenant(user);
       return send(res, url.pathname.endsWith('/status') ? {platforms: await t.platforms.statuses()} : await platformReadForTask(t.platforms, url.pathname.split('/').pop(), b));
     }
@@ -248,6 +262,16 @@ const server = http.createServer(async (req, res) => {
       return send(res, {sessions: items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))});
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/session/')) return send(res, await load(dir, url.pathname.split('/').pop()));
+    if (req.method === 'GET' && url.pathname === '/api/tasks') {
+      const store = (await tenant(user)).tasks;
+      return send(res, {tasks: store.list({sessionId: url.searchParams.get('session') || ''}), queue: queue.stats()});
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/tasks/')) {
+      const store = (await tenant(user)).tasks;
+      const task = store.find(decodeURIComponent(url.pathname.slice('/api/tasks/'.length)));
+      if (!task) return send(res, {error: '任务不存在'}, 404);
+      return send(res, {task: {...store.snapshot(task), events: task.events}});
+    }
 
     if (req.method === 'GET' && (url.pathname.startsWith('/api/resumes') || url.pathname.startsWith('/api/applications') || url.pathname.startsWith('/api/interviews'))) {
       const out = await handleResume({method: 'GET', pathname: url.pathname.slice('/api/'.length), url, dir});
@@ -367,7 +391,21 @@ const server = http.createServer(async (req, res) => {
         await save(dir, s);
         return send(res, s);
       }
-      if (url.pathname === '/api/stop') { await load(dir, body.id); running.get(body.id)?.abort(); return send(res, {ok: true}); }
+      if (url.pathname === '/api/stop') {
+        await load(dir, body.id);
+        const run = runs.get(body.id);
+        if (run) { run.stopReason = 'user'; run.controller.abort(); }
+        return send(res, {ok: true});
+      }
+      if (url.pathname === '/api/tasks/cancel') {
+        const store = (await tenant(user)).tasks, task = store.find(String(body.id || ''));
+        if (!task) return send(res, {error: '任务不存在'}, 404);
+        const run = runs.get(task.sessionId);
+        if (!run || run.taskId !== task.id) return send(res, {error: '任务已经结束，不需要停止'}, 409);
+        run.stopReason = 'user';
+        run.controller.abort();
+        return send(res, {ok: true});
+      }
       if (url.pathname === '/api/session/rename') {
         const s = await load(dir, String(body.id || ''));
         const title = String(body.title || '').trim().slice(0, 80);
@@ -380,37 +418,100 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/session/delete') {
         const id = String(body.id || '');
         await load(dir, id);
-        if (running.has(id)) return send(res, {error: '当前对话正在执行任务，先停止再删除'}, 409);
+        if (runs.has(id)) return send(res, {error: '当前对话正在执行任务，先停止再删除'}, 409);
         await unlink(file(dir, id));
         return send(res, {ok: true});
       }
       if (url.pathname === '/api/chat') {
         const s = await load(dir, body.id);
-        if (running.has(s.id)) return send(res, {error: '当前对话正在执行任务'}, 409);
+        if (runs.has(s.id)) return send(res, {error: '当前对话正在执行任务'}, 409);
         const text = String(body.message || '').trim();
         if (text.length > 8000) return send(res, {error: '问题过长，请拆分到8000字以内'}, 400);
         const attachments = (Array.isArray(body.attachments) ? body.attachments : []).slice(0, 5).filter(a => typeof a.name === 'string' && typeof a.text === 'string' && a.text.length <= 40000);
         if (!text && !attachments.length) return send(res, {error: '请输入问题或上传资料'}, 400);
+        const modelConfig = models.snapshot();
+        if (modelConfig.mode === 'codex' && user.name !== 'owner') return send(res, {error: '请先在模型与接口设置中配置自己的 API 或本地模型'}, 400);
+
+        // 一个聊天请求 = 一个任务：先落成 queued，拿到任务闸名额后才 running。
+        const store = (await tenant(user)).tasks;
+        const sourceName = typeof body.sourceName === 'string' ? body.sourceName.trim().slice(0, 40) : '';
+        const title = (sourceName ? '来源校对 · ' + sourceName : text || attachments[0]?.name || '求职对话').slice(0, 25);
+        const task = store.create({sessionId: s.id, title, backend: backendLabel(modelConfig), sourceName});
         const controller = new AbortController();
-        running.set(s.id, controller);
+        const run = {controller, taskId: task.id, stopReason: ''};
+        runs.set(s.id, run);
         owners.set(s.id, user);
         const taskBridgeToken = randomBytes(32).toString('hex');
         bridgeTokens.set(taskBridgeToken, s.id);
-        s.lastTask = {status: 'running', phase: '正在制定计划', startedAt: new Date().toISOString(), plan: null};
+        s.lastTask = {status: 'queued', phase: '排队中', startedAt: '', taskId: task.id, plan: null};
         await save(dir, s);
+
         res.writeHead(200, {'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'});
-        const emit = e => {
-          if (e.type === 'status') s.lastTask.phase = e.text;
-          if (e.type === 'plan') s.lastTask.plan = e.plan;
-          if (!res.destroyed) res.write(JSON.stringify(e) + '\n');
+        const write = payload => { if (!res.destroyed) res.write(JSON.stringify(payload) + '\n'); };
+        const snapshot = () => store.snapshot(task);
+        const initial = task.events[task.events.length - 1];
+        write({...initial, taskId: task.id, task: snapshot()});
+        const push = event => {
+          const stored = store.record(task, event);
+          if (event.type === 'status') s.lastTask.phase = event.text;
+          if (event.type === 'plan') s.lastTask.plan = event.plan;
+          write({...stored, taskId: task.id, task: snapshot()});
+          return stored;
         };
-        taskEvents.set(s.id, emit);
-        emit({type: 'status', text: '正在理解你的需求'});
-        const tick = setInterval(() => emit({type: 'heartbeat'}), 15000);
-        res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+        const setState = (state, info = {}) => {
+          const stored = store.transition(task, state, info);
+          write({...stored, taskId: task.id, task: snapshot()});
+          return stored;
+        };
+        let percent = 0;
+        const progress = (label, next) => {
+          percent = typeof next === 'number' ? Math.max(percent, Math.min(100, next)) : Math.min(92, percent + 8);
+          push({type: 'progress', percent, text: label || ''});
+        };
+        taskControls.set(s.id, {taskId: task.id, setState, progress});
+        taskEvents.set(s.id, push);
+        let release = null, tick = null;
+        const finish = async () => {
+          if (tick) { clearInterval(tick); tick = null; }
+          if (release) { release(); release = null; }
+          if (runs.get(s.id) === run) runs.delete(s.id);
+          if (taskControls.get(s.id)?.taskId === task.id) taskControls.delete(s.id);
+          owners.delete(s.id);
+          bridgeTokens.delete(taskBridgeToken);
+          taskEvents.delete(s.id);
+          for (const key of loginPrompted) if (key.startsWith(s.id + ':')) loginPrompted.delete(key);
+          await store.flush();
+          if (!res.writableEnded) res.end();
+        };
+        res.on('close', () => {
+          if (res.writableEnded) return;
+          if (!run.stopReason) run.stopReason = 'client_closed';
+          controller.abort();
+        });
+
+        // 排队期间也要发心跳，避免 120 秒的等待被当成失联。
+        tick = setInterval(() => write({type: 'heartbeat', taskId: task.id}), lim.heartbeatMs);
         try {
-          const modelConfig = models.snapshot();
-          if (modelConfig.mode === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
+          release = await queue.acquire(user.id, {signal: controller.signal});
+        } catch (e) {
+          if (e.code === 'QUEUE_TIMEOUT') {
+            push({type: 'error', text: e.message, code: 'QUEUE_TIMEOUT', recovery: '先停止不需要的任务，或稍后重试。'});
+            setState('failed');
+            s.lastTask = {...s.lastTask, status: 'failed', error: e.message};
+          } else {
+            setState('cancelled', {reason: run.stopReason || 'client_closed'});
+            s.lastTask = {...s.lastTask, status: 'stopped'};
+          }
+          await save(dir, s);
+          await finish();
+          return;
+        }
+
+        try {
+          s.lastTask = {...s.lastTask, status: 'running', phase: '正在制定计划', startedAt: new Date().toISOString()};
+          await save(dir, s);
+          setState('running');
+          progress('开始执行', 5);
           const profile = (await loadProfile(dir)).facts;
           const skill = await selectSkill(root, text).catch(() => null);
           const result = await runAgent({
@@ -423,13 +524,23 @@ const server = http.createServer(async (req, res) => {
             attachments,
             profile,
             skill,
-            onEvent: emit,
+            // 15 分钟是整任务的墙钟上限：排队花掉的时间也从这里扣。
+            timeLimitMs: Math.max(1, lim.taskTimeLimitMs - Math.max(0, Date.now() - (Date.parse(task.createdAt) || Date.now()))),
+            onEvent: event => {
+              push(event);
+              if (event.type === 'status' || event.type === 'tool') progress(event.text);
+              else if (event.type === 'evidence') progress('已取得证据');
+            },
             signal: controller.signal
           });
           s.messages.push({role: 'user', content: text, attachments}, {role: 'assistant', backend: backendLabel(modelConfig), content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
           s.memory = result.memory.slice(0, 5000);
           s.lastTask = {...s.lastTask, status: 'complete', quality: result.quality, durationMs: result.durationMs, finishedAt: new Date().toISOString()};
-          if (result.artifact.content.trim()) s.artifacts.push({id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()});
+          if (result.artifact.content.trim()) {
+            const artifact = {id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()};
+            s.artifacts.push(artifact);
+            push({type: 'draft', draft: {artifactId: artifact.id, title: artifact.title, chars: artifact.content.length}});
+          }
           if (s.title === '新的求职对话') s.title = (text || attachments[0]?.name || '求职对话').slice(0, 25);
           s.updatedAt = new Date().toISOString();
           await save(dir, s);
@@ -441,21 +552,32 @@ const server = http.createServer(async (req, res) => {
             skill: result.skill?.name || '',
             durationMs: result.durationMs
           }).catch(() => {});
-          emit({type: 'done', session: s});
+          progress('已完成', 100);
+          setState('succeeded');
+          write({type: 'done', session: s, taskId: task.id, task: snapshot()});
         } catch (e) {
-          const friendly = decorateChatError(e.message, !!models.snapshot().apiKey);
-          s.lastTask = {...s.lastTask, status: controller.signal.aborted ? 'stopped' : 'failed', error: friendly};
+          const timedOut = e.code === 'TASK_TIMEOUT';
+          const friendly = timedOut ? e.message : decorateChatError(e.message, !!models.snapshot().apiKey);
+          if (timedOut) {
+            run.stopReason = 'time_limit';
+            push({type: 'error', text: friendly, code: 'TASK_TIMEOUT', recovery: '把任务拆小再试，或在设置里换更快的接口。'});
+            setState('failed', {reason: 'time_limit'});
+            s.lastTask = {...s.lastTask, status: 'failed', error: friendly};
+          } else if (run.stopReason || controller.signal.aborted) {
+            const reason = run.stopReason || 'user';
+            const stopText = reason === 'client_closed' ? '连接已断开，任务停止。' : '已停止本次任务。';
+            push({type: 'error', text: stopText, code: 'CANCELLED', recovery: '重新发送即可重试。'});
+            setState('cancelled', {reason});
+            s.lastTask = {...s.lastTask, status: 'stopped', error: stopText};
+          } else {
+            push({type: 'error', text: friendly, code: 'TASK_FAILED', recovery: '检查错误后重试，或换一个可用的执行后端。'});
+            setState('failed');
+            s.lastTask = {...s.lastTask, status: 'failed', error: friendly};
+          }
           await save(dir, s);
-          await recordTask(dir, {sessionId: s.id, title: s.title, status: 'failed', error: friendly}).catch(() => {});
-          emit({type: 'error', text: friendly});
+          await recordTask(dir, {sessionId: s.id, title: s.title, status: s.lastTask.status === 'stopped' ? 'stopped' : 'failed', error: s.lastTask.error}).catch(() => {});
         } finally {
-          clearInterval(tick);
-          running.delete(s.id);
-          owners.delete(s.id);
-          bridgeTokens.delete(taskBridgeToken);
-          taskEvents.delete(s.id);
-          for (const key of loginPrompted) if (key.startsWith(s.id + ':')) loginPrompted.delete(key);
-          res.end();
+          await finish();
         }
         return;
       }
@@ -472,7 +594,7 @@ localOrigin = 'http://127.0.0.1:' + actualPort;
 allowedHosts = buildAllowedHosts(actualPort);
 let closing = null;
 const close = () => closing || (closing = new Promise(resolve => {
-  for (const controller of running.values()) controller.abort();
+  for (const run of runs.values()) run.controller.abort();
   inboundMcp.close().catch(() => {});
   if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
   server.close(() => resolve());

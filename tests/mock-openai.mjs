@@ -10,6 +10,12 @@ const FINAL = {
   visualization: {title: '', unit: '', items: []}
 };
 
+// 带文稿的最终结果：UI 测试用它断言任务卡里的草稿区块。
+const DRAFT = {
+  ...FINAL,
+  artifact: {title: '双选会参会单位草稿', content: '西南财经大学 11 月 8 日双选会：参会单位 12 家（测试草稿正文）。'}
+};
+
 function decide(body) {
   const messages = body.messages || [];
   const last = messages[messages.length - 1] || {role: 'user', content: ''};
@@ -24,11 +30,12 @@ function decide(body) {
   if (all.includes('规划阶段')) {
     return {text: JSON.stringify({goal: '回答测试问题', steps: ['理解需求', '给出答复'], needsSearch: false, deliverable: '一段文字'})};
   }
+  if (/整理成草稿/.test(all)) return {text: JSON.stringify(DRAFT)};
   if (all.includes('复核阶段')) return {text: JSON.stringify(FINAL)};
   return {text: JSON.stringify(FINAL)};
 }
 
-export async function startMockOpenAI({port = 0} = {}) {  const state = {requests: [], failNext: 0, status: 200};
+export async function startMockOpenAI({port = 0} = {}) {  const state = {requests: [], failNext: 0, status: 200, delayMs: 0};
   const server = http.createServer(async (req, res) => {
     if (!req.url.startsWith('/v1/chat/completions')) { res.writeHead(404); res.end('{}'); return; }
     let raw = '';
@@ -38,6 +45,9 @@ export async function startMockOpenAI({port = 0} = {}) {  const state = {request
     state.requests.push(body);
     if (state.status && state.status !== 200) { res.writeHead(state.status, {'content-type': 'application/json'}); res.end('{"error":"mock status"}'); return; }
     if (state.failNext > 0) { state.failNext--; res.writeHead(429, {'content-type': 'application/json'}); res.end('{"error":"rate limited"}'); return; }
+    // 慢响应用来观察排队、运行中与超时；客户端断开后不再写。
+    if (state.delayMs > 0) await new Promise(resolve => setTimeout(resolve, state.delayMs));
+    if (res.destroyed) return;
     const answer = decide(body);
 
     if (body.stream) {
@@ -60,9 +70,12 @@ export async function startMockOpenAI({port = 0} = {}) {  const state = {request
       res.end(JSON.stringify({choices: [{message: {role: 'assistant', content: answer.text}}]}));
     }
   });
+  const sockets = new Set();
+  server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   const base = 'http://127.0.0.1:' + server.address().port + '/v1';
-  return {url: base, state, close: () => new Promise(resolve => server.close(resolve))};
+  // 关服务时先断开还挂着的慢请求，测试不会等满 delayMs。
+  return {url: base, state, close: () => new Promise(resolve => { for (const socket of sockets) socket.destroy(); server.close(resolve); })};
 }
 
 

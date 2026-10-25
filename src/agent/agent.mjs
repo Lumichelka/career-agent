@@ -4,6 +4,7 @@ import {buildContext} from './context.mjs';
 import {parsePlan,checkDelivery} from './workflow.mjs';
 import {existsSync,readdirSync,statSync} from 'node:fs';
 import {platformTools} from '../tools/registry.mjs';
+import {evidenceFromToolResult} from '../tools/evidence.mjs';
 export function resolveCodex(){
 if(process.env.CAREER_CODEX_PATH&&existsSync(process.env.CAREER_CODEX_PATH))return process.env.CAREER_CODEX_PATH;
 const base=join(process.env.LOCALAPPDATA||'', 'OpenAI','Codex','bin');
@@ -59,7 +60,7 @@ function finish(error,result){if(ended)return;ended=true;clearTimeout(timer);sig
 child.on('error',()=>finish(new Error('无法启动本机 Codex。请检查安装与登录状态。')));
 child.stderr.on('data',d=>{stderr=(stderr+d.toString()).slice(-12000)});
 function processLine(line){let event;try{event=JSON.parse(line)}catch{return}if(event.type==='error'||event.type==='turn.failed'){const reason=String(event.message||event.error?.message||'运行失败');onEvent({type:'status',text:'模型服务报告错误'});stderr+='\n'+reason;}
-const item=event.item;if(!item)return;if(event.type==='item.completed'&&['web_search','web_search_call','mcp_tool_call'].includes(item.type)){toolEvidence.push(JSON.stringify(item).slice(0,10000));if(toolEvidence.length>12)toolEvidence.shift();}if(item.type==='agent_message'&&typeof item.text==='string')final=item.text;
+const item=event.item;if(!item)return;if(event.type==='item.completed'&&['web_search','web_search_call','mcp_tool_call'].includes(item.type)){toolEvidence.push(JSON.stringify(item).slice(0,10000));if(toolEvidence.length>12)toolEvidence.shift();const evidence=evidenceFromToolResult(item.type,{text:JSON.stringify(item).slice(0,2000),message:item.type});if(evidence)onEvent({type:'evidence',evidence});}if(item.type==='agent_message'&&typeof item.text==='string')final=item.text;
 if(['web_search','web_search_call','command_execution','mcp_tool_call','file_change'].includes(item.type)&&event.type==='item.started'){const label=item.type.startsWith('web_search')?'正在检索公开信息':item.type==='command_execution'?'正在读取与核对任务资料':item.type==='mcp_tool_call'?'正在调用工具':'正在生成文件';trace.push({type:item.type,label});onEvent({type:'tool',toolType:item.type,text:label});}}
 child.stdout.on('data',d=>{buffer+=d.toString();const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines)processLine(line)});
 child.on('close',code=>{if(buffer.trim())processLine(buffer);if(ended)return;if(code!==0||!final){let message='模型运行失败，没有生成替代回复。';if(/auth|login|401|unauthorized/i.test(stderr))message='Codex 登录失效，请使用本机官方登录后重试。';else if(/429|usage limit|rate limit|quota/i.test(stderr))message='Codex 额度或频率受限，请额度恢复后重试。';else if(/network|connect|stream|dns|fetch|proxy/i.test(stderr))message='连接模型服务失败，请检查网络后重试。';return finish(new Error(message));}finish(null,{raw:final,toolEvidence})});
@@ -67,12 +68,15 @@ child.stdin.on("error",()=>{});
 child.stdin.end(prompt);
 });}
 
-export async function runAgent({root,session,message,attachments=[],profile=[],skill=null,onEvent=()=>{},signal,modelCall=runModel}){
+export async function runAgent({root,session,message,attachments=[],profile=[],skill=null,onEvent=()=>{},signal,modelCall=runModel,timeLimitMs=15*60*1000}){
   const started=Date.now(),trace=[];
   const deadline=new AbortController();
+  let limitHit=false;
   const stop=()=>deadline.abort();signal?.addEventListener('abort',stop,{once:true});
   if(signal?.aborted)deadline.abort();
-  const timer=setTimeout(stop,600000);
+  const limit=Math.max(1,Number(timeLimitMs)||15*60*1000);
+  // 整任务 15 分钟上限：到点中止本轮，并把原因翻译成 TASK_TIMEOUT 交给任务卡。
+  const timer=setTimeout(()=>{limitHit=true;deadline.abort()},limit);
   const phase=text=>onEvent({type:'status',text});
   try{
     if(skill)phase('使用技能：'+skill.name);
@@ -94,5 +98,11 @@ export async function runAgent({root,session,message,attachments=[],profile=[],s
     const quality=checkDelivery(result,{needsSearch:plan.needsSearch,trace});
     if(quality.issues.length)result.reply+='\n\n执行限制：'+quality.issues.join('；')+'。';
     return {...result,trace,plan,quality,skill:skill?{id:skill.id,name:skill.name}:null,durationMs:Date.now()-started};
+  }catch(error){
+    if(limitHit){
+      const minutes=limit>=60000?Math.round(limit/60000)+' 分钟':limit+' 毫秒';
+      const timeout=new Error('任务超过 '+minutes+' 上限，已停止。');timeout.code='TASK_TIMEOUT';throw timeout;
+    }
+    throw error;
   }finally{clearTimeout(timer);signal?.removeEventListener('abort',stop);}
 }
