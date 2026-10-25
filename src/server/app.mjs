@@ -5,12 +5,14 @@ import {runApiModel, probeApi} from '../model/api-model.mjs';
 import {runDiagnostics} from '../model/diag.mjs';
 import {KeyVault} from '../model/keyvault.mjs';
 import {PlatformBrowser} from '../platform/platforms.mjs';
+import {PLATFORM_SITES} from '../platform/sites.mjs';
 import {handleRecruit} from '../recruit/api.mjs';
 import {handleResume} from '../resume/api.mjs';
 import {handleCompany} from '../company/api.mjs';
+import {handleWechat} from '../wechat/api.mjs';
 import http from 'node:http';
 import os from 'node:os';
-import {readFile, mkdir, writeFile, readdir, copyFile} from 'node:fs/promises';
+import {readFile, mkdir, writeFile, readdir, copyFile, unlink} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
@@ -67,12 +69,12 @@ async function load(dir, id) { if (!validId(id)) throw new Error('无效会话')
 async function save(dir, s) { await writeFile(file(dir, s.id), JSON.stringify(s, null, 2), 'utf8'); }
 
 async function platformReadForTask(platforms, action, body) {
-  const execute = () => action === 'search' ? platforms.search(body.platform, body.query) : platforms.read(body.platform);
+  const execute = () => action === 'search' ? platforms.search(body.platform, body.query) : action === 'open-result' ? platforms.openResult(body.platform) : platforms.read(body.platform);
   const result = await execute();
   const emit = taskEvents.get(body.taskId), controller = running.get(body.taskId), key = body.taskId + ':' + body.platform;
   if (!emit || !controller || !['needs_connection', 'needs_login', 'needs_user', 'needs_verification', 'unconfirmed', 'load_failed'].includes(result.status) || loginPrompted.has(key)) return result;
   loginPrompted.add(key);
-  emit({type: 'platform_required', platform: body.platform, reason: result.message, taskId: body.taskId});
+  emit({type: 'platform_required', platform: body.platform, platformName: PLATFORM_SITES[body.platform]?.name || body.platform, reason: result.message, taskId: body.taskId});
   const choice = await new Promise(resolve => {
     let settled = false;
     const finish = value => { if (settled) return; settled = true; clearTimeout(timer); controller.signal.removeEventListener('abort', abort); loginWaiters.delete(body.taskId); resolve(value); };
@@ -94,7 +96,12 @@ http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/health') return send(res, {app: 'career-agent', status: 'ready', host, port});
 
-    if (req.method === 'GET' && ['/', '/today', '/index.html'].includes(url.pathname)) {
+    if (req.method === 'GET' && url.pathname === '/') {
+      res.writeHead(302, {Location: '/chat'});
+      return res.end();
+    }
+
+    if (req.method === 'GET' && ['/today', '/index.html'].includes(url.pathname)) {
       const html = (await readFile(join(root, 'src', 'web', 'workbench.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src 'self' https://esm.sh; worker-src blob: https://esm.sh; img-src 'self' data:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff'});
       return res.end(html);
@@ -117,10 +124,14 @@ http.createServer(async (req, res) => {
       res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
       return res.end(html);
     }
+    if (req.method === 'GET' && url.pathname === '/wechat') {
+      res.writeHead(302, {Location: '/recruit?tab=sources&type=wechat'});
+      return res.end();
+    }
+
     if (req.method === 'GET' && url.pathname === '/companies') {
-      const html = (await readFile(join(root, 'src', 'web', 'companies.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
-      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
-      return res.end(html);
+      res.writeHead(302, {Location: '/chat'});
+      return res.end();
     }
 
     if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/artifact.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
@@ -160,6 +171,16 @@ http.createServer(async (req, res) => {
     const {dir, models, platforms} = await tenant(user);
 
     if (url.pathname === '/api/auth/me') return send(res, {user: {name: user.name, id: user.id}});
+    if (req.method === 'GET' && url.pathname.startsWith('/api/platform/screenshot/')) {
+      const id = url.pathname.split('/').pop();
+      try {
+        const image = await readFile(platforms.screenshotPath(id));
+        res.writeHead(200, {'Content-Type': 'image/png', 'Cache-Control': 'no-store'});
+        return res.end(image);
+      } catch {
+        return send(res, {error: '还没有该网站的截图'}, 404);
+      }
+    }
     if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
       accounts.logout(req.headers.cookie);
       res.setHeader('Set-Cookie', 'career_auth=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
@@ -194,6 +215,11 @@ http.createServer(async (req, res) => {
       const out = await handleResume({method: 'GET', pathname: url.pathname.slice('/api/'.length), url, dir});
       if (!out) return send(res, {error: '未知的简历接口'}, 404);
       if (out.file) return sendFile(res, out.file.body, out.file.type, out.file.name);
+      return send(res, out.json, out.status || 200);
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/wechat')) {
+      const out = await handleWechat({method: 'GET', pathname: url.pathname.slice('/api/wechat/'.length), url, dir});
+      if (!out) return send(res, {error: '未知的公众号接口'}, 404);
       return send(res, out.json, out.status || 200);
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/companies')) {
@@ -234,6 +260,11 @@ http.createServer(async (req, res) => {
         if (out.file) return sendFile(res, out.file.body, out.file.type, out.file.name);
         return send(res, out.json, out.status || 200);
       }
+      if (url.pathname.startsWith('/api/wechat')) {
+        const out = await handleWechat({method: 'POST', pathname: url.pathname.slice('/api/wechat/'.length), body, dir});
+        if (!out) return send(res, {error: '未知的公众号接口'}, 404);
+        return send(res, out.json, out.status || 200);
+      }
       if (url.pathname.startsWith('/api/companies')) {
         const out = await handleCompany({method: 'POST', pathname: url.pathname.slice('/api/'.length), body, dir});
         if (!out) return send(res, {error: '未知的公司档案接口'}, 404);
@@ -261,6 +292,10 @@ http.createServer(async (req, res) => {
         if (action === 'status') return send(res, {platforms: await platforms.statuses()});
         if (action === 'open') return send(res, await platforms.open(body.platform));
         if (action === 'close') return send(res, await platforms.close(body.platform));
+        if (action === 'ocr') return send(res, await platforms.ocr(body.platform));
+        if (action === 'probe') return send(res, await platforms.probe());
+        if (action === 'open-result') return send(res, await platformReadForTask(platforms, 'open-result', body));
+        if (action === 'external') return send(res, await platforms.openExternal(body.platform));
         if (action === 'resume' || action === 'skip') {
           await load(dir, body.id);
           const pending = loginWaiters.get(body.id);
@@ -278,6 +313,22 @@ http.createServer(async (req, res) => {
         return send(res, s);
       }
       if (url.pathname === '/api/stop') { await load(dir, body.id); running.get(body.id)?.abort(); return send(res, {ok: true}); }
+      if (url.pathname === '/api/session/rename') {
+        const s = await load(dir, String(body.id || ''));
+        const title = String(body.title || '').trim().slice(0, 80);
+        if (!title) return send(res, {error: '标题不能为空'}, 400);
+        s.title = title;
+        s.updatedAt = new Date().toISOString();
+        await save(dir, s);
+        return send(res, {ok: true, session: {id: s.id, title: s.title, updatedAt: s.updatedAt}});
+      }
+      if (url.pathname === '/api/session/delete') {
+        const id = String(body.id || '');
+        await load(dir, id);
+        if (running.has(id)) return send(res, {error: '当前对话正在执行任务，先停止再删除'}, 409);
+        await unlink(file(dir, id));
+        return send(res, {ok: true});
+      }
       if (url.pathname === '/api/chat') {
         const s = await load(dir, body.id);
         if (running.has(s.id)) return send(res, {error: '当前对话正在执行任务'}, 409);

@@ -2,11 +2,13 @@
 // 这里只负责"算出结果"，写响应的细节交给 server.mjs。
 import {join} from 'node:path';
 import {RecruitStore} from './store.mjs';
-import {SOURCES} from './sources/index.mjs';
+import {SOURCES, sourceById} from './sources/index.mjs';
 import {runCollection, htmlToText, normalize} from './collect.mjs';
 import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
+import {parseRenderedText} from './browser.mjs';
+import {WeChatStore} from '../wechat/store.mjs';
 
 const MAX_DAYS = 180;
 
@@ -35,13 +37,48 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   if (method === 'GET') {
     if (pathname === 'sources') {
       const data = withStore(dir, store => ({sources: store.sourceStates(), runs: store.recentRuns(10), stats: store.stats()}));
-      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || ''}]));
-      return {json: {...data, catalog}};
+      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: true}}]));
+      let wechat = {accounts: [], stats: {accounts: 0, articles: 0}};
+      try {
+        const ws = WeChatStore.open(join(dir, 'wechat.db'));
+        try {
+          wechat = {
+            accounts: ws.listAccounts().map(a => ({...a, sourceId: 'wechat:' + a.id, sourceType: 'wechat', enabled: true})),
+            stats: ws.stats()
+          };
+        } finally { ws.close(); }
+      } catch { /* 公众号库尚未建立时不影响招聘来源 */ }
+      return {json: {...data, catalog, wechat}};
     }
     if (pathname === 'events') {
       const {from, to, days} = range(url);
-      const events = withStore(dir, store => store.listEvents({from, to, limit: 300}));
+      const events = withStore(dir, store => store.listEvents({from, to, limit: 300, withProjects: true}));
       return {json: {events, days, from, to}};
+    }
+    if (pathname === 'calendar') {
+      const requested = url.searchParams.get('month') || '';
+      const month = /^\d{4}-\d{2}$/.test(requested) ? requested : new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 7);
+      const [year, mon] = month.split('-').map(Number);
+      const lastDay = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+      const from = `${month}-01T00:00:00+08:00`;
+      const to = `${month}-${String(lastDay).padStart(2, '0')}T23:59:59+08:00`;
+      const events = withStore(dir, store => store.listEvents({from, to, limit: 1000, withProjects: true}));
+      const days = [];
+      for (const e of events) {
+        const date = e.startAt.slice(0, 10);
+        let day = days.find(d => d.date === date);
+        if (!day) { day = {date, events: []}; days.push(day); }
+        day.events.push(e);
+      }
+      return {json: {month, days, stats: {events: events.length, projects: events.reduce((n, e) => n + (e.projects?.length || 0), 0)}}};
+    }
+    if (pathname.startsWith('projects/')) {
+      const id = pathname.split('/')[1];
+      const data = withStore(dir, store => {
+        const project = store.getProject(id);
+        return project ? {project, event: store.getEvent(project.eventId)} : null;
+      });
+      return data ? {json: data} : {status: 404, json: {error: '招聘项目不存在'}};
     }
     if (pathname === 'schedule') {
       const {from, to, days} = range(url);
@@ -64,6 +101,79 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   }
 
   if (method === 'POST') {
+    if (pathname === 'source-parse' || pathname === 'source-save') {
+      let source;
+      try { source = sourceById(String(body?.sourceId || '')); } catch { source = null; }
+      if (!source) return {status: 400, json: {error: '未知信息源'}};
+      const raw = String(body?.html || body?.text || '');
+      if (raw.trim().length < 20) return {status: 400, json: {error: '请粘贴来源页 HTML 或正文'}};
+      let json = null;
+      if (source.mode === 'json') {
+        try { json = JSON.parse(raw); } catch { return {status: 400, json: {error: '该源是 JSON 接口，请粘贴接口返回的 JSON'}}; }
+      }
+      let items = [];
+      try {
+        if (typeof source.parseList === 'function') items = source.parseList(source.mode === 'json' ? '' : raw, source, json) || [];
+        if (!items.length && source.mode !== 'json') items = parseRenderedText(htmlToText(raw), source);
+      } catch (e) { return {status: 400, json: {error: '解析失败：' + e.message}}; }
+      const preview = [];
+      for (const item of items.slice(0, 80)) {
+        if (!item?.url && body?.url) item.url = String(body.url);
+        const event = normalize(item, source);
+        if (event) preview.push(event);
+      }
+      if (!preview.length) return {status: 400, json: {error: '没有解析到活动；请确认页面结构或换用正文手动导入'}};
+      if (pathname === 'source-parse') {
+        return {json: {ok: true, count: preview.length, preview: preview.slice(0, 20).map(e => ({title: e.title, startAt: e.startAt, venue: e.venue, url: e.sourceUrl}))}};
+      }
+      if (!body?.confirm) return {status: 400, json: {error: '需要确认后写入'}};
+      let created = 0, updated = 0;
+      withStore(dir, store => {
+        for (const event of preview) {
+          event.confidence = 0.62;
+          event.notes = [event.notes, '手动粘贴来源页'].filter(Boolean).join('；');
+          const action = store.upsertEvent(event);
+          if (action === 'created') created++; else updated++;
+        }
+      });
+      return {json: {ok: true, count: preview.length, created, updated}};
+    }
+    if (pathname === 'projects/bulk') {
+      const eventId = String(body?.eventId || '');
+      const text = String(body?.text || '');
+      if (!eventId) return {status: 400, json: {error: '缺少关联活动'}};
+      const lines = text.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 100);
+      if (!lines.length) return {status: 400, json: {error: '请粘贴至少一行项目'}};
+      try {
+        const projects = withStore(dir, store => {
+          const saved = [];
+          for (const line of lines) {
+            const parts = line.split(/\s*[|｜\t]\s*/);
+            const company = parts[0] || '';
+            const title = parts[1] || '';
+            if (!company && !title) continue;
+            saved.push(store.upsertProject({eventId, company, title, positions: parts[2] || '', applyMode: parts[3] || '', applyUrl: parts[4] || ''}));
+          }
+          return saved;
+        });
+        return {json: {ok: true, count: projects.length, projects}};
+      } catch (e) {
+        return {status: 400, json: {error: e.message}};
+      }
+    }
+    if (pathname === 'projects') {
+      try {
+        const project = withStore(dir, store => store.upsertProject(body || {}));
+        return {json: {ok: true, project}};
+      } catch (e) {
+        return {status: 400, json: {error: e.message}};
+      }
+    }
+    if (pathname.startsWith('projects/') && pathname.endsWith('/delete')) {
+      const id = pathname.split('/')[1];
+      withStore(dir, store => store.deleteProject(id));
+      return {json: {ok: true}};
+    }
     if (pathname === 'manual/parse') {
       try {
         const parsed = await parseManualInput(body || {});

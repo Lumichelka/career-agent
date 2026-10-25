@@ -184,23 +184,7 @@
   // 侧栏加入口：工作台 / 招聘日历
   try {
     const anchor = $('#platforms');
-    if (anchor && !$('#today-entry')) {
-      const t = document.createElement('button');
-      t.id = 'today-entry';
-      t.className = 'new platform-launch';
-      t.textContent = '▦ 今天 / 工作台';
-      t.onclick = () => { location.href = '/'; };
-      anchor.before(t);
-    }
-    if (anchor && !$('#recruit-entry')) {
-      const b = document.createElement('button');
-      b.id = 'recruit-entry';
-      b.className = 'new platform-launch';
-      b.textContent = '▤ 招聘日历 / 行程表';
-      b.onclick = () => { location.href = '/recruit'; };
-      anchor.after(b);
-    }
-    const recruit = $('#recruit-entry');
+    const recruit = anchor;
     if (recruit && !$('#resume-entry')) {
       const r = document.createElement('button');
       r.id = 'resume-entry';
@@ -209,14 +193,117 @@
       r.onclick = () => { location.href = '/resume'; };
       recruit.after(r);
     }
-    const resumeBtn = $('#resume-entry');
-    if (resumeBtn && !$('#company-entry')) {
-      const c = document.createElement('button');
-      c.id = 'company-entry';
-      c.className = 'new platform-launch';
-      c.textContent = '▦ 公司档案';
-      c.onclick = () => { location.href = '/companies'; };
-      resumeBtn.after(c);
+    const platformsBtn = $('#platforms');
+    if (platformsBtn && !$('#data-root-link')) {
+      const d = document.createElement('a');
+      d.id = 'data-root-link';
+      d.href = '/recruit';
+      d.className = 'new';
+      d.textContent = '▤ 数据与日历';
+      d.style.display = 'block';
+      d.style.textDecoration = 'none';
+      platformsBtn.after(d);
+    }
+    const sessionsEl = $('#sessions');
+    if (sessionsEl && !$('#session-search')) {
+      const q = document.createElement('input');
+      q.id = 'session-search';
+      q.placeholder = '搜索对话…';
+      q.setAttribute('aria-label', '搜索对话');
+      q.style.cssText = 'width:100%;margin:8px 0;padding:8px 10px;border:1px solid #dce7df;border-radius:8px;background:#fff;font:12px inherit;color:#1f3a2e';
+      sessionsEl.before(q);
+      const filter = () => {
+        const v = q.value.trim().toLowerCase();
+        sessionsEl.querySelectorAll('button').forEach(b => { b.style.display = !v || b.textContent.toLowerCase().includes(v) ? '' : 'none'; });
+      };
+      q.addEventListener('input', filter);
+      new MutationObserver(filter).observe(sessionsEl, {childList: true});
+      const actions = document.createElement('div');
+      actions.id = 'session-actions';
+      actions.style.cssText = 'display:flex;gap:5px;margin:0 0 8px';
+      actions.innerHTML = '<button type="button" id="session-rename" style="flex:1;padding:5px;font-size:10.5px;border:1px solid #dce7df;border-radius:6px;background:#fff;color:#3d5c4b">重命名</button><button type="button" id="session-export" style="flex:1;padding:5px;font-size:10.5px;border:1px solid #dce7df;border-radius:6px;background:#fff;color:#3d5c4b">保存</button><button type="button" id="session-delete" style="flex:1;padding:5px;font-size:10.5px;border:1px solid #dce7df;border-radius:6px;background:#fff;color:#9a4a3a">删除</button>';
+      q.after(actions);
+      const cur = () => (ZX.currentSession ? ZX.currentSession() : null);
+      actions.querySelector('#session-rename').onclick = async () => {
+        const s = cur(); if (!s) return;
+        const title = prompt('对话名称', s.title || '新的求职对话');
+        if (!title || !title.trim()) return;
+        try { await ZX.api('session/rename', {id: s.id, title: title.trim()}); s.title = title.trim(); const b = sessionsEl.querySelector('button[data-session="' + s.id + '"]'); if (b) b.textContent = s.title; } catch (e) { alert(e.message); }
+      };
+      actions.querySelector('#session-delete').onclick = async () => {
+        const s = cur(); if (!s) return;
+        if (!confirm('删除这个对话？')) return;
+        try { await ZX.api('session/delete', {id: s.id}); location.href = '/chat'; } catch (e) { alert(e.message); }
+      };
+      actions.querySelector('#session-export').onclick = async () => {
+        const s = cur(); if (!s) return;
+        try {
+          const d = await ZX.api('session/' + encodeURIComponent(s.id));
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], {type: 'application/json'}));
+          a.download = (s.title || 'conversation').replace(/[\\/:*?"<>|]/g, '_') + '.json';
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        } catch (e) { alert(e.message); }
+      };
     }
   } catch { /* 侧栏结构变化时忽略 */ }
+  function setupContextPanel() {
+    const header = document.querySelector('header');
+    if (!header || document.getElementById('context-toggle')) return;
+    const project = new URLSearchParams(location.search).get('project') || '';
+    const btn = document.createElement('button');
+    btn.id = 'context-toggle';
+    btn.textContent = '上下文';
+    btn.style.cssText = 'margin-left:10px;padding:5px 10px;border:1px solid #d5dfcd;border-radius:8px;background:#fff;color:#2d5542;font-size:11px;cursor:pointer';
+    header.appendChild(btn);
+    const panel = document.createElement('div');
+    panel.id = 'context-panel';
+    panel.hidden = true;
+    panel.style.cssText = 'position:fixed;right:18px;top:70px;width:280px;z-index:30;background:#fff;border:1px solid #dce7df;border-radius:12px;padding:12px;box-shadow:0 12px 36px #1f3a2e22;font-size:12px;line-height:1.8;color:#314b3f';
+    panel.innerHTML = '<b style="font-size:12px">当前上下文</b>' + (project ? '<div style="margin-top:6px">项目：<code style="font-size:10px">' + project.slice(0,8) + '…</code></div>' : '<div style="margin-top:6px;color:#7b8b80">还没有从日历选择项目</div>') + '<div style="margin-top:8px"><a href="/recruit">打开数据与日历 →</a></div><div><a href="/resume">我的简历</a> · <a href="/companies">公司档案</a></div><div style="color:#7b8b80;margin-top:6px">来源只来自高校/公众号；平台用于研究岗位要求与薪资。</div>';
+    document.body.appendChild(panel);
+    btn.onclick = () => { panel.hidden = !panel.hidden; };
+    if (project) {
+      panel.hidden = false;
+      let projectLoaded = false;
+      const loadProject = async (attempt = 0) => {
+        if (projectLoaded) return;
+        try {
+          const d = await ZX.api('recruit/projects/' + encodeURIComponent(project));
+          if (!d?.project) return;
+          projectLoaded = true;
+          const p = d.project, e = d.event || {};
+          panel.querySelector('b').insertAdjacentHTML('afterend', '<div style="margin-top:6px"><b style="font-size:12px">' + (p.company || '未填单位') + '</b><div style="color:#5f7568">' + (p.title || '现场招聘') + '</div><div style="font-size:10.5px;color:#7b8b80">' + (e.school || '') + ' · ' + (e.title || '') + '</div></div>');
+        } catch { if (attempt < 10) setTimeout(() => loadProject(attempt + 1), 1500); }
+      };
+      loadProject();
+      const input = document.querySelector('#input');
+      if (input && !input.value.trim()) {
+        input.value = '研究这个招聘项目（ID：' + project + '）：先读取项目详情和所属活动，再查公司/行业/岗位要求和薪资，最后对照我的简历给出准备建议。不要从平台登记岗位或投递。';
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+      }
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupContextPanel, {once: true});
+  else setTimeout(setupContextPanel, 0);
+  function setupMobileSidebar() {
+    if (document.getElementById('mobile-sidebar')) return;
+    const header = document.querySelector('header');
+    const aside = document.querySelector('aside');
+    if (!header || !aside) return;
+    const b = document.createElement('button');
+    b.id = 'mobile-sidebar';
+    b.textContent = '☰';
+    b.setAttribute('aria-label', '打开对话列表');
+    b.style.cssText = 'display:none;margin-right:8px;border:0;background:#edf3e9;border-radius:8px;padding:5px 9px;font-size:16px;cursor:pointer';
+    header.prepend(b);
+    const style = document.createElement('style');
+    style.textContent = '@media(max-width:750px){#mobile-sidebar{display:inline-block!important}aside.open{display:flex!important;position:fixed;z-index:40;inset:0 auto 0 0;width:min(82vw,300px);box-shadow:0 0 50px #1f3a2e55}}';
+    document.head.appendChild(style);
+    b.onclick = () => aside.classList.toggle('open');
+    aside.addEventListener('click', e => { if (e.target.closest('#sessions button')) aside.classList.remove('open'); });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupMobileSidebar, {once: true});
+  else setTimeout(setupMobileSidebar, 0);
 })();

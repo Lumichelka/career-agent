@@ -8,7 +8,8 @@ export default {
   channel: '官方平台',
   kind: '双选会',
   mode: 'browser',
+  capabilities: {list: 'browser', detail: 'none', projects: 'none'},
   enabled: false,
   listUrl: 'https://www.ncss.cn/',
-  note: '全国性双选会与岗位聚合，需登录后浏览；适合作为"大范围双选会"补充源。'
+  note: "全国双选会平台，需登录；作为可选平台源，不计入高校覆盖率。"
 };

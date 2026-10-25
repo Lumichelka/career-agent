@@ -93,12 +93,13 @@ function scoreConfidence(event) {
   return Math.min(0.95, Number(c.toFixed(2)));
 }
 
-export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 8, onLog = () => {}, persist = true} = {}) {
+export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 8, projectLimit = 12, onLog = () => {}, persist = true} = {}) {
   const source = typeof sourceOrId === 'string' ? sourceById(sourceOrId) : sourceOrId;
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
   const store = persist ? RecruitStore.open(join(dir, 'recruit.db')) : null;
-  const result = {id: source.id, name: source.name, status: 'ok', fetched: 0, created: 0, updated: 0, message: '', durationMs: 0};
+  if (store) store.syncSources(SOURCES);
+  const result = {id: source.id, name: source.name, status: 'ok', fetched: 0, created: 0, updated: 0, projects: 0, projectEvents: 0, projectErrors: 0, message: '', durationMs: 0};
   try {
     if (!source.enabled) {
       result.status = 'disabled';
@@ -108,8 +109,10 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     onLog?.({source: source.id, text: '开始采集：' + source.name});
 
     let items = [];
+    let listText = '';
     if (source.mode === 'browser') {
       const {text, title} = await browserText(source.listUrl);
+      listText = text;
       if (store) store.saveRaw({url: source.listUrl, sourceId: source.id, title, text});
       items = parseRenderedText(text, source);
     } else {
@@ -119,6 +122,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
         result.message = res.message;
         return result;
       }
+      listText = res.text;
       if (store) store.saveRaw({url: source.listUrl, sourceId: source.id, title: source.name, text: res.text.slice(0, 120000)});
       if (source.mode === 'json') {
         const pages = source.pageUrl ? Math.min(source.maxPages || 1, 5) : 1;
@@ -169,6 +173,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     }
 
     const seen = [];
+    let projectEvents = 0, projectErrors = 0, projectTotal = 0;
     for (const item of items) {
       const event = normalize(item, source);
       if (!event) continue;
@@ -178,6 +183,40 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
         const action = store.upsertEvent(event);
         if (action === 'created') result.created++; else result.updated++;
       } else result.created++;
+
+      // 项目阶段：只对声明了 fetchProjects 的源执行；失败不影响活动入库。
+      if (store && typeof source.fetchProjects === 'function' && projectEvents < projectLimit) {
+        try {
+          const got = await source.fetchProjects(item, event, {source});
+          if (got?.status === 'ok' && got.projects?.length) {
+            const synced = store.syncProjects(event.id, source.id, got.projects);
+            projectTotal += synced.total;
+            projectEvents++;
+            onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目 ${synced.total} 个（新增 ${synced.created}，更新 ${synced.updated}）`});
+          } else {
+            projectErrors++;
+            onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目未抓取（${got?.message || got?.status || '未知原因'}）`});
+          }
+        } catch (e) {
+          projectErrors++;
+          onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目失败（${e.message}）`});
+        }
+      }
+    }
+    result.projects = projectTotal;
+    result.projectEvents = projectEvents;
+    result.projectErrors = projectErrors;
+
+    // 来源页如果链接了公众号推文，顺手发现并分析（不批量刷公众号主页）。
+    if (store && listText.includes('mp.weixin.qq.com')) {
+      try {
+        const {harvestWechat} = await import('../wechat/harvest.mjs');
+        const harvested = await harvestWechat({text: listText, dir, school: source.school, limit: 2, onLog});
+        result.wechatArticles = harvested.imported;
+        if (harvested.imported) onLog?.({source: source.id, text: `从来源页发现并入库 ${harvested.imported} 篇公众号文章`});
+      } catch (e) {
+        onLog?.({source: source.id, text: `公众号链接处理失败：${e.message}`});
+      }
     }
     if (store && items.length && !truncated) {
       const missing = store.markMissing(source.id, seen);
@@ -185,6 +224,14 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
       if (missing.hidden) onLog?.({source: source.id, text: '有 ' + missing.hidden + ' 场连续 3 次未出现，已标记“可能撤下”'});
     }
     if (!items.length) { result.status = 'empty'; result.message = '页面可访问，但没有解析到活动；可能需要浏览器模式或适配选择器。'; }
+    else if (typeof source.fetchProjects === 'function') {
+      if (!projectEvents) {
+        result.status = 'list_only';
+        result.message = `活动已入库，但项目阶段未成功（${projectErrors} 场失败）`;
+      } else if (projectErrors) {
+        result.message = `项目部分成功：${projectEvents} 场，${projectErrors} 场失败`;
+      }
+    }
   } catch (e) {
     result.status = 'error';
     result.message = e.message;
@@ -192,8 +239,8 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     result.durationMs = Date.now() - t0;
     if (store) {
       try {
-        store.markSource(source.id, {status: result.status, error: result.message, count: result.created});
-        store.recordRun({id: randomUUID(), sourceId: source.id, startedAt, finishedAt: new Date().toISOString(), status: result.status, fetched: result.fetched, created: result.created, updated: result.updated, message: result.message});
+        store.markSource(source.id, {status: result.status, error: result.message, count: result.fetched});
+        store.recordRun({id: randomUUID(), sourceId: source.id, startedAt, finishedAt: new Date().toISOString(), status: result.status, fetched: result.fetched, created: result.created, updated: result.updated, message: result.message + (result.projects ? `；项目 ${result.projects}` : '')});
       } catch { /* 记录失败不掩盖采集结果 */ }
       store.close();
     }
@@ -222,6 +269,8 @@ export async function runCollection({dir, sourceIds, limit = 20, concurrency = 2
     fetched: results.reduce((a, r) => a + (r.fetched || 0), 0),
     created: results.reduce((a, r) => a + (r.created || 0), 0),
     updated: results.reduce((a, r) => a + (r.updated || 0), 0),
+    wechatArticles: results.reduce((a, r) => a + (r.wechatArticles || 0), 0),
+    projects: results.reduce((a, r) => a + (r.projects || 0), 0),
     failed: results.filter(r => ['error', 'blocked', 'disallowed'].includes(r.status)).length
   }};
 }

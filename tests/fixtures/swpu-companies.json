@@ -1,0 +1,25 @@
+{
+  "code": 1,
+  "data": [
+    {
+      "jobfair_apply_job_id": "6763298",
+      "company_id": "189188",
+      "company_name": "深圳市朗驰欣创科技股份有限公司成都分公司",
+      "industry_category": "信息传输、软件和信息技术服务业",
+      "scale": "150-500人",
+      "city_name": "成都市",
+      "field_no": "A01",
+      "publish_type": "现场招聘"
+    },
+    {
+      "jobfair_apply_job_id": "6763299",
+      "company_id": "189189",
+      "company_name": "成都某某制造有限公司",
+      "industry_category": "制造业",
+      "scale": "500-1000人",
+      "city_name": "成都市",
+      "field_no": "A02",
+      "publish_type": "现场招聘"
+    }
+  ]
+}

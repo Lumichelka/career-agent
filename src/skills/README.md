@@ -14,14 +14,14 @@ SKILL.md 示例：
 
 ```markdown
 ---
-id: schedule-planner
-name: 行程规划
-description: 按天/周整理线下招聘，检查冲突与通勤
-triggers: [排行程, 这周有什么, 冲突]
-tools: [career_recruit_events]
+id: company-research
+name: 公司调研
+description: 查询一家用人单位的公开信息，输出带来源的简报
+triggers: [公司怎么样, 这家公司, 口碑]
+tools: [career_company_research, career_public_search]
 writes: false
 version: 1
 ---
 ```
 
-能力面板会自动读取并展示这些技能；当前已内置四个：`schedule-planner`、`company-research`、`resume-tailoring`、`interview-prep`。
+能力面板会自动读取并展示这些技能；当前已内置三个：`company-research`、`resume-tailoring`、`interview-prep`（行程规划技能已按新需求移除）。

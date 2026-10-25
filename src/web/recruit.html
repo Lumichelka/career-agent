@@ -30,6 +30,19 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .toolbar select{padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:#fff;font:13px inherit}
 .sources{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
 .source{border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:#fcfdfb}
+#wx-articles .article{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:6px 0;background:#fcfdfb}#wx-articles .article b{font-size:12.5px}#wx-articles .article .meta{font-size:10.5px;color:var(--muted);margin-top:3px}
+.src-table{grid-column:1/-1;width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+.src-head,.src-row{display:grid;grid-template-columns:minmax(150px,1.5fr) 92px 82px 52px 78px 145px;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #eef2ec;font-size:11.5px}
+.src-head{background:#f5f8f3;color:#7b8b80;font-size:10px;letter-spacing:.5px}
+.src-row:last-child{border-bottom:0}
+.src-name b{font-size:12.5px}
+.src-sub{color:#7b8b80;font-size:10px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.src-row .badge{font-size:9.5px;margin-left:2px}
+.src-cat{padding:7px 10px;background:#fafcf8;color:#7b8b80;font-size:10px;letter-spacing:1px;border-bottom:1px solid #eef2ec}
+.src-actions{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.src-actions button{padding:4px 7px;font-size:10.5px;border-radius:6px}
+.src-actions a{font-size:10.5px}
+@media(max-width:860px){.src-head{display:none}.src-row{grid-template-columns:1fr 1fr;gap:3px 8px}.src-actions{grid-column:1/-1}}
 .source.on{border-color:#cfe2d4;background:#fbfefb}
 .source h3{margin:0;font-size:13px;font-weight:600;display:flex;gap:7px;align-items:center}
 .source p{margin:6px 0 0;font-size:11px;color:var(--muted);line-height:1.6}
@@ -60,6 +73,24 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#1f3a2e;color:#fff;padding:10px 18px;border-radius:24px;font-size:12.5px;opacity:0;pointer-events:none;transition:.2s;max-width:80vw;text-align:center}
 .toast.show{opacity:1}
 .note{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.8}
+.cal-head{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:8px 0 4px;font-size:10px;color:var(--muted);text-align:center}
+.calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;width:100%}
+.cal-cell{min-width:0;overflow:hidden;min-height:104px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;text-align:left;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:.12s}
+.cal-cell:hover{border-color:#b9cdbd;background:#fbfdfb}
+.cal-cell.selected{border-color:var(--green);box-shadow:0 0 0 1px var(--green) inset}
+.cal-cell.today .cal-date{background:var(--green);color:#fff}
+.cal-cell.blank{background:#fafbf8;border-style:dashed;cursor:default}
+.cal-date{font-size:11px;font-weight:600;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;color:#4e6558}
+.cal-count{font-size:9px;color:var(--muted)}
+.cal-chip{display:block;font-size:10px;line-height:1.4;padding:2px 4px;border-radius:5px;background:#eef6f0;color:#32654d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-more{font-size:9px;color:var(--muted)}
+#day-detail{margin-top:16px}
+.project{border-left:3px solid #b9d6c4;background:#fbfdfb;padding:7px 9px;margin:6px 0;display:flex;justify-content:space-between;gap:8px;font-size:12px}
+.project .hint{font-size:10.5px;color:var(--muted)}
+.project-form{border:1px dashed #cfdcd2;border-radius:9px;padding:8px;margin-top:8px;display:grid;gap:6px}
+.project-form input,.bulk-form textarea{padding:6px 8px;border:1px solid #d7e1d9;border-radius:7px;font:12px inherit;width:100%}
+.bulk-form{border:1px dashed #cfdcd2;border-radius:9px;padding:8px;margin-top:8px;display:grid;gap:6px}
+@media(max-width:720px){.cal-cell{min-height:78px;padding:4px}.cal-chip{font-size:9px}.cal-head{font-size:9px}}
 @media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}.ev{grid-template-columns:1fr}.ev .side{flex-direction:row;align-items:center}.ev time{font-size:12px}main{padding:16px 12px 70px}}
 dialog#manual-dialog{border:1px solid var(--line);border-radius:16px;padding:0;width:min(680px,92vw);max-height:88vh;overflow:auto;background:#fff;color:var(--ink);box-shadow:0 24px 70px #1f3a2e33}
 dialog#manual-dialog::backdrop{background:#1f3a2e55}
@@ -85,7 +116,12 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
 <main>
   <div class="stats" id="stats"></div>
 
-  <section class="panel">
+  <div class="toolbar" style="margin:12px 0">
+    <button data-view="calendar" class="primary">日历</button>
+    <button data-view="sources">来源</button>
+  </div>
+
+  <section class="panel" id="sources-panel">
     <h2>信息源</h2>
     <div class="toolbar" style="margin-bottom:12px">
       <button class="primary" id="collect-all">采集全部已接入源</button>
@@ -94,23 +130,47 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
       <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。</span>
     </div>
     <div class="sources" id="sources"><div class="empty">正在读取信息源…</div></div>
+    <details class="panel" style="margin-top:14px;padding:12px">
+      <summary style="cursor:pointer;font-size:13px">手工导入来源页（网络/登录被阻断时）</summary>
+      <div class="hint">在普通浏览器打开高校页面，复制 HTML 或正文；选择对应源，先预览再确认写入。不会绕过 robots/登录。</div>
+      <div class="grid2" style="margin-top:10px">
+        <label>来源<select id="ms-source"><option value="">选择信息源</option></select></label>
+        <label>来源链接<input id="ms-url" placeholder="可选：活动/来源页 URL"></label>
+      </div>
+      <label style="margin-top:8px">粘贴 HTML / 正文<textarea id="ms-html" style="min-height:90px" placeholder="HTML 或接口返回的 JSON"></textarea></label>
+      <div class="row" style="margin-top:8px"><button id="ms-preview">预览解析</button><button id="ms-save" class="primary">确认写入</button><span id="ms-status" class="hint"></span></div>
+      <div id="ms-preview-list" class="hint" style="margin-top:8px"></div>
+    </details>
+    <details class="panel" style="margin-top:14px;padding:12px" open>
+      <summary style="cursor:pointer;font-size:13px">公众号文章：粘贴推文，判断是否含招聘</summary>
+      <div class="grid2" style="margin-top:10px">
+        <label>文章链接<input id="wx-url" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off"></label>
+        <label>正文粘贴（微信验证时）<textarea id="wx-text" placeholder="链接抓不到正文时再粘贴" style="min-height:70px"></textarea></label>
+      </div>
+      <div class="row" style="margin-top:8px"><button id="wx-import">记录并分析</button><button id="wx-harvest">从来源页找公众号</button><span id="wx-status" class="hint"></span></div>
+      <div id="wx-result" class="hint" style="margin-top:8px"></div>
+    </details>
+    <div class="panel" id="wx-articles-panel" style="margin-top:14px;padding:12px">
+      <h2>最近公众号文章 <span id="wx-articles-count" class="hint"></span></h2>
+      <div id="wx-articles"><div class="empty">还没有文章</div></div>
+    </div>
   </section>
 
-  <section class="panel">
-    <h2>行程安排</h2>
-    <div class="toolbar" style="margin-bottom:6px">
-      <select id="days">
-        <option value="14">未来 14 天</option>
-        <option value="30" selected>未来 30 天</option>
-        <option value="60">未来 60 天</option>
-        <option value="90">未来 90 天</option>
-      </select>
+  <section class="panel" id="calendar-panel">
+    <h2>活动日历 <span id="cal-title" class="hint"></span></h2>
+    <div class="toolbar" style="margin-bottom:8px">
+      <button id="cal-prev">← 上月</button>
+      <input type="month" id="cal-month">
+      <button id="cal-next">下月 →</button>
+      <button id="cal-today">今天</button>
       <button data-export="ics">导出日历 .ics</button>
       <button data-export="csv">导出表格 .csv</button>
       <button data-export="md">导出安排表 .md</button>
     </div>
-    <div id="schedule"><div class="empty">还没有数据，先点“采集全部已接入源”。</div></div>
-    <div class="note">时间为北京时间。通勤时长按校区坐标估算，仅用于判断是否赶场，出发前请用地图复核。标“待复核”的记录请点开来源链接确认。</div>
+    <div class="cal-head"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+    <div id="calendar" class="calendar"><div class="empty">正在读取日历…</div></div>
+    <div id="day-detail"></div>
+    <div class="note">点击日期查看活动；一场双选会可以添加多个招聘项目。已暂停冲突/通勤规划，只保留活动与项目清单。</div>
   </section>
 
   <section class="panel">
@@ -147,7 +207,7 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
         <label>投递方式<input id="m-apply" maxlength="40" placeholder="网申 / 邮箱 / 现场"></label>
       </div>
       <label>备注（含识别提示）<textarea id="m-notes" style="min-height:60px"></textarea></label>
-      <div class="row"><button id="m-save" class="primary">保存到招聘库</button><span class="note" style="margin:0">保存后可在行程里看到，并参与冲突检测与导出。</span></div>
+      <div class="row"><button id="m-save" class="primary">保存到招聘库</button><span class="note" style="margin:0">保存后可在日历里看到，并参与导出。</span></div>
     </div>
   </div>
 </dialog>
@@ -165,77 +225,79 @@ async function api(path,body){
   return d;
 }
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const days=()=>Number(el('#days').value)||30;
+const days=()=>90;
+const pad=n=>String(n).padStart(2,'0');
+const monthNow=()=>new Date(Date.now()+8*3600*1000).toISOString().slice(0,7);
+const todayStr=()=>new Date(Date.now()+8*3600*1000).toISOString().slice(0,10);
+let calendar=null,selectedDate='';
 
-function renderStats(stats,schedule){
-  const conflict=schedule?.stats?.conflicts||0;
+function renderStats(stats,cal){
   el('#stats').innerHTML=[
     ['收录活动',stats?.total??0],['未来活动',stats?.upcoming??0],
-    ['安排天数',schedule?.stats?.days??0],['时间冲突',conflict]
+    ['本月活动',cal?.stats?.events??0],['招聘项目',cal?.stats?.projects??0]
   ].map(([k,v])=>`<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('');
 }
 
-function renderSources(sources){
+function renderSources(sources,wechat){
   sourceState=sources;
+  window.__wxAccounts=Object.fromEntries((wechat?.accounts||[]).map(a=>[a.id,a.name]));
+  const wxBySchool=new Map();
+  for(const a of wechat?.accounts||[]){const key=a.school||'未归类';if(!wxBySchool.has(key))wxBySchool.set(key,[]);wxBySchool.get(key).push(a);}
+  const shown=new Set();
+  const rows=[];
+  const statusBadge=s=>{
+    if(!s.enabled)return '<span class="badge off">未接入</span>';
+    const st=s.last_status||'待采集';
+    return '<span class="badge '+(/^(ok|connected)$/.test(st)?'ok':'off')+'">'+esc(st)+'</span>';
+  };
+  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b><div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.lastAnalysis?' · 最近分析 '+esc(String(a.lastAnalysis).slice(0,10)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions"><a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
   const group={};
   for(const s of sources)(group[s.category] ||= []).push(s);
-  el('#sources').innerHTML=Object.entries(group).map(([cat,list])=>{
-    const cards=list.map(s=>{
-      const badge=s.enabled?(s.last_status?`<span class="badge ${/ok|created|updated/.test(s.last_status)?'':'off'}">${esc(s.last_status)}</span>`:'<span class="badge">待采集</span>'):'<span class="badge off">未接入</span>';
-      const note=(s.last_error||catalog[s.id]?.note||s.note||'').slice(0,120);
-      return `<div class="source ${s.enabled?'on':''}">
-        <h3>${esc(s.name)} ${badge}</h3>
-        <p>${esc(s.school)} · ${esc(s.channel||'')} · ${esc(s.mode)}</p>
-        <p>${s.last_run?`最近采集：${esc(String(s.last_run).slice(0,16).replace('T',' '))} · ${esc(s.last_count||0)} 条`:'尚未采集'}</p>
-        ${note?`<p>${esc(note)}</p>`:''}
-        <div class="row">
-          <button data-collect="${esc(s.id)}" ${s.enabled?'':'disabled'}>采集这个源</button>
-          <a href="${esc(s.list_url)}" target="_blank" rel="noopener noreferrer">打开原站 ↗</a>
-        </div>
-      </div>`;
-    }).join('');
-    return `<div style="grid-column:1/-1;font-size:11px;color:#7b8b80;letter-spacing:1px;margin-top:4px">${esc(cat)}</div>${cards}`;
-  }).join('');
+  for(const [cat,list] of Object.entries(group)){
+    rows.push('<div class="src-cat">'+esc(cat)+'</div>');
+    for(const s of list){
+      const proj=catalog[s.id]?.capabilities?.projects||'none';
+      const note=(s.last_error||catalog[s.id]?.note||s.note||'').slice(0,140);
+      rows.push('<div class="src-row"><div class="src-name"><b>'+esc(s.name)+'</b>'+statusBadge(s)+'<div class="src-sub" title="'+esc(note)+'">'+esc(note||(s.school+' · '+(s.channel||'')))+'</div></div><div>'+esc(s.channel||s.mode)+'</div><div>'+esc(s.school)+'</div><div>'+(s.last_count||0)+' 条</div><div>'+esc(proj==='none'?'—':proj)+'</div><div class="src-actions"><button data-collect="'+esc(s.id)+'" '+(s.enabled?'':'disabled')+'>采集</button><a href="'+esc(s.list_url)+'" target="_blank" rel="noopener noreferrer">原站 ↗</a></div></div>');
+      const key=s.school||'';
+      if(wxBySchool.has(key)&&!shown.has(key)){shown.add(key);rows.push(...wxBySchool.get(key).map(accountRow));}
+    }
+  }
+  const rest=[];for(const [school,list] of wxBySchool)if(!shown.has(school))rest.push(...list);
+  if(rest.length){rows.push('<div class="src-cat">公众号</div>');rows.push(...rest.map(accountRow));}
+  const sel=el('#ms-source');if(sel&&sel.options.length<=1)sel.innerHTML='<option value="">选择信息源</option>'+sources.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>').join('');
+  el('#sources').innerHTML='<div class="src-table"><div class="src-head"><span>来源 / 状态</span><span>方式</span><span>学校</span><span>最近</span><span>项目</span><span>操作</span></div>'+rows.join('')+'</div>';
 }
-
 function fmtTime(iso){
   const d=new Date(iso);const p=n=>String(n).padStart(2,'0');
   return p(d.getHours())+':'+p(d.getMinutes());
 }
 function fmtDate(day){return day}
 
-function renderSchedule(schedule){
-  if(!schedule.days.length){el('#schedule').innerHTML='<div class="empty">这个时间范围内还没有活动。先采集，或换一个更大的时间范围。</div>';return}
-  el('#schedule').innerHTML=schedule.days.map(day=>{
-    const items=day.items.map(({event,conflict,travel,warning})=>{
-      const cls=conflict?'conflict':/小于估算通勤|未公布/.test(warning||'')?'warn':'';
-      const flag=conflict?'<span class="flag bad">时间冲突</span>':/小于估算通勤/.test(warning||'')?`<span class="flag">${esc(warning)}</span>`:'';
-      const conf=Math.round((event.confidence||0)*100);
-      const statusFlag=event.status==='possibly_removed'?'<span class="flag bad">可能撤下</span>':event.status==='cancelled'?'<span class="flag bad">已取消</span>':'';
-      const crossFlag=(event.crossSources&&event.crossSources.length>1)?'<span class="flag ok">多源收录</span>':'';
-      const ivFlag=event.interviewStage?`<span class="flag">${esc([...new Set([event.interviewStage,event.interviewType].filter(Boolean))].join(' · '))}</span>`:'';
-      const side=[flag,ivFlag,statusFlag,crossFlag].filter(Boolean).join(' ');
-      return `<article class="ev ${cls}">
-        <time>${esc(fmtTime(event.startAt))}${event.endAt?'–'+esc(fmtTime(event.endAt)):''}</time>
-        <div>
-          <p class="title">${esc(event.title)}</p>
-          <div class="meta">
-            ${event.company?`<b><a href="/companies?name=${encodeURIComponent(event.company)}">${esc(event.company)}</a></b> · `:''}${esc(event.school)} · ${esc(event.kind)}
-            ${event.venue?`<br>地点：${esc(event.venue)}`:''}
-            ${travel?`<br>通勤：${esc(travel.minutes)} 分钟（${esc(travel.basis)}）`:''}
-            <br>置信度 ${conf}% · ${event.verified?'<span class="flag ok">已复核</span>':'待复核'}
-          </div>
-          <div class="row">
-            ${event.mapUrl?`<a href="${esc(event.mapUrl)}" target="_blank" rel="noopener noreferrer">地图 ↗</a>`:''}
-            ${event.sourceUrl?`<a href="${esc(event.sourceUrl)}" target="_blank" rel="noopener noreferrer">来源 ↗</a>`:''}
-            <button data-verify="${esc(event.id)}">复核来源</button>
-          </div>
-        </div>
-        <div class="side">${side}</div>
-      </article>`;
-    }).join('');
-    return `<div class="day"><h3>${esc(day.date)} <span>周${esc(day.weekday)} · ${day.items.length} 场</span></h3>${items}</div>`;
+function mapFor(e){const q=[e.venue,e.school,e.city].filter(Boolean).join(' ');return 'https://uri.amap.com/search?keyword='+encodeURIComponent(q||e.title||'招聘会');}
+function shiftMonth(delta){const [y,m]=calendar.month.split('-').map(Number);const d=new Date(Date.UTC(y,m-1+delta,1));loadCalendar(d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1));}
+async function loadCalendar(month){const d=await api('calendar?month='+encodeURIComponent(month));calendar=d;el('#cal-month').value=d.month;if(!selectedDate||!d.days.some(x=>x.date===selectedDate)){selectedDate=d.days.some(x=>x.date===todayStr())?todayStr():(d.days[0]?.date||'');}renderCalendar();renderStats(window.__stats,d);}
+function renderCalendar(){
+  if(!calendar)return;
+  const [y,m]=calendar.month.split('-').map(Number);const offset=(new Date(Date.UTC(y,m-1,1)).getUTCDay()+6)%7;const total=new Date(Date.UTC(y,m,0)).getUTCDate();const cells=[];
+  for(let i=0;i<offset;i++)cells.push('<div class="cal-cell blank"></div>');
+  for(let d=1;d<=total;d++){
+    const date=calendar.month+'-'+pad(d);const evs=calendar.days.find(x=>x.date===date)?.events||[];
+    const chips=evs.slice(0,3).map(e=>'<span class="cal-chip" data-date="'+date+'">'+esc(fmtTime(e.startAt))+' '+esc(e.title.slice(0,14))+'</span>').join('');
+    cells.push('<div class="cal-cell '+(date===selectedDate?'selected ':'')+(date===todayStr()?'today':'')+'" data-date="'+date+'"><span class="cal-date">'+d+'</span><span class="cal-count">'+(evs.length?evs.length+' 场':'')+'</span>'+chips+(evs.length>3?'<span class="cal-more">+'+(evs.length-3)+'</span>':'')+'</div>');
+  }
+  while(cells.length%7)cells.push('<div class="cal-cell blank"></div>');
+  el('#calendar').innerHTML=cells.join('');el('#cal-title').textContent=calendar.month;renderDayDetail();
+}
+function renderDayDetail(){
+  const day=calendar?.days.find(d=>d.date===selectedDate);
+  if(!day){el('#day-detail').innerHTML='<div class="empty">这天没有活动。</div>';return}
+  const events=day.events.map(e=>{
+    const projects=(e.projects||[]).map(p=>'<div class="project"><div><b>'+esc(p.company||'未填单位')+'</b> '+esc(p.title||'')+'<div class="hint">'+esc(p.positions||'')+(p.applyMode?' · '+esc(p.applyMode):'')+(p.applyUrl?' · '+esc(p.applyUrl):'')+'</div></div><a class="hint" href="/chat?project='+encodeURIComponent(p.id)+'">研究 ↗</a><button data-del-project="'+esc(p.id)+'">删除</button></div>').join('');
+    const flags=[e.status==='possibly_removed'?'<span class="flag bad">可能撤下</span>':'',e.interviewStage?'<span class="flag">'+esc([...new Set([e.interviewStage,e.interviewType].filter(Boolean))].join(' · '))+'</span>':'',(e.crossSources||[]).length>1?'<span class="flag ok">多源收录</span>':''].filter(Boolean).join(' ');
+    return '<article class="ev"><time>'+esc(fmtTime(e.startAt))+(e.endAt?'–'+esc(fmtTime(e.endAt)):'')+'</time><div><p class="title">'+esc(e.title)+'</p><div class="meta">'+(e.company?'<b><a href="/companies?name='+encodeURIComponent(e.company)+'">'+esc(e.company)+'</a></b> · ':'')+esc(e.school)+' · '+esc(e.kind)+(e.venue?'<br>地点：'+esc(e.venue):'')+'<br>招聘项目：'+(e.projects||[]).length+' 个</div><div class="row">'+(e.sourceUrl?'<a href="'+esc(e.sourceUrl)+'" target="_blank" rel="noopener noreferrer">来源 ↗</a>':'')+'<a href="'+esc(mapFor(e))+'" target="_blank" rel="noopener noreferrer">地图 ↗</a><button data-verify="'+esc(e.id)+'">复核来源</button><button data-add-project="'+esc(e.id)+'">＋ 招聘项目</button><button data-bulk-project="'+esc(e.id)+'">批量粘贴</button></div><div class="projects">'+(projects||'<div class="hint">还没有拆分项目；双选会可在这里补充参会单位/岗位。</div>')+'</div><div class="bulk-form" data-bulk="'+esc(e.id)+'" hidden><textarea data-bulk-text placeholder="每行一个：单位 | 岗位 | 要求 | 投递方式 | 链接"></textarea><button data-save-bulk="'+esc(e.id)+'">批量保存</button></div><div class="project-form" data-form="'+esc(e.id)+'" hidden><input data-p-company placeholder="单位名称"><input data-p-title placeholder="项目/岗位名称"><input data-p-positions placeholder="岗位要求/专业"><input data-p-apply placeholder="投递方式（网申/邮箱/现场）"><input data-p-url placeholder="投递链接"><button data-save-project="'+esc(e.id)+'">保存项目</button></div></div><div class="side">'+flags+'</div></article>';
   }).join('');
+  el('#day-detail').innerHTML='<h3 style="font-size:14px;margin:0 0 8px">'+esc(day.date)+' <span class="hint">'+events.length+' 项</span></h3>'+events;
 }
 
 function renderRuns(runs){
@@ -249,12 +311,8 @@ function renderRuns(runs){
 async function loadAll(){
   try{
     const s=await api('sources');
-    renderSources(s.sources);
-    renderRuns(s.runs);
-    const sch=await api('schedule?days='+days());
-    renderStats(s.stats,sch.schedule);
-    renderSchedule(sch.schedule);
-    window.__stats=s.stats;
+    catalog=s.catalog||{};renderSources(s.sources,s.wechat);renderRuns(s.runs);loadWechatArticles();window.__stats=s.stats;
+    await loadCalendar(el('#cal-month').value||monthNow());
   }catch(e){toast(e.message)}
 }
 
@@ -273,16 +331,75 @@ async function collect(ids,label){
 
 el('#collect-all').onclick=()=>collect([],'采集');
 el('#refresh').onclick=()=>loadAll();
-el('#days').onchange=()=>loadAll();
+function showView(view){const isSources=view==='sources';el('#sources-panel').hidden=!isSources;el('#calendar-panel').hidden=isSources;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('primary',b.dataset.view===view));}
+document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>showView(b.dataset.view));
+showView(new URLSearchParams(location.search).get('tab')==='sources'?'sources':'calendar');
+el('#cal-prev').onclick=()=>shiftMonth(-1);
+el('#cal-next').onclick=()=>shiftMonth(1);
+el('#cal-today').onclick=()=>loadCalendar(monthNow());
+el('#cal-month').onchange=()=>loadCalendar(el('#cal-month').value);
 document.addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b)return;
   if(b.dataset.collect){await collect([b.dataset.collect],'采集 '+b.dataset.collect);return}
   if(b.dataset.export){const f=b.dataset.export;try{const r=await fetch('/api/recruit/export.'+f+'?days='+days(),{headers:{'x-career-token':TOKEN}});if(!r.ok)throw new Error('导出失败');const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='zhixiang-schedule.'+f;a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);toast('已导出 '+f.toUpperCase())}catch(err){toast(err.message)}return}
+  if(b.dataset.wxDraft){if(!wxDraft)return;el('#m-title').value=wxDraft.title||'';el('#m-start').value=wxDraft.startAt?wxDraft.startAt.slice(0,16):'';el('#m-venue').value=wxDraft.venue||'';el('#m-city').value=wxDraft.city||'';el('#m-company').value=wxDraft.company||'';el('#m-school').value=wxDraft.school||'公众号导入';el('#m-kind2').value=wxDraft.kind||'其他';el('#m-apply').value=wxDraft.applyMode||'';el('#m-notes').value=wxDraft.notes||'';manualPreview=wxArticle?.content||'';el('#m-draft').hidden=false;manualDialog.showModal();return}
   if(b.dataset.verify){b.disabled=true;try{const r=await api('verify',{id:b.dataset.verify});toast(r.message);await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}
   if(b.id==='probe'){b.disabled=true;b.textContent='检查中…';try{const r=await api('probe',{});const bad=r.results.filter(x=>!x.ok);el('#log').hidden=false;el('#log').textContent=r.results.map(x=>`${x.ok?'✔':'✘'} ${x.id} ${x.status||''} ${x.reason||''} ${x.message||''}`).join('\n');toast(bad.length?`${bad.length} 个源当前不可达`:'所有源都可访问')}catch(err){toast(err.message)}finally{b.disabled=false;b.textContent='检查各源连通性'}return}
 });
+el('#wx-import').onclick=async()=>{
+  const url=el('#wx-url').value.trim();
+  if(!url){toast('请填写文章链接');return}
+  el('#wx-status').textContent='抓取并分析中…';
+  try{
+    const resp=await fetch('/api/wechat/articles/import',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({url,text:el('#wx-text').value})});const d=await resp.json().catch(()=>({error:'返回格式异常'}));if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));
+    wxArticle=d.article;wxDraft=d.analysis?.draft||d.draft;
+    const yes={yes:'含招聘信息',no:'未发现招聘信息',uncertain:'不确定'}[d.analysis?.hasRecruitment]||'未判断';
+    el('#wx-result').innerHTML='已记录：<b>'+esc(d.article.title)+'</b><br>'+yes+' · 识别项目 '+(d.analysis?.projects?.length||0)+' 个'+(d.analysis?.summary?'<br>'+esc(d.analysis.summary):'')+(d.analysis?.warnings?.length?'<br>提示：'+esc(d.analysis.warnings.join('；')):'');
+    el('#wx-status').textContent='';
+    if(wxDraft) el('#wx-result').innerHTML+='<br><button data-wx-draft>用草稿填入手动导入</button>';
+    await loadAll();
+  }catch(e){el('#wx-status').textContent=e.message;toast(e.message)}
+};
+el('#wx-harvest').onclick=async()=>{
+  const url=el('#wx-url').value.trim();
+  if(!url){toast('请填写来源页或文章链接');return}
+  el('#wx-status').textContent='扫描来源页中的公众号链接…';
+  try{
+    const resp=await fetch('/api/wechat/harvest',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({url})});
+    const d=await resp.json().catch(()=>({error:'返回格式异常'}));
+    if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));
+    el('#wx-result').innerHTML='发现 '+d.links+' 个链接，入库 '+d.imported+' 篇'+(d.articles?.length?'<br>'+d.articles.map(a=>esc(a.title)+' · '+esc(a.hasRecruitment)+' · '+a.projects+' 项目草稿').join('<br>'):'');
+    el('#wx-status').textContent='';await loadAll();
+  }catch(e){el('#wx-status').textContent=e.message;toast(e.message)}
+};
+function renderManualPreview(list){
+  el('#ms-preview-list').innerHTML=list?.length?list.map(e=>'<div>'+esc(e.title)+' · '+esc(String(e.startAt||'').slice(0,16).replace('T',' '))+(e.venue?' · '+esc(e.venue):'')+'</div>').join(''):'';
+}
+el('#ms-preview').onclick=async()=>{
+  const sourceId=el('#ms-source').value,html=el('#ms-html').value;
+  if(!sourceId||!html.trim()){toast('请选择来源并粘贴内容');return}
+  el('#ms-status').textContent='解析中…';
+  try{const r=await api('source-parse',{sourceId,html,url:el('#ms-url').value.trim()});renderManualPreview(r.preview);el('#ms-status').textContent='解析到 '+r.count+' 条，确认后写入';}
+  catch(e){el('#ms-status').textContent=e.message;toast(e.message)}
+};
+el('#ms-save').onclick=async()=>{
+  const sourceId=el('#ms-source').value,html=el('#ms-html').value;
+  if(!sourceId||!html.trim()){toast('请选择来源并粘贴内容');return}
+  if(!confirm('确认把这些活动写入招聘库？'))return;
+  el('#ms-status').textContent='写入中…';
+  try{const r=await api('source-save',{sourceId,html,url:el('#ms-url').value.trim(),confirm:true});el('#ms-status').textContent='已写入：新增 '+r.created+'，更新 '+r.updated;toast('来源页已导入');await loadAll();}
+  catch(e){el('#ms-status').textContent=e.message;toast(e.message)}
+};
+async function loadWechatArticles(){
+  try{
+    const r=await fetch('/api/wechat/articles',{headers:{'x-career-token':TOKEN}});
+    const d=await r.json();const list=d.articles||[];
+    el('#wx-articles-count').textContent=list.length+' 篇';
+    el('#wx-articles').innerHTML=list.length?list.map(a=>{let drafts=[];try{drafts=(JSON.parse(a.extractedJson||'{}').projects)||[];}catch{}const names=drafts.slice(0,5).map(p=>p.company).filter(Boolean);return '<article class="article"><b><a href="'+esc(a.url)+'" target="_blank" rel="noopener noreferrer">'+esc(a.title)+'</a></b><div class="meta">'+esc((window.__wxAccounts&&window.__wxAccounts[a.accountId])||'公众号')+' · '+esc(a.hasRecruitment==='yes'?'含招聘信息':a.hasRecruitment==='no'?'未发现招聘':'待确认')+' · '+(a.projectCount||0)+' 个项目草稿 · '+esc(String(a.analyzedAt||a.createdAt||'').slice(0,10))+'</div>'+(names.length?'<div class="hint">草稿：'+esc(names.join('、'))+(drafts.length>5?' 等':'')+'</div>':'')+'<div class="row">'+(a.eventId?'<span class="hint">已关联活动</span>':'<span class="hint">未入库活动</span>')+'</div></article>';}).join(''):'<div class="empty">还没有文章；先粘贴推文链接或从来源页扫描</div>';
+  }catch(e){el('#wx-articles').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
+}
 const manualDialog=el('#manual-dialog');
-let manualPreview='';
+let manualPreview='';let wxArticle=null,wxDraft=null;
 el('#manual-open').onclick=()=>{el('#m-status').textContent='';el('#m-draft').hidden=true;manualDialog.showModal()};
 el('#m-close').onclick=()=>manualDialog.close();
 el('#m-parse').onclick=async()=>{
@@ -308,16 +425,25 @@ el('#m-save').onclick=async()=>{
   if(!title||!start){toast('标题和开始时间必填');return}
   try{
     const startAt=start.length===16?start+':00+08:00':start;
-    await api('manual/save',{
+    const saved=await api('manual/save',{
       title,startAt,venue:el('#m-venue').value.trim(),city:el('#m-city').value.trim(),
       company:el('#m-company').value.trim(),kind:el('#m-kind2').value,
       school:el('#m-school').value.trim()||'手动导入',
       notes:el('#m-notes').value.trim(),applyMode:el('#m-apply').value.trim(),
-      sourceUrl:el('#m-url').value.trim(),rawText:manualPreview
+      sourceUrl:wxArticle?.url||el('#m-url').value.trim(),rawText:manualPreview
     });
+    if(wxArticle?.id&&saved.event?.id) await fetch('/api/wechat/articles/'+wxArticle.id+'/link',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({eventId:saved.event.id})}).catch(()=>{});
     manualDialog.close();toast('已保存到招聘库');await loadAll();
   }catch(e){toast(e.message)}
 };
+document.addEventListener('click',async e=>{
+  const cell=e.target.closest('[data-date]');if(cell&&!cell.classList.contains('blank')){selectedDate=cell.dataset.date;renderCalendar();return}
+  const bulk=e.target.closest('[data-bulk-project]');if(bulk){const form=document.querySelector('[data-bulk="'+bulk.dataset.bulkProject+'"]');if(form)form.hidden=!form.hidden;return}
+  const saveBulk=e.target.closest('[data-save-bulk]');if(saveBulk){const form=saveBulk.closest('.bulk-form');try{const r=await api('projects/bulk',{eventId:saveBulk.dataset.saveBulk,text:form.querySelector('[data-bulk-text]').value});toast('已保存 '+r.count+' 个项目');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
+  const add=e.target.closest('[data-add-project]');if(add){const form=document.querySelector('[data-form="'+add.dataset.addProject+'"]');if(form)form.hidden=!form.hidden;return}
+  const save=e.target.closest('[data-save-project]');if(save){const form=save.closest('.project-form');const eventId=save.dataset.saveProject;try{await api('projects',{eventId,company:form.querySelector('[data-p-company]').value,title:form.querySelector('[data-p-title]').value,positions:form.querySelector('[data-p-positions]').value,applyMode:form.querySelector('[data-p-apply]').value,applyUrl:form.querySelector('[data-p-url]').value});toast('项目已保存');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
+  const del=e.target.closest('[data-del-project]');if(del){if(!confirm('删除这个招聘项目？'))return;try{await api('projects/'+del.dataset.delProject+'/delete',{});toast('已删除');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
+});
 loadAll();
 </script>
 </body>

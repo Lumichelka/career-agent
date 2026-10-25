@@ -8,8 +8,9 @@ export default {
   channel: '就业信息网',
   kind: '宣讲会',
   mode: 'static',
+  capabilities: {list: 'static', detail: 'none', projects: 'none'},
   enabled: false,
   listUrl: 'https://scc.cufe.edu.cn/',
-  note: '本次测试连接超时（可能是站点侧 IP 限制或网络策略），需要备用通道。',
+  note: "当前网络请求失败；重试/浏览器仍失败时只走公众号。",
   fallback: '官方微信公众号「中央财经大学就业指导中心」+ 人工转发链接解析'
 };

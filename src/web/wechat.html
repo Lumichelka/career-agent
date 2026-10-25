@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>职向 · 公众号</title>
+<style>
+:root{--bg:#f6f8f5;--card:#fff;--ink:#1f3a2e;--muted:#7b8b80;--line:#e2e8e1;--green:#1f6b50;--soft:#e8f1ea;--danger:#a63a3a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.7 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+a{color:var(--green);text-decoration:none}a:hover{text-decoration:underline}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px 26px;background:#fffdf8e8;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.brand{font-size:18px;font-weight:600;letter-spacing:2px}.brand small{display:block;font-size:9px;letter-spacing:2px;color:var(--muted);font-weight:400}
+nav{display:flex;gap:6px;flex-wrap:wrap}nav a{padding:7px 12px;border-radius:9px;font-size:12.5px;color:#4e6558}nav a.active{background:var(--green);color:#fff}nav a:hover{background:var(--soft);text-decoration:none}
+.spacer{flex:1}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:7px 12px;font:inherit;font-size:12.5px}
+button:hover{border-color:#b9cdbd;background:#f7fbf7}button.primary{background:var(--green);border-color:var(--green);color:#fff}button.danger{color:var(--danger)}
+main{max-width:1150px;margin:0 auto;padding:22px 22px 80px}
+.grid{display:grid;grid-template-columns:290px minmax(0,1fr);gap:16px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:16px}
+.panel h2{margin:0 0 12px;font-size:13px;letter-spacing:1px;color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.account{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:8px;cursor:pointer;background:#fff}
+.account:hover{border-color:#b9cdbd}.account.selected{border-color:var(--green);background:#f7fbf8}
+.account b{font-size:13px}.account .meta{font-size:10.5px;color:var(--muted);margin-top:2px}
+label{display:grid;gap:4px;font-size:12px;color:#4e6558}
+input,select,textarea{width:100%;padding:8px 10px;border:1px solid #d7e1d9;border-radius:8px;font:13px inherit;background:#fff;color:var(--ink)}
+textarea{min-height:70px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.article{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.article b{font-size:13px}.article .meta{font-size:10.5px;color:var(--muted);margin-top:3px}
+.hint{font-size:11px;color:var(--muted);line-height:1.8}
+.empty{padding:22px;border:1px dashed var(--line);border-radius:12px;color:var(--muted);font-size:12px;text-align:center}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f3a2e;color:#fff;padding:9px 16px;border-radius:22px;font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:100}
+.toast.show{opacity:1}
+.gate{position:fixed;inset:0;z-index:99;background:#f4f6f0;display:grid;place-items:center;padding:20px}
+.gate[hidden]{display:none}
+.gate .box{background:#fff;border:1px solid var(--line);border-radius:20px;padding:30px 32px;max-width:420px;text-align:center}
+@media(max-width:860px){.grid{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}main{padding:14px 12px 70px}.top{padding:10px 14px;gap:10px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">✧ 职向<small>WECHAT ARTICLES</small></div>
+  <nav>
+    <a href="/">今天</a>
+    <a href="/chat">对话</a>
+    <a href="/recruit">机会日历</a>
+    <a href="/resume">简历与投递</a>
+    <a href="/companies">公司档案</a>
+    <a href="/wechat" class="active">公众号</a>
+  </nav>
+  <div class="spacer"></div>
+  <button id="refresh">刷新</button>
+</header>
+
+<main id="main">
+  <div class="grid">
+    <aside>
+      <div class="panel">
+        <h2>公众号 <span id="wechat-stats" class="hint"></span></h2>
+        <div id="account-list"><div class="empty">正在读取…</div></div>
+      </div>
+      <details class="panel">
+        <summary style="cursor:pointer;font-size:13px">＋ 添加公众号</summary>
+        <form id="new-account" class="grid" style="margin-top:10px">
+          <label>名称<input id="na-name" maxlength="80" required placeholder="例如：西财就业"></label>
+          <label>学校<input id="na-school" maxlength="60"></label>
+          <label>说明<input id="na-note" maxlength="500" placeholder="biz 可留空，导入文章时自动识别"></label>
+          <button type="submit" class="primary">添加</button>
+        </form>
+      </details>
+    </aside>
+
+    <section>
+      <div class="panel">
+        <h2>导入公众号文章 <a href="/recruit">手动导入活动 →</a></h2>
+        <div class="hint">粘贴公开文章链接；只抓这一篇，不批量监控。导入后记录标题、时间、摘要，并可把解析出的活动保存到招聘库。</div>
+        <div class="grid2" style="margin-top:10px">
+          <label>归属公众号<select id="import-account"><option value="">自动识别 biz</option></select></label>
+          <label>文章链接<input id="import-url" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off"></label>
+        </div>
+        <label style="margin-top:10px">正文粘贴（微信要求验证时，把推文内容粘贴到这里）<textarea id="import-text" placeholder="可留空；链接抓不到正文时再粘贴"></textarea></label>
+        <div class="row" style="margin-top:10px"><button id="import-btn" class="primary">抓取并解析</button><span id="import-status" class="hint"></span></div>
+        <div id="draft-box" class="panel" style="margin:14px 0 0;padding:12px" hidden>
+          <h2>识别出的活动（确认后保存）</h2>
+          <div class="grid2">
+            <label>标题<input id="d-title" maxlength="200"></label>
+            <label>开始时间<input id="d-start" type="datetime-local"></label>
+            <label>地点<input id="d-venue" maxlength="120"></label>
+            <label>城市<input id="d-city" maxlength="30"></label>
+            <label>单位<input id="d-company" maxlength="120"></label>
+            <label>类型<select id="d-kind"><option>宣讲会</option><option>双选会</option><option>就业指导</option><option>招聘信息</option><option>其他</option></select></label>
+          </div>
+          <label>备注<textarea id="d-notes" style="min-height:60px"></textarea></label>
+          <div class="row"><button id="save-event" class="primary">保存为招聘活动</button><span class="hint">保存后可去机会日历添加招聘项目。</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>文章记录</h2>
+        <div id="article-list"><div class="empty">还没有导入文章</div></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="gate" id="gate" hidden>
+  <div class="box">
+    <h3>请先登录</h3>
+    <p class="hint">公众号文章只保存在本机，需要登录后查看。</p>
+    <p><a href="/chat" style="display:inline-block;background:var(--green);color:#fff;border-radius:9px;padding:8px 16px">去登录</a></p>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = 'SESSION_TOKEN';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const toast = t => { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 3200); };
+const fmt = iso => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
+let state = {accounts: [], articles: [], stats: {}, currentArticle: null, selectedAccount: ''};
+
+async function api(prefix, path, body) {
+  const r = await fetch('/api/' + prefix + '/' + path, {method: body ? 'POST' : 'GET', headers: {'x-career-token': TOKEN, 'content-type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { const e = new Error('请先登录'); e.needLogin = true; throw e; }
+  if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+function renderAccounts() {
+  $('#wechat-stats').textContent = (state.stats.accounts || 0) + ' 个 / ' + (state.stats.articles || 0) + ' 篇';
+  if (!state.accounts.length) { $('#account-list').innerHTML = '<div class="empty">还没有公众号</div>'; return; }
+  $('#account-list').innerHTML = state.accounts.map(a => `<div class="account ${state.selectedAccount === a.id ? 'selected' : ''}" data-account="${esc(a.id)}">
+    <b>${esc(a.name)}</b><div class="meta">${esc(a.school || '未填学校')} · ${a.articles} 篇</div></div>`).join('');
+  document.querySelectorAll('[data-account]').forEach(el => el.onclick = () => { state.selectedAccount = el.dataset.account; renderAccounts(); renderArticles(); });
+  const sel = $('#import-account');
+  sel.innerHTML = '<option value="">自动识别 biz</option>' + state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+}
+
+function renderArticles() {
+  const list = state.selectedAccount ? state.articles.filter(a => a.accountId === state.selectedAccount) : state.articles;
+  if (!list.length) { $('#article-list').innerHTML = '<div class="empty">还没有文章记录</div>'; return; }
+  const accountName = id => state.accounts.find(a => a.id === id)?.name || '未归类';
+  $('#article-list').innerHTML = list.map(a => `<article class="article">
+    <b><a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">${esc(a.title)}</a></b>
+    <div class="meta">${esc(accountName(a.accountId))} · ${esc(fmt(a.publishedAt || a.createdAt))}${a.eventId ? ' · 已关联活动' : ''}</div>
+    <div class="row"><button data-import-again="${esc(a.url)}">重新解析</button><button class="danger" data-del-article="${esc(a.id)}">删除</button></div>
+  </article>`).join('');
+  document.querySelectorAll('[data-import-again]').forEach(b => b.onclick = () => { $('#import-url').value = b.dataset.importAgain; $('#import-btn').click(); });
+  document.querySelectorAll('[data-del-article]').forEach(b => b.onclick = async () => {
+    if (!confirm('删除这条文章记录？')) return;
+    try { await api('wechat', 'articles/' + b.dataset.delArticle + '/delete', {}); await load(); toast('已删除'); } catch (e) { toast(e.message); }
+  });
+}
+
+function fillDraft(draft) {
+  $('#d-title').value = draft.title || '';
+  $('#d-start').value = draft.startAt ? draft.startAt.slice(0, 16) : '';
+  $('#d-venue').value = draft.venue || '';
+  $('#d-city').value = draft.city || '';
+  $('#d-company').value = draft.company || '';
+  $('#d-kind').value = draft.kind || '其他';
+  $('#d-notes').value = draft.notes || '';
+  $('#draft-box').hidden = false;
+}
+
+async function load() {
+  const d = await api('wechat', 'accounts');
+  state.accounts = d.accounts || [];
+  state.articles = d.articles || [];
+  state.stats = d.stats || {};
+  renderAccounts();
+  renderArticles();
+}
+
+async function boot() {
+  try { await api('auth', 'me'); }
+  catch (e) { if (e.needLogin) { $('#gate').hidden = false; $('#main').style.visibility = 'hidden'; return; } toast(e.message); return; }
+  try { await load(); } catch (e) { toast(e.message); }
+}
+
+$('#import-btn').onclick = async () => {
+  const url = $('#import-url').value.trim();
+  if (!url) { toast('请填写文章链接'); return; }
+  $('#import-status').textContent = '正在抓取…';
+  try {
+    const d = await api('wechat', 'articles/import', {url, accountId: $('#import-account').value, text: $('#import-text').value});
+    state.currentArticle = d.article;
+    fillDraft(d.draft);
+    $('#import-status').textContent = '已记录：' + d.article.title;
+    await load();
+    toast('文章已记录');
+  } catch (e) { $('#import-status').textContent = e.message; toast(e.message); }
+};
+
+$('#save-event').onclick = async () => {
+  const start = $('#d-start').value;
+  if (!start) { toast('请填写开始时间'); return; }
+  try {
+    const startAt = start.length === 16 ? start + ':00+08:00' : start;
+    const r = await fetch('/api/recruit/manual/save', {method: 'POST', headers: {'x-career-token': TOKEN, 'content-type': 'application/json'}, body: JSON.stringify({
+      title: $('#d-title').value, startAt, venue: $('#d-venue').value, city: $('#d-city').value,
+      company: $('#d-company').value, kind: $('#d-kind').value, school: '公众号导入',
+      notes: $('#d-notes').value, sourceUrl: state.currentArticle?.url || '', rawText: state.currentArticle?.content || ''
+    })});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '保存失败');
+    if (state.currentArticle) await api('wechat', 'articles/' + state.currentArticle.id + '/link', {eventId: d.event.id});
+    $('#draft-box').hidden = true;
+    toast('已保存到招聘活动');
+    await load();
+  } catch (e) { toast(e.message); }
+};
+
+$('#new-account').onsubmit = async e => {
+  e.preventDefault();
+  try { await api('wechat', 'accounts', {name: $('#na-name').value, school: $('#na-school').value, note: $('#na-note').value}); $('#new-account').reset(); await load(); toast('已添加'); }
+  catch (err) { toast(err.message); }
+};
+$('#refresh').onclick = () => load().then(() => toast('已刷新')).catch(e => toast(e.message));
+boot();
+</script>
+</body>
+</html>

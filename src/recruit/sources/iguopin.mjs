@@ -8,7 +8,8 @@ export default {
   channel: '官方平台',
   kind: '招聘信息',
   mode: 'browser',
+  capabilities: {list: 'browser', detail: 'none', projects: 'none'},
   enabled: false,
   listUrl: 'https://www.iguopin.com/',
-  note: '央国企校招聚合，页面为前端渲染。'
+  note: "央国企校招聚合，前端渲染/需登录；作为可选平台源。"
 };

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server/index.mjs",
     "start:lan": "node scripts/launch.mjs --lan",
-    "test": "node --test tests/core.test.mjs tests/api-model.test.mjs tests/isolation.test.mjs tests/recruit.test.mjs tests/paths.test.mjs tests/tools.test.mjs tests/memory.test.mjs tests/skills.test.mjs tests/sources.test.mjs tests/lifecycle.test.mjs tests/resume.test.mjs tests/backup.test.mjs tests/manual.test.mjs tests/company.test.mjs tests/docx.test.mjs",
+    "test": "node --test tests/core.test.mjs tests/api-model.test.mjs tests/isolation.test.mjs tests/recruit.test.mjs tests/paths.test.mjs tests/tools.test.mjs tests/memory.test.mjs tests/skills.test.mjs tests/sources.test.mjs tests/lifecycle.test.mjs tests/resume.test.mjs tests/backup.test.mjs tests/manual.test.mjs tests/company.test.mjs tests/docx.test.mjs tests/platform.test.mjs tests/projects.test.mjs tests/wechat.test.mjs tests/swpu-jobfair.test.mjs tests/collect-projects.test.mjs tests/scu-jobfair.test.mjs tests/uestc.test.mjs tests/project-workflow.test.mjs tests/wechat-harvest.test.mjs tests/source-manual.test.mjs",
     "check": "node scripts/check.mjs",
     "tools": "node scripts/list-tools.mjs",
     "collect": "node src/recruit/cli.mjs collect",
