@@ -21,14 +21,16 @@ function decide(body) {
   if (body.tools?.length && /请调用 career_platform_status/.test(userText)) {
     return {toolCalls: [{id: 'call_career_platform_status', name: 'career_platform_status', args: '{}'}]};
   }
+  // 需要草稿的用例：执行与复核阶段都保留 artifact，模拟任务卡上的草稿区块。
+  const base = /生成草稿/.test(all) ? {...FINAL, artifact: {title: '双选会草稿', content: '活动与单位待确认'}} : FINAL;
   if (all.includes('规划阶段')) {
     return {text: JSON.stringify({goal: '回答测试问题', steps: ['理解需求', '给出答复'], needsSearch: false, deliverable: '一段文字'})};
   }
-  if (all.includes('复核阶段')) return {text: JSON.stringify(FINAL)};
-  return {text: JSON.stringify(FINAL)};
+  if (all.includes('复核阶段')) return {text: JSON.stringify(base)};
+  return {text: JSON.stringify(base)};
 }
 
-export async function startMockOpenAI({port = 0} = {}) {  const state = {requests: [], failNext: 0, status: 200};
+export async function startMockOpenAI({port = 0, delayMs = 0} = {}) {  const state = {requests: [], failNext: 0, status: 200};
   const server = http.createServer(async (req, res) => {
     if (!req.url.startsWith('/v1/chat/completions')) { res.writeHead(404); res.end('{}'); return; }
     let raw = '';
@@ -39,6 +41,7 @@ export async function startMockOpenAI({port = 0} = {}) {  const state = {request
     if (state.status && state.status !== 200) { res.writeHead(state.status, {'content-type': 'application/json'}); res.end('{"error":"mock status"}'); return; }
     if (state.failNext > 0) { state.failNext--; res.writeHead(429, {'content-type': 'application/json'}); res.end('{"error":"rate limited"}'); return; }
     const answer = decide(body);
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
 
     if (body.stream) {
       res.writeHead(200, {'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache'});
