@@ -32,7 +32,12 @@ export function sourceHealth(source) {
     mode: source.mode,
     category: source.category,
     note: source.note || '',
-    fallback: source.fallback || ''
+    fallback: source.fallback || '',
+    capabilities: source.capabilities || {
+      list: source.mode,
+      detail: source.detail ? 'http' : 'none',
+      projects: typeof source.fetchProjects === 'function' ? 'custom' : 'none'
+    }
   };
 }
 

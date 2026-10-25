@@ -35,7 +35,7 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   if (method === 'GET') {
     if (pathname === 'sources') {
       const data = withStore(dir, store => ({sources: store.sourceStates(), runs: store.recentRuns(10), stats: store.stats()}));
-      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || ''}]));
+      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', capabilities: s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}}]));
       return {json: {...data, catalog}};
     }
     if (pathname === 'events') {

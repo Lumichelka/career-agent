@@ -85,3 +85,31 @@ test('API：批量粘贴多个招聘项目', async () => {
     assert.equal(out.status, 400);
   });
 });
+
+test('来源项目同步：幂等、手工保留、连续缺失移除', async () => {
+  await withDir(async dir => {
+    const store = RecruitStore.open(join(dir, 'recruit.db'));
+    try {
+      store.upsertEvent(baseEvent());
+      const eventId = 'a'.repeat(24);
+      let r = store.syncProjects(eventId, 'swpu-jobfair', [
+        {company: '甲公司', title: '数据分析', sourceKey: '1'},
+        {company: '乙公司', title: '产品经理', sourceKey: '2'}
+      ]);
+      assert.equal(r.created, 2);
+      r = store.syncProjects(eventId, 'swpu-jobfair', [
+        {company: '甲公司', title: '数据分析（更新）', sourceKey: '1'},
+        {company: '乙公司', title: '产品经理', sourceKey: '2'}
+      ]);
+      assert.equal(r.updated, 2);
+      const manual = store.upsertProject({eventId, company: '手工单位', title: '手工岗位'});
+      assert.equal(manual.sourceId, '');
+      for (let i = 0; i < 3; i++) store.syncProjects(eventId, 'swpu-jobfair', [{company: '甲公司', title: '数据分析（更新）', sourceKey: '1'}]);
+      const projects = store.listProjects(eventId).filter(p => p.status === 'active');
+      assert.equal(projects.some(p => p.company === '乙公司'), false);
+      assert.equal(projects.some(p => p.id === manual.id), true);
+      const events = store.listEvents({from: '2026-10-01T00:00:00+08:00', to: '2026-12-01T00:00:00+08:00', withProjects: true});
+      assert.equal(events[0].projects.some(p => p.company === '乙公司'), false);
+    } finally { store.close(); }
+  });
+});

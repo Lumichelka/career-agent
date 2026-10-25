@@ -8,7 +8,7 @@ try {
 }
 import {dirname} from 'node:path';
 import {mkdirSync} from 'node:fs';
-import {randomUUID} from 'node:crypto';
+import {randomUUID, createHash} from 'node:crypto';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources(
@@ -34,7 +34,10 @@ CREATE TABLE IF NOT EXISTS runs(
 CREATE TABLE IF NOT EXISTS event_projects(
   id TEXT PRIMARY KEY, event_id TEXT NOT NULL, company TEXT, title TEXT,
   positions TEXT, requirements TEXT, apply_mode TEXT, apply_url TEXT,
-  source_url TEXT, notes TEXT, created_at TEXT, updated_at TEXT
+  source_url TEXT, notes TEXT, source_id TEXT, source_key TEXT,
+  status TEXT DEFAULT 'active', confidence REAL DEFAULT 0.8,
+  first_seen_at TEXT, last_seen_at TEXT, missing_runs INTEGER DEFAULT 0,
+  raw_text TEXT, created_at TEXT, updated_at TEXT
 );
 CREATE TABLE IF NOT EXISTS raw_pages(
   url TEXT PRIMARY KEY, source_id TEXT, title TEXT, text TEXT, fetched_at TEXT, hash TEXT
@@ -80,6 +83,19 @@ export class RecruitStore {
     this.db.exec("UPDATE events SET cross_sources=source_id WHERE cross_sources IS NULL OR cross_sources=''");
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_projects_event ON event_projects(event_id)');
+    const pcols = new Set(this.db.prepare('PRAGMA table_info(event_projects)').all().map(r => r.name));
+    const pMig = [
+      ['source_id', 'TEXT'], ['source_key', 'TEXT'], ['status', "TEXT DEFAULT 'active'"],
+      ['confidence', 'REAL DEFAULT 0.8'], ['first_seen_at', 'TEXT'], ['last_seen_at', 'TEXT'],
+      ['missing_runs', 'INTEGER DEFAULT 0'], ['raw_text', 'TEXT']
+    ];
+    for (const [name, ddl] of pMig) {
+      if (!pcols.has(name)) this.db.exec(`ALTER TABLE event_projects ADD COLUMN ${name} ${ddl}`);
+    }
+    this.db.exec("UPDATE event_projects SET status='active' WHERE status IS NULL OR status=''");
+    this.db.exec("UPDATE event_projects SET first_seen_at=created_at WHERE first_seen_at IS NULL");
+    this.db.exec("UPDATE event_projects SET last_seen_at=updated_at WHERE last_seen_at IS NULL");
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_source ON event_projects(event_id, source_id, source_key)');
   }
 
   syncSources(sources) {
@@ -172,7 +188,7 @@ export class RecruitStore {
     const events = this.db.prepare(sql).all(...args, limit).map(rowToEvent);
     if (withProjects && events.length) {
       const ids = events.map(e => e.id);
-      const rows = this.db.prepare(`SELECT * FROM event_projects WHERE event_id IN (${ids.map(() => '?').join(',')}) ORDER BY created_at ASC`).all(...ids);
+      const rows = this.db.prepare(`SELECT * FROM event_projects WHERE event_id IN (${ids.map(() => '?').join(',')}) AND status!='removed' ORDER BY created_at ASC`).all(...ids);
       const byEvent = new Map();
       for (const row of rows) {
         if (!byEvent.has(row.event_id)) byEvent.set(row.event_id, []);
@@ -200,21 +216,70 @@ export class RecruitStore {
       applyMode: String(input.applyMode || '').trim().slice(0, 60),
       applyUrl: String(input.applyUrl || '').trim().slice(0, 500),
       sourceUrl: String(input.sourceUrl || '').trim().slice(0, 500),
-      notes: String(input.notes || '').trim().slice(0, 2000)
+      notes: String(input.notes || '').trim().slice(0, 2000),
+      sourceId: input.sourceId ? String(input.sourceId).slice(0, 80) : null,
+      sourceKey: input.sourceKey ? String(input.sourceKey).slice(0, 200) : null,
+      confidence: Number.isFinite(Number(input.confidence)) ? Number(input.confidence) : 0.8,
+      rawText: String(input.rawText || '').slice(0, 4000)
     };
     const now = new Date().toISOString();
     if (input.id) {
       const existing = this.db.prepare('SELECT id FROM event_projects WHERE id=?').get(input.id);
       if (!existing) throw new Error('招聘项目不存在');
-      this.db.prepare(`UPDATE event_projects SET company=?,title=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,notes=?,updated_at=? WHERE id=?`)
-        .run(data.company, data.title, data.positions, data.requirements, data.applyMode, data.applyUrl, data.sourceUrl, data.notes, now, input.id);
+      this.db.prepare(`UPDATE event_projects SET company=?,title=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,notes=?,updated_at=?,last_seen_at=?,status='active',missing_runs=0 WHERE id=?`)
+        .run(data.company, data.title, data.positions, data.requirements, data.applyMode, data.applyUrl, data.sourceUrl, data.notes, now, now, input.id);
       return rowToProject(this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(input.id));
     }
     const id = randomUUID();
-    this.db.prepare(`INSERT INTO event_projects(id,event_id,company,title,positions,requirements,apply_mode,apply_url,source_url,notes,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id, eventId, data.company, data.title, data.positions, data.requirements, data.applyMode, data.applyUrl, data.sourceUrl, data.notes, now, now);
+    this.db.prepare(`INSERT INTO event_projects(id,event_id,company,title,positions,requirements,apply_mode,apply_url,source_url,notes,source_id,source_key,status,confidence,first_seen_at,last_seen_at,missing_runs,raw_text,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(id, eventId, data.company, data.title, data.positions, data.requirements, data.applyMode, data.applyUrl, data.sourceUrl, data.notes,
+        data.sourceId, data.sourceKey, 'active', data.confidence, now, now, 0, data.rawText, now, now);
     return rowToProject(this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(id));
+  }
+
+  // 来源同步：按 sourceKey 幂等；手工项目（source_id 为空）永不删除。
+  syncProjects(eventId, sourceId, projects) {
+    if (!eventId || !sourceId) throw new Error('项目和来源必填');
+    const now = new Date().toISOString();
+    const seen = [];
+    const result = {created: 0, updated: 0, kept: 0, removed: 0, total: 0};
+    for (const p of (projects || []).slice(0, 500)) {
+      const company = String(p.company || '').trim().slice(0, 120);
+      const title = String(p.title || '').trim().slice(0, 200);
+      if (!company && !title) continue;
+      const sourceKey = String(p.sourceKey || createHash('sha1').update([sourceId, company, title, p.sourceUrl || ''].join('|')).digest('hex').slice(0, 32));
+      const existing = this.db.prepare('SELECT id FROM event_projects WHERE event_id=? AND source_id=? AND source_key=?').get(eventId, sourceId, sourceKey);
+      if (existing) {
+        this.db.prepare(`UPDATE event_projects SET company=?,title=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,notes=?,confidence=?,raw_text=?,status='active',missing_runs=0,last_seen_at=?,updated_at=? WHERE id=?`)
+          .run(company, title, String(p.positions || '').slice(0, 2000), String(p.requirements || '').slice(0, 4000),
+            String(p.applyMode || '').slice(0, 60), String(p.applyUrl || '').slice(0, 500), String(p.sourceUrl || '').slice(0, 500),
+            String(p.notes || '').slice(0, 2000), Number.isFinite(Number(p.confidence)) ? Number(p.confidence) : 0.8,
+            String(p.rawText || '').slice(0, 4000), now, now, existing.id);
+        result.updated++;
+      } else {
+        const id = randomUUID();
+        this.db.prepare(`INSERT INTO event_projects(id,event_id,company,title,positions,requirements,apply_mode,apply_url,source_url,notes,source_id,source_key,status,confidence,first_seen_at,last_seen_at,missing_runs,raw_text,created_at,updated_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`)
+          .run(id, eventId, company, title, String(p.positions || '').slice(0, 2000), String(p.requirements || '').slice(0, 4000),
+            String(p.applyMode || '').slice(0, 60), String(p.applyUrl || '').slice(0, 500), String(p.sourceUrl || '').slice(0, 500),
+            String(p.notes || '').slice(0, 2000), sourceId, sourceKey, 'active',
+            Number.isFinite(Number(p.confidence)) ? Number(p.confidence) : 0.8, now, String(p.rawText || '').slice(0, 4000), now, now);
+        result.created++;
+      }
+      seen.push(sourceKey);
+    }
+    const rows = this.db.prepare("SELECT id,missing_runs FROM event_projects WHERE event_id=? AND source_id=? AND status='active'").all(eventId, sourceId);
+    for (const row of rows) {
+      const key = this.db.prepare('SELECT source_key FROM event_projects WHERE id=?').get(row.id)?.source_key;
+      if (seen.includes(key)) continue;
+      const missing = (Number(row.missing_runs) || 0) + 1;
+      this.db.prepare('UPDATE event_projects SET missing_runs=?,status=?,last_seen_at=? WHERE id=?')
+        .run(missing, missing >= 3 ? 'removed' : 'active', now, row.id);
+      if (missing >= 3) result.removed++;
+    }
+    result.total = seen.length;
+    return result;
   }
 
   deleteProject(id) {
@@ -268,6 +333,10 @@ function rowToProject(r) {
     positions: r.positions, requirements: r.requirements,
     applyMode: r.apply_mode, applyUrl: r.apply_url,
     sourceUrl: r.source_url, notes: r.notes,
+    sourceId: r.source_id || '', sourceKey: r.source_key || '',
+    status: r.status || 'active', confidence: Number(r.confidence) || 0.8,
+    firstSeenAt: r.first_seen_at, lastSeenAt: r.last_seen_at,
+    missingRuns: Number(r.missing_runs) || 0,
     createdAt: r.created_at, updatedAt: r.updated_at
   };
 }

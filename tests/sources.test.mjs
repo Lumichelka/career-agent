@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {SOURCES, sourceById, enabledSources, CATEGORIES} from '../src/recruit/sources/index.mjs';
 
-test('源注册表：自动发现 13 个源，id 唯一', () => {
-  assert.equal(SOURCES.length, 14);
+test('源注册表：自动发现 15 个源，id 唯一', () => {
+  assert.equal(SOURCES.length, 15);
   const ids = SOURCES.map(s => s.id);
   assert.equal(new Set(ids).size, ids.length);
-  assert.equal(enabledSources().length, 8);
+  assert.equal(enabledSources().length, 9);
 });
 
 test('每个源字段完整，已接入的必须有 parseList', () => {
@@ -21,6 +21,9 @@ test('每个源字段完整，已接入的必须有 parseList', () => {
       assert.equal(typeof source.parseList, 'function', source.id + ' 已接入但没有 parseList');
     } else {
       assert.ok(source.note, source.id + ' 未接入但没有说明原因');
+    }
+    if (source.fetchProjects) {
+      assert.equal(typeof source.fetchProjects, 'function', source.id + ' fetchProjects 不是函数');
     }
   }
 });
