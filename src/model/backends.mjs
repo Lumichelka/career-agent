@@ -298,6 +298,40 @@ function candidateMessage(current, capabilities) {
   return '当前后端「' + (current.label || current.kind) + '」还没有配置好，请选择一个候选后端或先到「模型与接口设置」完成配置。';
 }
 
+// 回退建议：一次失败只给一个同能力、已配置的下一个候选；排除当前后端。
+// 顺序由 candidatesFor 保证：已配置在前 → 约每次费用升序（本机 ¥0 最前）→ 无价排后。
+export function pickFallback(entries = [], {capabilities = ['text', 'tools'], currentKind = ''} = {}) {
+  // candidatesFor 会排掉非 owner 的 Codex、视觉任务里的 Agent，并做能力过滤。
+  const card = candidatesFor(entries, capabilities)
+    .filter(item => item.configured === true)
+    .find(item => item.kind !== currentKind);
+  return card || null;
+}
+
+// 回退建议的门槛：锁定 / 本轮已有工具成功 / 已建议满 3 次 / 连续失败超过 3 次，都不给。
+// depth 由客户端在 /api/chat 里递增；streak 是服务端按会话累计的兜底计数，客户端不老实也封顶。
+export function suggestFallback({settings = {}, user = null, capabilities = ['text', 'tools'], currentKind = '', depth = 0, streak = 1, locked = false, hadToolSuccess = false} = {}) {
+  if (locked) return {ok: false, reason: 'LOCKED'};
+  if (hadToolSuccess) return {ok: false, reason: 'TOOL_SIDE_EFFECT'};
+  if (Number(depth) >= 3) return {ok: false, reason: 'DEPTH_LIMIT'};
+  if (Number(streak) > 3) return {ok: false, reason: 'FAILURE_LIMIT'};
+  const card = pickFallback(backendEntries({settings, user}), {capabilities, currentKind});
+  if (!card) return {ok: false, reason: 'NO_CANDIDATE'};
+  return {
+    ok: true,
+    code: 'FALLBACK_SUGGESTED',
+    suggestion: {
+      kind: card.kind,
+      label: card.label,
+      approxCostLabel: card.approxCostLabel || '',
+      approxCostPerCall: card.approxCostPerCall ?? null,
+      preset: card.preset || '',
+      model: card.model || '',
+      depth: Math.max(0, Number(depth) || 0)
+    }
+  };
+}
+
 // 本轮开始前解析：满足就返回 backend；不满足就停下列候选（不降级、不猜）。
 export function resolveTurn({settings = {}, choice = null, user = null, requested = '', attachments = []} = {}) {
   const capabilities = turnCapabilities(attachments);

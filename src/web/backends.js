@@ -7,7 +7,7 @@
 
   const CAP_LABELS = {text: '文本', tools: '工具', vision: '读图'};
   const STEP_LABELS = {plan: '规划', act: '执行', review: '复核', sample: '采样'};
-  const state = {info: null, lock: false, cost: null, pendingCandidates: null, pendingTimer: null};
+  const state = {info: null, lock: false, cost: null, pendingCandidates: null, pendingTimer: null, failure: null, failureTimer: null};
 
   // 与 src/model/prices.mjs 的 formatCny 保持同一口径：永远带「≈¥」。
   function formatCny(cny) {
@@ -155,6 +155,52 @@
     state.pendingTimer = setTimeout(show, 0);
   }
 
+  // 「换 X 重试（约 ¥x）」：一次失败只给这一张按钮；没有建议时只给「重试」（同后端）。
+  function fallbackLabel(suggestion) {
+    const cost = suggestion?.approxCostLabel ? '（' + suggestion.approxCostLabel + '）' : '';
+    return '换 ' + (suggestion.label || suggestion.kind) + ' 重试' + cost;
+  }
+
+  function failureHtml(failure) {
+    if (!failure || !failure.taskId) return '';
+    const suggestion = failure.suggestion;
+    if (suggestion && suggestion.kind) {
+      return '<section class="turn-actions" role="group" aria-label="失败后的可用操作">'
+        + '<button type="button" class="fallback-retry" data-fallback-task="' + esc(failure.taskId) + '" data-fallback-kind="' + esc(suggestion.kind) + '" data-fallback-message="' + esc(suggestion.message || '') + '">' + esc(fallbackLabel(suggestion)) + '</button>'
+        + '</section>';
+    }
+    if (!failure.error) return '';
+    return '<section class="turn-actions" role="group" aria-label="失败后的可用操作">'
+      + '<button type="button" data-retry-same="1">重试</button>'
+      + '</section>';
+  }
+
+  function renderFailure() {
+    const messages = $('#messages');
+    if (!messages) return;
+    messages.querySelectorAll('.turn-actions').forEach(node => node.remove());
+    const html = failureHtml(state.failure);
+    if (html) {
+      messages.insertAdjacentHTML('beforeend', html);
+      messages.scrollTop = messages.scrollHeight;
+    }
+  }
+
+  function scheduleFailure() {
+    clearTimeout(state.failureTimer);
+    const deadline = Date.now() + 15000;
+    // 和候选卡一样，等这一轮收尾（输入与附件回填）后再出按钮，点的时候 busy 已经为 false。
+    const show = () => {
+      if (!state.failure) return;
+      if (!turnIdle() && Date.now() < deadline) {
+        state.failureTimer = setTimeout(show, 80);
+        return;
+      }
+      renderFailure();
+    };
+    state.failureTimer = setTimeout(show, 0);
+  }
+
   async function waitUntilIdle(timeoutMs = 15000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -164,17 +210,52 @@
     return turnIdle();
   }
 
+  function clearFailure() {
+    clearTimeout(state.failureTimer);
+    state.failure = null;
+    document.querySelectorAll('.turn-actions').forEach(node => node.remove());
+  }
+
   window.addEventListener('career:task', event => {
     const detail = event.detail || {};
-    if (detail.type === 'candidate_required') { scheduleCandidates(detail); return; }
+    if (detail.type === 'candidate_required') {
+      state.failure = null;
+      scheduleCandidates(detail);
+      return;
+    }
+    if (detail.type === 'fallback_suggested') {
+      state.failure = {...(state.failure || {}), taskId: detail.taskId, suggestion: detail};
+      scheduleFailure();
+      return;
+    }
+    if (detail.type === 'error') {
+      // 候选卡的停止条件由候选 UI 负责，不再额外给「重试」。
+      if (detail.code === 'CANDIDATE_REQUIRED') return;
+      state.failure = {...(state.failure || {}), taskId: detail.taskId || state.failure?.taskId || '', error: detail.text || ''};
+      scheduleFailure();
+      return;
+    }
     if (detail.type === 'task' && detail.state === 'running') {
       state.cost = null;
       state.pendingCandidates = null;
+      clearFailure();
       renderBar();
+      return;
+    }
+    if (detail.type === 'task' && detail.state === 'failed') {
+      if (!state.failure?.error) {
+        state.failure = {...(state.failure || {}), taskId: detail.taskId};
+        scheduleFailure();
+      }
+      return;
+    }
+    if (detail.type === 'task' && (detail.state === 'cancelled' || detail.state === 'succeeded')) {
+      clearFailure();
       return;
     }
     if (detail.type === 'done') {
       state.pendingCandidates = null;
+      clearFailure();
       const last = detail.session?.messages?.at(-1);
       state.cost = totalCost(last?.calls);
       renderBar();
@@ -211,6 +292,57 @@
     }
   });
 
+  // 一次点击 = 确认换后端 + 用同一条消息/附件重跑整轮；建议由服务端绑定失败任务，只能消费一次。
+  document.addEventListener('click', async event => {
+    const button = event.target.closest('[data-fallback-task]');
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    button.disabled = true;
+    try {
+      const result = await zx.api('backends/fallback', {taskId: button.dataset.fallbackTask, kind: button.dataset.fallbackKind});
+      window.__fallbackDepth = (Number(result.fallback?.depth) || 0) + 1;
+      await refresh();
+      // 从抽屉（可能刷新过页面）点按钮时，先切回失败任务所在的会话，再重跑。
+      const sessionId = button.dataset.fallbackSession || '';
+      if (sessionId && window.__zxLoadSession && window.__zx.currentSession?.()?.id !== sessionId) await window.__zxLoadSession(sessionId);
+      clearFailure();
+      if (!(await waitUntilIdle())) throw new Error('上一轮还在收尾，请稍后重试。');
+      const input = $('#input');
+      const message = button.dataset.fallbackMessage || '';
+      if (input && !input.value.trim() && message) input.value = message;
+      const attachments = $('#attachments');
+      if (input && !input.value.trim() && !(attachments && attachments.children.length)) {
+        throw new Error('消息没有留在输入框里，请重新输入这条消息后再发送。');
+      }
+      $('#chat')?.requestSubmit();
+    } catch (error) {
+      button.disabled = false;
+      window.__fallbackDepth = 0;
+      zx.showError?.(error.message);
+    }
+  });
+
+  // 没有换后端建议时（本轮已有工具成功 / 锁定 / 建议用满）：只重试同一后端。
+  document.addEventListener('click', async event => {
+    const button = event.target.closest('[data-retry-same]');
+    if (!button || button.disabled) return;
+    event.preventDefault();
+    button.disabled = true;
+    try {
+      window.__fallbackDepth = 0;
+      clearFailure();
+      if (!(await waitUntilIdle())) throw new Error('上一轮还在收尾，请稍后重试。');
+      const input = $('#input');
+      if (input && !input.value.trim() && !($('#attachments')?.children.length)) {
+        throw new Error('消息没有留在输入框里，请重新输入后再发送。');
+      }
+      $('#chat')?.requestSubmit();
+    } catch (error) {
+      button.disabled = false;
+      zx.showError?.(error.message);
+    }
+  });
+
   window.__turnLock = () => state.lock === true;
   window.__backendState = () => ({lock: state.lock, cost: state.cost, info: state.info});
 
@@ -232,6 +364,9 @@
 .candidate-card .candidate-action{font-size:10px;color:#8a6a2f}
 .candidate-card.unconfigured{background:#f7faf7}
 .candidate-card[disabled]{opacity:.6}
+.turn-actions{display:flex;gap:8px;flex-wrap:wrap;margin:-6px 0 22px;padding:0 2px;min-width:0}
+.turn-actions button{border:1px solid #9fc4ac;background:#eaf5ed;color:#1f5a41;border-radius:10px;padding:7px 13px;font-size:12px;font-weight:600;max-width:100%;overflow-wrap:anywhere;text-align:left}
+.turn-actions button[disabled]{opacity:.55;cursor:default}
 .calls{margin-top:14px;border:1px solid #e2eae4;background:#fbfdfb;border-radius:11px;padding:8px 12px;min-width:0;max-width:100%}
 .calls summary{cursor:pointer;font-size:11px;color:#436b57;font-weight:600;overflow-wrap:anywhere}
 .calls .table-scroll{overflow-x:auto;margin-top:8px;max-width:100%}

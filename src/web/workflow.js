@@ -72,6 +72,17 @@ function undoBlock(task) {
   return '<section class="task-block task-undo"><h5>撤销摘要</h5><p class="placeholder">' + escape(text) + '</p><div class="task-actions">' + button + '</div></section>';
 }
 
+// 回退建议落在失败任务卡上：刷新/重开抽屉后仍看得到；点击与对话区共用同一个按钮动作。
+function fallbackBlock(task) {
+  const suggestion = task.fallback;
+  if (!suggestion || !suggestion.kind) return '';
+  const label = '换 ' + (suggestion.label || suggestion.kind) + ' 重试' + (suggestion.approxCostLabel ? '（' + suggestion.approxCostLabel + '）' : '');
+  if (suggestion.consumedAt) {
+    return '<section class="task-block task-fallback"><h5>回退建议</h5><p class="placeholder">已切换到 ' + escape(suggestion.label || suggestion.kind) + '，等待这一轮重跑。</p></section>';
+  }
+  return '<section class="task-block task-fallback"><h5>回退建议</h5><div class="task-actions"><button type="button" data-fallback-task="' + escape(task.id) + '" data-fallback-kind="' + escape(suggestion.kind) + '" data-fallback-session="' + escape(task.sessionId || '') + '" data-fallback-message="' + escape(suggestion.message || '') + '">' + escape(label) + '</button></div></section>';
+}
+
 function card(task) {
   const counts = task.counts || {};
   const canStop = ['queued', 'running', 'waiting_confirmation', 'blocked'].includes(task.state);
@@ -85,6 +96,7 @@ function card(task) {
     + '<p class="task-phase">' + escape(task.phase || '') + '</p>'
     + '<div class="task-meta">自动写入 ' + (Number(counts.writes) || 0) + ' 条 · 批次 ' + (Number(counts.batches) || 0) + ' · 工具 ' + (Number(counts.tools) || 0) + ' · 证据 ' + (Number(counts.evidence) || 0) + ' · 草稿 ' + (Number(counts.drafts) || 0) + '</div>'
     + error
+    + fallbackBlock(task)
     + evidenceBlock(task)
     + draftBlock(task)
     + undoBlock(task)

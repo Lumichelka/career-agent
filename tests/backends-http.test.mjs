@@ -171,7 +171,7 @@ test('HTTP：截图遇到无视觉的 Codex 停下出候选卡，选视觉 API �
   assert.equal(overrideCalls[0].backend.kind, 'api');
 });
 
-test('HTTP：锁定时失败不回退到备用接口，也不给换后端建议', async t => {
+test('HTTP：失败不静默回退到备用接口，锁定时也不给换后端建议', async t => {
   const primary = await startMockOpenAI();
   const backup = await startMockOpenAI();
   t.after(async () => { await primary.close(); await backup.close(); });
@@ -190,11 +190,13 @@ test('HTTP：锁定时失败不回退到备用接口，也不给换后端建议'
   assert.ok(locked.some(event => event.type === 'error'));
   assert.equal(backup.state.requests.length, 0, '锁定时不能静默回退到备用接口');
 
-  // 不锁定时保留现有传输级备用链路，但 #33 的「换 X 重试」建议还没实现。
+  // #33：备用接口配置保留但不自动生效；换后端必须是一次点击。alice 非 owner 没有其他已配置后端，
+  // 所以这里既不能静默请求备用接口，也不该凭空给建议。
   const unlocked = await chat(app, alice.cookie, session.id, '不锁这一轮');
-  assert.equal(unlocked.at(-1).type, 'done');
-  assert.ok(backup.state.requests.length > 0, '未锁定时现有备用接口仍可用');
-  assert.ok(!unlocked.some(event => event.type === 'fallback_suggested'));
+  assert.equal(unlocked.at(-1).type, 'error');
+  assert.equal(backup.state.requests.length, 0, '未锁定时也不能静默回退到备用接口');
+  assert.ok(!unlocked.some(event => event.type === 'fallback_suggested'), '没有其他已配置后端时不给建议');
+  assert.equal(unlocked.filter(event => event.type === 'task').at(-1).state, 'failed');
 });
 
 test('HTTP：供应商没回 usage 显示「未回传」，未知价只留 tokens', async t => {
