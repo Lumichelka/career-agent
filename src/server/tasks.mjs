@@ -141,7 +141,7 @@ function abortRace(signal) {
 // 记录对外只保留任务本身；用户身份从认证里来，不跟随响应泄露。
 export function publicTask(task) {
   const {userId, ...rest} = task;
-  return {...rest, counts: {...task.counts}, evidence: [...(task.evidence || [])], drafts: (task.drafts || []).map(draft => ({...draft}))};
+  return {...rest, counts: {...task.counts}, evidence: [...(task.evidence || [])], drafts: (task.drafts || []).map(draft => ({...draft})), fallback: task.fallback ? {...task.fallback} : null};
 }
 
 export class TaskManager {
@@ -181,6 +181,7 @@ export class TaskManager {
       drafts: [],
       error: null,
       undo: null,
+      fallback: null,
       createdAt: at,
       startedAt: null,
       updatedAt: at,
@@ -200,7 +201,14 @@ export class TaskManager {
       await mkdir(dirname(file), {recursive: true});
       const tmp = file + '.tmp';
       await writeFile(tmp, payload, 'utf8');
-      await rename(tmp, file);
+      // Windows 上杀毒/索引偶尔会短暂占用目标文件，rename 报 EPERM/EBUSY；重试几次再判定失败。
+      for (let attempt = 0; ; attempt += 1) {
+        try { await rename(tmp, file); return; }
+        catch (error) {
+          if (attempt >= 4 || !['EPERM', 'EBUSY', 'EACCES'].includes(error?.code)) throw error;
+          await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
+        }
+      }
     });
     this.writes.set(task.id, next);
     return next;
@@ -248,6 +256,29 @@ export class TaskManager {
     return {ok: false, reason: 'missing'};
   }
 
+  // 回退建议绑定：只有失败任务的建议能被点击一次；它记录当时算出的后端与深度。
+  async checkFallback(userId, {taskId, kind} = {}) {
+    const task = await this.read(userId, String(taskId || ''));
+    if (!task) return {ok: false, reason: 'missing', status: 404};
+    const suggestion = task.fallback;
+    if (!suggestion) return {ok: false, reason: 'no-suggestion', status: 409, task: publicTask(task)};
+    if (task.state !== 'failed') return {ok: false, reason: 'not-failed', status: 409, task: publicTask(task)};
+    if (suggestion.consumedAt) return {ok: false, reason: 'consumed', status: 409, task: publicTask(task)};
+    if (Number(suggestion.depth) >= 3) return {ok: false, reason: 'depth-limit', status: 409, task: publicTask(task)};
+    if (String(kind || '') !== suggestion.kind) return {ok: false, reason: 'kind-mismatch', status: 409, task: publicTask(task)};
+    return {ok: true, task: publicTask(task)};
+  }
+
+  async consumeFallback(userId, {taskId, kind} = {}) {
+    const check = await this.checkFallback(userId, {taskId, kind});
+    if (!check.ok) return check;
+    const task = await this.read(userId, String(taskId));
+    task.fallback = {...task.fallback, consumedAt: nowIso()};
+    task.updatedAt = nowIso();
+    await this.persist(task);
+    return {ok: true, task: publicTask(task)};
+  }
+
   async setDraft(userId, {taskId, draftId, action}) {
     const target = {save: 'saved', discard: 'discarded'}[action];
     if (!target) return {ok: false, reason: 'invalid-action'};
@@ -262,7 +293,7 @@ export class TaskManager {
   }
 
   // 一次任务 = 排队 → 执行 → 终态；执行体拿到的 emit 会被补充 task/progress/evidence 事件。
-  async run({userId, sessionId, title = '', sourceName = '对话', signal, emit = () => {}, execute, describeError}) {
+  async run({userId, sessionId, title = '', sourceName = '对话', signal, emit = () => {}, execute, describeError, onFailure}) {
     if (typeof execute !== 'function') throw new Error('任务需要执行体');
     const task = await this.create({userId, sessionId, title, sourceName});
     const started = Date.now();
@@ -282,7 +313,8 @@ export class TaskManager {
     const snapshot = () => ({
       taskId: task.id, state: task.state, phase: task.phase, counts: {...task.counts},
       title: task.title, sourceName: task.sourceName,
-      error: task.error ? {...task.error} : null, undo: task.undo ? {...task.undo} : null
+      error: task.error ? {...task.error} : null, undo: task.undo ? {...task.undo} : null,
+      fallback: task.fallback ? {...task.fallback} : null
     });
     const emitTask = () => baseEmit({type: 'task', ...snapshot(), at: nowIso()});
     const emitProgress = extra => baseEmit({type: 'progress', taskId: task.id, state: task.state, phase: task.phase, counts: {...task.counts}, ...extra, at: nowIso()});
@@ -457,9 +489,18 @@ export class TaskManager {
         task.error = {code: error?.code || 'TASK_FAILED', message: message.slice(0, 500)};
         if (error?.recovery) task.error.recovery = String(error.recovery).slice(0, 200);
       }
+      // 回退建议由调用方按「锁定 / 副作用 / 连续失败」算出，绑定在这次失败的任务上；
+      // 建议事件先于 error 发出，前端读到错误时已经知道可以「换 X 重试」。
+      if (typeof onFailure === 'function' && task.state === 'failed') {
+        try {
+          const suggestion = await onFailure({task: publicTask(task), error});
+          if (suggestion && suggestion.kind) task.fallback = {...suggestion, taskId: task.id, createdAt: nowIso()};
+        } catch { /* 建议算不出来不影响报错 */ }
+      }
       touch();
       await this.persist(task);
       emitTask();
+      if (task.fallback) baseEmit({type: 'fallback_suggested', taskId: task.id, ...task.fallback, at: nowIso()});
       if (task.error) baseEmit({type: 'error', taskId: task.id, text: task.error.message, code: task.error.code, recovery: task.error.recovery || '', at: nowIso()});
       const finalError = task.error ? Object.assign(new Error(task.error.message), task.error) : error;
       return {task: publicTask(task), result: null, error: finalError};
