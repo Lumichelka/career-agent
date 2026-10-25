@@ -88,7 +88,10 @@ function stateChip(task) {
 function evidenceBlock(task) {
   const items = task.evidence || [];
   const list = items.length
-    ? '<ul>' + items.slice(-6).map(item => '<li>' + escape(item.label || item.kind || '证据') + '</li>').join('') + '</ul>'
+    ? '<ul>' + items.slice(-6).map(item => {
+        const label = escape(item.label || item.kind || '证据');
+        return '<li>' + (item.url ? '<a href="' + escape(item.url) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>' : label) + '</li>';
+      }).join('') + '</ul>'
     : '<p class="placeholder">暂无证据。工具调用与截图会记录在这里。</p>';
   return '<section class="task-block task-evidence"><h5>证据</h5>' + list + '</section>';
 }
