@@ -1,5 +1,7 @@
 import {join} from 'node:path';
 import {SOURCES, sourceHealth} from '../../recruit/sources/index.mjs';
+import {createWriteGateway, WriteError} from '../../writes/gateway.mjs';
+import {bulkWriteRows, normalizeSource, validateBulkPayload} from '../../recruit/bulk.mjs';
 
 function ctxDir(ctx) { return ctx.config?.recruitDir; }
 
@@ -114,4 +116,116 @@ export async function events(args, ctx) {
       }))
     };
   } finally { store.close(); }
+}
+
+const WRITE_RECOVERY = {
+  MISSING_IDEMPOTENCY_KEY: '自动写入必须带幂等键；重新发起时带上 idempotencyKey。',
+  INVALID_IDEMPOTENCY_KEY: '幂等键需为 1 到 200 个字符。',
+  IDEMPOTENCY_KEY_CONFLICT: '同一幂等键已用于不同参数；换一个新的幂等键再写。',
+  IDEMPOTENCY_IN_PROGRESS: '同一幂等键的写入还在进行；稍后重试。',
+  WRITE_LOCKED: '数据库正忙；稍后重试。',
+  AUDIT_EVENT_TOO_LARGE: '单条写入内容超过 256KB；拆分或缩小这次写入。',
+  WRITE_CONSTRAINT: '写入违反数据约束；修正数据后重试。',
+  WRITE_FAILED: '写入失败已整体回滚；稍后重试。',
+  CONFIRMATION_EXPIRED: '确认已过期，请重新发起写入并确认。',
+  CONFIRMATION_MISMATCH: '确认对应的工具或参数已变化，请重新发起并确认。',
+  CONFIRMATION_CONSUMED: '这次确认已经用过；重新发起写入。',
+  CONFIRMATION_REJECTED: '你已经拒绝过这次写入。',
+  CONFIRMATION_NOT_FOUND: '找不到这条确认记录。',
+  CONFIRMATION_PENDING: '这次写入在等待你确认。'
+};
+
+function writeFailure(error) {
+  if (error instanceof WriteError) {
+    return {
+      status: 'error',
+      code: error.code,
+      message: error.message,
+      recovery: WRITE_RECOVERY[error.code] || '稍后重试；失败时不会留下半截数据。',
+      writeStatus: error.status
+    };
+  }
+  return {
+    status: 'error',
+    code: 'TOOL_FAILED',
+    message: String(error?.message || error),
+    recovery: '稍后重试；失败时不会留下半截数据。'
+  };
+}
+
+// 自动写入：一次调用 = 一个批次；业务行、write_audit、idempotency 同库同事务。
+// 只写 events / event_projects；source_id=manual 表示手动/浏览器读取；不写公司档案。
+export async function bulkWrite(args, ctx) {
+  const dir = ctxDir(ctx);
+  if (!dir) return {status: 'unavailable', message: '当前任务没有关联招聘数据库，无法自动写入。', recovery: '请先在本机招聘库准备好数据目录。'};
+  const userId = String(ctx.config?.userId || ctx.userId || '').trim();
+  if (!userId) {
+    return {status: 'error', code: 'UNAUTHORIZED', message: '自动写入需要登录用户身份。', recovery: '请先在网页端登录后再让智能体写入。'};
+  }
+  const source = normalizeSource(args.source);
+  const invalid = validateBulkPayload(args.events, args.projects, args.source);
+  if (invalid) {
+    return {status: 'error', code: 'INVALID_ARGUMENTS', message: invalid, recovery: '按工具参数说明修正后重试。'};
+  }
+  const {RecruitStore} = await import('../../recruit/store.mjs');
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  try {
+    // 业务写入必须复用这条连接；网关在同一事务里写业务行、审计与幂等。
+    const gateway = createWriteGateway({
+      db: store.db,
+      domain: 'recruit',
+      userId,
+      actorType: ctx.config?.actorType || 'model',
+      actorRef: ctx.config?.actorRef || '',
+      taskId: ctx.config?.taskId || ctx.taskId || ''
+    });
+    const projects = args.projects || [];
+    const outcome = await gateway.write({
+      tool: 'career_recruit_bulk_write',
+      sensitivity: 'auto',
+      payload: {events: args.events, projects, source},
+      idempotencyKey: args.idempotencyKey,
+      confirmId: args.confirmId || '',
+      // 确认接口（#30）用新幂等键执行时，用 confirmationKey 指向发起确认时的原键。
+      confirmationKey: args.confirmationKey || '',
+      approveConfirmation: ctx.confirmed === true,
+      entity: 'events',
+      action: 'create',
+      sourceRef: source,
+      execute: () => bulkWriteRows({store, events: args.events, projects, source})
+    });
+    if (outcome.status === 'confirm_required') {
+      return {
+        status: 'confirm_required',
+        code: 'NEEDS_CONFIRMATION',
+        message: '这次写入需要你确认后才会落库。',
+        confirmId: outcome.confirmId,
+        preview: outcome.preview,
+        expiresAt: outcome.expiresAt,
+        recovery: '在任务卡确认后重试。'
+      };
+    }
+    const counts = {
+      rows: Number(outcome.counts?.rows) || 0,
+      created: Number(outcome.counts?.created) || 0,
+      updated: Number(outcome.counts?.updated) || 0,
+      deleted: Number(outcome.counts?.deleted) || 0,
+      skipped: Number(outcome.counts?.skipped) || 0
+    };
+    const result = {
+      status: 'ok',
+      batchId: outcome.batchId,
+      duplicate: !!outcome.duplicate,
+      confirmed: !!outcome.confirmed,
+      counts,
+      result: outcome.result || null
+    };
+    // 只有真正写入（不是幂等重放）才发 writes 事件，任务卡不会把重放算成新写入。
+    if (!outcome.duplicate) result.writeEvent = {batchId: outcome.batchId, counts};
+    return result;
+  } catch (error) {
+    return writeFailure(error);
+  } finally {
+    store.close();
+  }
 }

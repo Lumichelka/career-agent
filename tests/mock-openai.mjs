@@ -10,6 +10,20 @@ const FINAL = {
   visualization: {title: '', unit: '', items: []}
 };
 
+// 自动写入用例的固定参数：同键同参数重放、同键不同指纹、缺键三种分支。
+const BULK_EVENT = {
+  title: '西南财经大学2026届秋季双选会',
+  startAt: '2026-11-05T09:00:00+08:00',
+  school: '西南财经大学',
+  city: '成都',
+  kind: '双选会',
+  venue: '柳林校区体育馆',
+  sourceKey: 'swufe-2026-autumn'
+};
+const BULK_PROJECT = {eventIndex: 0, company: '中国银行四川省分行', title: '管理培训生', positions: '若干', applyMode: '网申'};
+const BULK_SOURCE = {sourceId: 'manual', sourceUrl: 'https://job.swufe.edu.cn/info/1', notes: '浏览器截图读取（非采集器）'};
+const bulkArgs = extra => JSON.stringify({events: [BULK_EVENT], projects: [BULK_PROJECT], source: BULK_SOURCE, idempotencyKey: 'idem-http-1', ...extra});
+
 function decide(body) {
   const messages = body.messages || [];
   const last = messages[messages.length - 1] || {role: 'user', content: ''};
@@ -20,6 +34,15 @@ function decide(body) {
   }
   if (body.tools?.length && /请调用 career_platform_status/.test(userText)) {
     return {toolCalls: [{id: 'call_career_platform_status', name: 'career_platform_status', args: '{}'}]};
+  }
+  if (body.tools?.length && /请自动写入招聘活动/.test(userText)) {
+    return {toolCalls: [{id: 'call_bulk_write', name: 'career_recruit_bulk_write', args: bulkArgs()}]};
+  }
+  if (body.tools?.length && /请自动写入另一场招聘活动/.test(userText)) {
+    return {toolCalls: [{id: 'call_bulk_write_conflict', name: 'career_recruit_bulk_write', args: bulkArgs({events: [{...BULK_EVENT, title: '西南财经大学2026届秋季双选会（另一场）'}]})}]};
+  }
+  if (body.tools?.length && /请自动写入缺少幂等键的招聘活动/.test(userText)) {
+    return {toolCalls: [{id: 'call_bulk_write_nokey', name: 'career_recruit_bulk_write', args: JSON.stringify({events: [BULK_EVENT]})}]};
   }
   // 需要草稿的用例：执行与复核阶段都保留 artifact，模拟任务卡上的草稿区块。
   const base = /生成草稿/.test(all) ? {...FINAL, artifact: {title: '双选会草稿', content: '活动与单位待确认'}} : FINAL;

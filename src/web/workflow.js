@@ -83,7 +83,7 @@ function card(task) {
     + '<div class="task-card-head"><span class="task-source" title="' + escape(task.sourceName || '对话') + '">' + escape(task.sourceName || '对话') + '</span>' + stateChip(task) + '</div>'
     + '<h4>' + escape(task.title || '求职任务') + '</h4>'
     + '<p class="task-phase">' + escape(task.phase || '') + '</p>'
-    + '<div class="task-meta">批次 ' + (Number(counts.batches) || 0) + ' · 工具 ' + (Number(counts.tools) || 0) + ' · 证据 ' + (Number(counts.evidence) || 0) + ' · 草稿 ' + (Number(counts.drafts) || 0) + '</div>'
+    + '<div class="task-meta">自动写入 ' + (Number(counts.writes) || 0) + ' 条 · 批次 ' + (Number(counts.batches) || 0) + ' · 工具 ' + (Number(counts.tools) || 0) + ' · 证据 ' + (Number(counts.evidence) || 0) + ' · 草稿 ' + (Number(counts.drafts) || 0) + '</div>'
     + error
     + evidenceBlock(task)
     + draftBlock(task)

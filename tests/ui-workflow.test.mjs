@@ -80,6 +80,7 @@ test('工作流抽屉：发消息后出现任务卡，390 宽不横向溢出，�
     assert.ok(await page.locator('#workflow-drawer .task-evidence').count() >= 1, '任务卡要有证据区块');
     assert.ok(await page.locator('#workflow-drawer .task-drafts').count() >= 1, '任务卡要有草稿区块');
     assert.ok(await page.locator('#workflow-drawer .task-undo').count() >= 1, '任务卡要有撤销摘要占位');
+    assert.match(await firstCard.innerText(), /自动写入 \d+ 条/, '任务卡显示自动写入条数');
 
     try {
       await page.waitForFunction(
