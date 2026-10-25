@@ -55,10 +55,11 @@ export class WeChatStore {
   }
 
   listAccounts() {
-    return this.db.prepare(`SELECT a.*, COUNT(r.id) AS articles FROM wechat_accounts a
+    return this.db.prepare(`SELECT a.*, COUNT(r.id) AS articles, MAX(r.analyzed_at) AS last_analysis, SUM(CASE WHEN r.has_recruitment='yes' THEN 1 ELSE 0 END) AS recruitment_articles FROM wechat_accounts a
       LEFT JOIN wechat_articles r ON r.account_id = a.id GROUP BY a.id ORDER BY a.category, a.school`).all().map(r => ({
       id: r.id, name: r.name, school: r.school, category: r.category, biz: r.biz,
-      homeUrl: r.home_url, note: r.note, articles: Number(r.articles) || 0
+      homeUrl: r.home_url, note: r.note, articles: Number(r.articles) || 0,
+      lastAnalysis: r.last_analysis || '', recruitmentArticles: Number(r.recruitment_articles) || 0
     }));
   }
 

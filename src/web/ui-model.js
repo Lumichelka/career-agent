@@ -229,6 +229,21 @@
       d.style.textDecoration = 'none';
       platformsBtn.after(d);
     }
+    const sessionsEl = $('#sessions');
+    if (sessionsEl && !$('#session-search')) {
+      const q = document.createElement('input');
+      q.id = 'session-search';
+      q.placeholder = '搜索对话…';
+      q.setAttribute('aria-label', '搜索对话');
+      q.style.cssText = 'width:100%;margin:8px 0;padding:8px 10px;border:1px solid #dce7df;border-radius:8px;background:#fff;font:12px inherit;color:#1f3a2e';
+      sessionsEl.before(q);
+      const filter = () => {
+        const v = q.value.trim().toLowerCase();
+        sessionsEl.querySelectorAll('button').forEach(b => { b.style.display = !v || b.textContent.toLowerCase().includes(v) ? '' : 'none'; });
+      };
+      q.addEventListener('input', filter);
+      new MutationObserver(filter).observe(sessionsEl, {childList: true});
+    }
     const companyBtn = $('#company-entry');
     if (companyBtn && !$('#wechat-entry')) {
       const x = document.createElement('button');
@@ -239,4 +254,31 @@
       companyBtn.after(x);
     }
   } catch { /* 侧栏结构变化时忽略 */ }
+  function setupContextPanel() {
+    const header = document.querySelector('header');
+    if (!header || document.getElementById('context-toggle')) return;
+    const project = new URLSearchParams(location.search).get('project') || '';
+    const btn = document.createElement('button');
+    btn.id = 'context-toggle';
+    btn.textContent = '上下文';
+    btn.style.cssText = 'margin-left:10px;padding:5px 10px;border:1px solid #d5dfcd;border-radius:8px;background:#fff;color:#2d5542;font-size:11px;cursor:pointer';
+    header.appendChild(btn);
+    const panel = document.createElement('div');
+    panel.id = 'context-panel';
+    panel.hidden = true;
+    panel.style.cssText = 'position:fixed;right:18px;top:70px;width:280px;z-index:30;background:#fff;border:1px solid #dce7df;border-radius:12px;padding:12px;box-shadow:0 12px 36px #1f3a2e22;font-size:12px;line-height:1.8;color:#314b3f';
+    panel.innerHTML = '<b style="font-size:12px">当前上下文</b>' + (project ? '<div style="margin-top:6px">项目：<code style="font-size:10px">' + project.slice(0,8) + '…</code></div>' : '<div style="margin-top:6px;color:#7b8b80">还没有从日历选择项目</div>') + '<div style="margin-top:8px"><a href="/recruit">打开数据与日历 →</a></div><div><a href="/resume">我的简历</a> · <a href="/companies">公司档案</a></div><div style="color:#7b8b80;margin-top:6px">来源只来自高校/公众号；平台用于研究岗位要求与薪资。</div>';
+    document.body.appendChild(panel);
+    btn.onclick = () => { panel.hidden = !panel.hidden; };
+    if (project) {
+      panel.hidden = false;
+      const input = document.querySelector('#input');
+      if (input && !input.value.trim()) {
+        input.value = '研究这个招聘项目（ID：' + project + '）：先读取项目详情和所属活动，再查公司/行业/岗位要求和薪资，最后对照我的简历给出准备建议。不要从平台登记岗位或投递。';
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+      }
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupContextPanel, {once: true});
+  else setTimeout(setupContextPanel, 0);
 })();
