@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原型 · 审计与撤销面板（#23）</title>
+<style>
+:root{
+  --green:#176b55;--green-dark:#123c30;--ink:#20332c;--muted:#7e8c85;
+  --line:#e3e9e4;--bg:#f8faf9;--card:#fff;--amber:#a8691f;--red:#a64232;--blue:#2c6390;
+  --shadow:0 18px 50px #172e2722;--topbar:40px;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{max-width:100%}
+body{margin:0;padding-top:var(--topbar);color:var(--ink);background:var(--bg);font:14px/1.75 'Segoe UI','Microsoft YaHei',sans-serif}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--green)}
+.app{display:flex;min-height:calc(100dvh - var(--topbar))}
+aside.rail{width:258px;flex:0 0 258px;background:#172e27;color:#e4eee9;padding:22px 18px;display:flex;flex-direction:column;gap:10px;overflow:auto}
+.brand{font-size:26px;letter-spacing:4px;padding:0 10px 10px}
+.brand small{display:block;font-size:9px;letter-spacing:2px;color:#9db9aa;margin-top:4px}
+.rail button.entry{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;border:1px solid #ffffff24;background:#ffffff0c;color:#edf7f1;border-radius:12px;padding:9px 12px;font-size:12.5px;text-align:left}
+.rail button.entry:hover{background:#ffffff17}
+.rail button.entry.on{background:#ffffff1f;border-color:#ffffff40}
+.rail .group-label{font-size:10px;letter-spacing:2px;color:#9bb0a5;margin:14px 10px 0}
+.sessions{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.sessions button{border:0;background:transparent;color:#aebfb5;text-align:left;font-size:11.5px;padding:8px 10px;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sessions button:hover,.sessions button.on{background:#ffffff0e;color:#fff}
+.rail .foot{margin-top:auto;padding-top:14px;border-top:1px solid #ffffff14;font-size:10.5px;line-height:1.9;color:#91aa9c}
+main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:calc(100dvh - var(--topbar));background:radial-gradient(ellipse at 50% 0,#e6f0e870,transparent 60%)}
+header{height:66px;flex:0 0 66px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 24px;background:#ffffffb8;border-bottom:1px solid var(--line)}
+header .title{font-size:16px;font-weight:600;display:flex;align-items:center;gap:10px}
+header .title span{font-weight:400;color:var(--muted);font-size:11px}
+header .head-right{display:flex;align-items:center;gap:9px;min-width:0}
+.route{border:1px solid #dce9df;background:#eff6f0;color:#4c7b66;border-radius:30px;padding:4px 11px;font-size:10.5px;white-space:nowrap}
+.route b{font-weight:600;color:#2c5f4a}
+.wf-entry{border:1px solid #cfe0d5;background:#fff;border-radius:30px;padding:4px 11px;font-size:11px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.wf-entry .badge{background:var(--green);color:#fff;border-radius:20px;min-width:17px;height:17px;display:inline-flex;align-items:center;justify-content:center;font-size:9.5px;padding:0 4px}
+.mobile-only{display:none;border:0;background:#edf3e9;border-radius:8px;padding:5px 9px;font-size:15px}
+.view{display:flex;flex-direction:column;flex:1;min-height:0}
+#messages{flex:1;overflow:auto;padding:26px max(22px,calc((100% - 760px)/2));display:flex;flex-direction:column;gap:16px}
+.msg{max-width:100%}
+.msg.user{margin-left:auto;width:max-content;max-width:86%;background:#eaf0e4;padding:10px 15px;border-radius:16px;font-size:13px}
+.msg.assistant .role{font-size:10.5px;color:var(--muted);margin-bottom:4px}
+.msg.assistant .body{font-size:13px;line-height:1.95}
+.msg.assistant .body p{margin:0 0 5px}
+.calls{margin-top:7px;font-size:10.5px;color:#6f8078;border:1px solid var(--line);background:#fff;border-radius:9px;padding:5px 9px;display:inline-block}
+.composer-area{flex:0 0 auto;padding:8px max(22px,calc((100% - 760px)/2)) 12px;background:linear-gradient(transparent,#f8faf9 30%)}
+.composer{border:1px solid #dbe5dd;background:#fff;border-radius:16px;padding:8px 12px;box-shadow:0 8px 24px #172e270d;color:#9aa89f;font-size:12.5px}
+.composer .bar{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+.composer .send{border:0;width:32px;height:32px;border-radius:50%;background:var(--green);color:#fff;font-size:14px}
+.proto{position:fixed;left:0;right:0;top:0;z-index:200;display:flex;align-items:center;justify-content:center;gap:10px;background:#172e27;min-height:var(--topbar);padding:4px 12px;box-shadow:0 6px 18px #172e2733}
+.proto .row{display:flex;align-items:center;gap:6px;color:#e8f2ec;font-size:10.5px;min-width:0}
+.proto .row.label small{font-size:8.5px;letter-spacing:1.5px;color:#8fb3a2}
+.proto button.arrow{width:24px;height:24px;border-radius:50%;border:1px solid #ffffff2e;background:#ffffff12;color:#dff0e7;font-size:13px;line-height:1;flex:0 0 auto}
+.proto button.arrow:hover{background:#ffffff26}
+.proto .name{min-width:200px;text-align:center;font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proto .tools{display:flex;gap:2px;margin-left:4px;padding-left:8px;border-left:1px solid #ffffff1f}
+.proto .tools button{border:1px solid transparent;background:transparent;color:#bcd4c7;border-radius:999px;padding:3px 8px;font-size:10px}
+.proto .tools button:hover{background:#ffffff14;color:#fff}
+.task{border:1px solid #dde7e0;background:#fff;border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.task.running{border-left:3px solid var(--green)}
+.task.done{border-left:3px solid #557f6c}
+.task-head{display:flex;align-items:flex-start;gap:8px;min-width:0}
+.dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;margin-top:7px;background:var(--green)}
+.dot.pulse{box-shadow:0 0 0 4px #176b5522;animation:pulse 1.8s infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 7px #176b550d}}
+.dot.actor{background:var(--blue)}
+.dot.collector{background:#8e7b45}
+.dot.confirm{background:#6a5a8a}
+.task.done .dot{background:#557f6c}
+.task-title{font-size:13px;font-weight:600;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.task-title small{font-weight:400;color:var(--muted);font-size:10.5px;margin-left:5px}
+.task-state{margin-left:auto;font-size:9.5px;color:#5b7a68;background:#eef5ef;border-radius:20px;padding:2px 8px;white-space:nowrap;flex:0 0 auto}
+.task.running .task-state{background:#eef5ef;color:#2d7150}
+.task-meta{display:flex;gap:9px;flex-wrap:wrap;font-size:10px;color:#7a8c81;min-width:0}
+.progress{height:5px;border-radius:4px;background:#edf2ee;overflow:hidden}
+.progress i{display:block;height:100%;background:linear-gradient(90deg,#2f8a68,#7bb79b);border-radius:4px}
+.task-line{font-size:11px;color:#5c7165;overflow-wrap:anywhere}
+.task-actions{display:flex;gap:6px;flex-wrap:wrap}
+.btn{border:1px solid #cfe0d5;background:#fff;border-radius:8px;padding:5px 10px;font-size:11px;color:#305c47}
+.btn:hover{background:#f2f8f3}
+.btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+.btn.warn{background:#fff;border-color:#e4c9b0;color:#8a5317}
+.btn.warn:hover{background:#fdf6ec}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff}
+.btn.ghost{border-color:#e2e8e3;color:#7b8c82;background:transparent}
+.btn:disabled{opacity:.5;cursor:default}
+details.more{border-top:1px dashed #e5ebe6;padding-top:6px}
+details.more summary{cursor:pointer;font-size:10.5px;color:#6d8176;list-style:none}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary:before{content:'▸ ';color:#93a69a}
+details.more[open] summary:before{content:'▾ '}
+.evidence{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.ev{border:1px solid #dde7e0;background:#fbfdfb;border-radius:7px;padding:3px 7px;font-size:10px;color:#4f6d5d}
+.ev b{font-weight:600;color:#2f5c47}
+.muted{color:#8b9a90;font-size:10.5px}
+.trace{font-size:10.5px;color:#7e8c85;overflow-wrap:anywhere}
+.scrim{position:fixed;inset:var(--topbar) 0 0 0;background:#172e2740;z-index:60;opacity:0;pointer-events:none;transition:opacity .18s}
+body.drawer-open .scrim{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:var(--topbar);right:0;bottom:0;width:min(400px,92vw);background:#fbfcfb;border-left:1px solid var(--line);z-index:70;transform:translateX(102%);transition:transform .22s ease;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+@media (min-width:751px){
+  body.drawer-open main{margin-right:400px;transition:margin .22s ease}
+  body.drawer-open .scrim{opacity:0;pointer-events:none}
+}
+body.drawer-open .drawer{transform:none}
+.drawer-head{padding:14px 14px 9px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:5px}
+.drawer-head .line{display:flex;align-items:center;gap:8px;min-width:0}
+.drawer-head h2{margin:0;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drawer-head .sub{font-size:10px;color:#8b9a90}
+.drawer-head .x{margin-left:auto;border:0;background:none;font-size:18px;color:#7d8f83;line-height:1;flex:0 0 auto}
+.drawer-head .back{border:1px solid #dfe8e2;background:#fff;border-radius:7px;font-size:11px;color:#3d6351;padding:2px 8px;flex:0 0 auto}
+.drawer-body{flex:1;overflow:auto;padding:11px;display:flex;flex-direction:column;gap:9px;min-height:0}
+.drawer-foot{border-top:1px solid var(--line);padding:8px 13px;font-size:10px;color:#8b9a90}
+/* ---- task audit summary ---- */
+.audit-sum{border-top:1px dashed #e5ebe6;padding-top:8px;display:flex;flex-direction:column;gap:6px}
+.audit-sum-head{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:11.5px}
+.audit-sum-head b{font-size:12px;color:#274b3b}
+.tally{display:flex;gap:5px;flex-wrap:wrap;font-size:10px}
+.tally span{border-radius:6px;padding:1px 6px;background:#f1f5f2;white-space:nowrap}
+.tally .ok{color:#2d7150;background:#eaf5ee}
+.tally .warn{color:#8a5317;background:#fbf1e0}
+.tally .calm{color:#63727b;background:#eef1f3}
+.tally .bad{color:#8f3225;background:#fbeae6}
+.undo-note{font-size:9.5px;color:#93a198;line-height:1.7}
+/* ---- audit surface (A / C) ---- */
+.audit-scope{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:#5f7468;padding:1px 2px}
+.audit-scope b{color:#274b3b}
+.link{border:0;background:none;color:var(--green);font-size:10.5px;padding:0;text-decoration:underline;text-underline-offset:2px}
+.audit-taskbar{border:1px solid #e3ebe5;background:#fff;border-radius:11px;padding:10px;display:flex;flex-direction:column;gap:7px}
+.audit-taskbar .bar-title{font-size:11.5px;color:#3c5a4a}
+.audit-taskbar .bar-title b{color:#224636}
+.batches{display:flex;flex-direction:column;gap:7px}
+.batch-row{width:100%;text-align:left;display:flex;align-items:flex-start;gap:8px;border:1px solid #e3ebe5;background:#fff;border-radius:10px;padding:8px 9px;min-width:0;transition:border-color .12s}
+.batch-row:hover{border-color:#c9dccf;background:#fcfefc}
+.batch-row.sel{border-color:#b7d3c1;background:#f4f9f5}
+.batch-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.batch-title{font-size:11.5px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+.batch-sub{font-size:9.5px;color:#819388;overflow-wrap:anywhere}
+.batch-chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:2px}
+.chev{color:#b3c0b7;font-size:15px;line-height:1;flex:0 0 auto;margin-top:4px}
+.pill{display:inline-block;border-radius:20px;padding:1px 7px;font-size:9.5px;background:#eef5ef;color:#4c7b66;white-space:nowrap}
+.pill.ok{background:#eaf5ee;color:#2d7150}
+.pill.warn{background:#fbf1e0;color:#8a5a17}
+.pill.bad{background:#fbebe7;color:var(--red)}
+.pill.calm{background:#eef1f3;color:#63727b}
+.pill.dark{background:#ece7f3;color:#5b4c7a}
+.audit-foot{font-size:9.5px;color:#93a198;text-align:center;padding:2px 0 6px;line-height:1.7}
+.batch-head{border:1px solid #e3ebe5;background:#fff;border-radius:11px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.batch-head h3{margin:0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.batch-head .meta{font-size:10px;color:#819388;overflow-wrap:anywhere}
+.batch-head .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.entities{display:flex;flex-direction:column;gap:7px}
+.entity{border:1px solid #e7eee9;background:#fff;border-radius:10px;padding:8px 9px;min-width:0}
+.entity-head{display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap;min-width:0}
+.entity-head b{font-size:11.5px;line-height:1.6;overflow-wrap:anywhere;min-width:0;flex:1}
+details.entity-acc{border:1px solid #e7eee9;background:#fff;border-radius:10px;min-width:0}
+details.entity-acc>summary{list-style:none;cursor:pointer;padding:8px 9px;display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap;min-width:0}
+details.entity-acc>summary::-webkit-details-marker{display:none}
+details.entity-acc>summary:before{content:'▸';color:#a8b8ae;flex:0 0 auto;font-size:10px;margin-top:3px}
+details.entity-acc[open]>summary:before{content:'▾'}
+details.entity-acc .acc-inner{padding:0 9px 9px}
+.diff{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+.dfield{border:1px solid #eef2ef;background:#fbfdfb;border-radius:8px;padding:5px 7px;min-width:0}
+.fname{font-size:9.5px;color:#8b9a90;letter-spacing:.4px}
+.fvals{display:flex;flex-wrap:wrap;gap:4px;align-items:baseline;font-size:11px;min-width:0;line-height:1.6}
+.fvals .old{color:#8a6a4a;text-decoration:line-through;text-decoration-color:#d9c3a8;overflow-wrap:anywhere}
+.fvals .new{color:#1f5b43;font-weight:600;overflow-wrap:anywhere}
+.fvals .arrow{color:#a9b6ad}
+.fvals .none{color:#a9b6ad}
+.ftag{font-size:8.5px;color:#8b9a90;border:1px solid #e7eee9;border-radius:4px;padding:0 3px}
+details.raw{margin-top:5px}
+details.raw summary{cursor:pointer;font-size:9.5px;color:#83968a;list-style:none}
+details.raw summary::-webkit-details-marker{display:none}
+details.raw summary:before{content:'▸ ';color:#a8b8ae}
+details.raw[open] summary:before{content:'▾ '}
+pre.json{white-space:pre-wrap;word-break:break-word;font:10px/1.65 ui-monospace,Consolas,monospace;background:#f6f9f7;border:1px solid #e7eee9;border-radius:8px;padding:7px;margin:4px 0 0;max-width:100%}
+.rawgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:6px}
+@media (min-width:751px){.rawgrid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.conflict-bar{border:1px solid #efdcbf;background:#fdf8ee;border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.conflict-bar .cb-title{font-size:11px;font-weight:600;color:#8a5317}
+.conflict-bar .cb-text{font-size:10.5px;line-height:1.75;color:#6f5a3e;overflow-wrap:anywhere}
+.conflict-bar .cb-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+/* ---- inline accordion (C) ---- */
+.inline-audit{border-top:1px dashed #e5ebe6;padding-top:8px;display:flex;flex-direction:column;gap:7px}
+.ia-head{display:flex;align-items:center;justify-content:space-between;gap:7px;flex-wrap:wrap}
+.ia-title{font-size:12px;font-weight:600;color:#274b3b}
+.ia-note{font-size:9.5px;color:#93a198;line-height:1.7}
+.batch-accs{display:flex;flex-direction:column;gap:6px}
+details.batch-acc{border:1px solid #e3ebe5;background:#fff;border-radius:10px;min-width:0}
+details.batch-acc>summary{list-style:none;cursor:pointer;padding:8px 9px;display:flex;align-items:flex-start;gap:7px;min-width:0;flex-wrap:wrap}
+details.batch-acc>summary::-webkit-details-marker{display:none}
+details.batch-acc>summary:before{content:'▸';color:#a8b8ae;flex:0 0 auto;font-size:10px;margin-top:5px}
+details.batch-acc[open]>summary:before{content:'▾'}
+details.batch-acc[open]>summary{border-bottom:1px solid #eef2ef}
+.acc-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.acc-main b{font-size:11.5px;line-height:1.5;overflow-wrap:anywhere}
+.acc-main small{font-size:9.5px;color:#819388;overflow-wrap:anywhere}
+.acc-body{padding:8px 9px 9px;display:flex;flex-direction:column;gap:6px}
+.acc-actions{display:flex;gap:6px;flex-wrap:wrap}
+.batch-row.confirm-row{border-style:dashed;background:#fafbfc}
+.confirm-static{border:1px dashed #e2e6ea;background:#fafbfc;border-radius:10px;padding:8px 9px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.confirm-static b{font-size:11px;color:#4e5b66;overflow-wrap:anywhere}
+.confirm-static small{font-size:9.5px;color:#8b9a90;overflow-wrap:anywhere}
+.only-mobile{display:none}
+/* ---- B layer ---- */
+.layer{position:fixed;inset:var(--topbar) 0 0 0;z-index:100;display:none;background:#172e2755;padding:18px}
+body.layer-open .layer{display:flex;align-items:stretch;justify-content:center}
+.layer-panel{background:#fbfcfb;border-radius:16px;box-shadow:var(--shadow);width:min(1000px,100%);display:flex;flex-direction:column;min-height:0;overflow:hidden;border:1px solid var(--line)}
+.layer-head{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;min-width:0}
+.layer-head .lh-main{min-width:0;flex:1}
+.layer-head h2{margin:0;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.layer-head .sub{font-size:10.5px;color:#819388;margin-top:2px}
+.layer-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.layer-actions .x{border:0;background:none;font-size:20px;line-height:1;color:#7d8f83;padding:0 2px}
+.layer-banner{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:8px 11px;border-radius:9px;background:#f2f8f4;border:1px solid #d8e8dd;font-size:11px;margin:10px 16px 0}
+.layer-banner b{color:#274b3b}
+.layer-grid{flex:1;display:grid;grid-template-columns:292px minmax(0,1fr);min-height:0}
+.layer-list{border-right:1px solid var(--line);padding:11px;overflow:auto;display:flex;flex-direction:column;gap:7px;min-width:0}
+.layer-detail{overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.filters{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:2px}
+.chip{border:1px solid #e0e9e3;background:#fff;border-radius:999px;padding:2px 8px;font-size:9.5px;color:#5f7468}
+.chip.on{background:#eef6f0;border-color:#bcd7c7;color:#24503e;font-weight:600}
+.empty{padding:34px 12px;text-align:center;color:#93a198;font-size:12px;line-height:1.8}
+.diff-table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
+.diff-table th{font-size:9px;letter-spacing:1px;color:#8b9a90;text-align:left;font-weight:600;padding:4px 6px;border-bottom:1px solid #e3ebe5}
+.diff-table td{padding:6px;border-bottom:1px solid #eef2ef;vertical-align:top;overflow-wrap:anywhere;line-height:1.6}
+.diff-table td.f{color:#5f7468;font-weight:600}
+.diff-table td.old{color:#8a6a4a;background:#fdfaf6;text-decoration:line-through;text-decoration-color:#e6d3bd}
+.diff-table td.new{color:#1f5b43;background:#f7fbf8;font-weight:600}
+.diff-table th:nth-child(1),.diff-table td:nth-child(1){width:92px}
+.diff-table th:nth-child(2),.diff-table td:nth-child(2){width:auto}
+.current-note{font-size:10px;color:#8a5317;background:#fdf8ee;border:1px solid #efdcbf;border-radius:7px;padding:5px 7px;margin-top:5px;line-height:1.7;overflow-wrap:anywhere}
+.layer-detail h3{margin:0;font-size:13.5px;line-height:1.5;overflow-wrap:anywhere}
+.layer-detail .meta{font-size:10px;color:#819388;overflow-wrap:anywhere}
+.detail-head{display:flex;flex-direction:column;gap:5px;border-bottom:1px solid var(--line);padding-bottom:9px}
+.detail-head .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.batch-block{border:1px solid #e7eee9;background:#fff;border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:6px;min-width:0}
+/* ---- dialogs / toast ---- */
+dialog{border:0;border-radius:16px;padding:0;max-width:min(94vw,480px);width:100%;box-shadow:var(--shadow)}
+dialog::backdrop{background:#172e2766}
+.dlg-body{padding:17px 19px;display:flex;flex-direction:column;gap:9px}
+.dlg-body h3{margin:0;font-size:15.5px;line-height:1.5}
+.dlg-body ul{margin:0;padding-left:18px;font-size:11.5px;line-height:1.85;color:#5b6f63}
+.dlg-body p{margin:0;font-size:11.5px;line-height:1.8;color:#5b6f63}
+.dlg-actions{display:flex;gap:7px;justify-content:flex-end;flex-wrap:wrap;margin-top:5px}
+.warn-box{border:1px solid #efdcbf;background:#fdf8ee;border-radius:9px;padding:9px 10px;font-size:11px;line-height:1.8;color:#6f5a3e;overflow-wrap:anywhere}
+.warn-box b{color:#8a5317}
+.help{padding:18px 20px;font-size:11.5px;line-height:1.85;max-height:80vh;overflow:auto}
+.help h2{margin:0 0 6px;font-size:16px}
+.help h3{margin:12px 0 3px;font-size:11.5px;color:#2f5c47}
+.help ul,.help ol{margin:3px 0;padding-left:18px}
+.help code{background:#f1f5f2;border-radius:4px;padding:0 4px;font-size:10.5px}
+.help .jump{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.help .close{margin-top:12px;width:100%}
+.toast{position:fixed;left:50%;top:120px;transform:translate(-50%,-10px);background:#172e27;color:#e9f3ec;border-radius:10px;padding:8px 13px;font-size:11px;z-index:300;opacity:0;pointer-events:none;transition:.22s;max-width:min(92vw,460px);text-align:center;line-height:1.6}
+body.toasting .toast{opacity:1;transform:translate(-50%,0)}
+.debug{display:none}
+@media (max-width:900px){
+  .layer-grid{grid-template-columns:250px minmax(0,1fr)}
+}
+@media (max-width:750px){
+  :root{--topbar:44px}
+  aside.rail{position:fixed;inset:0 auto 0 0;z-index:90;transform:translateX(-102%);transition:transform .2s;width:min(84vw,300px);box-shadow:0 0 50px #172e2755;padding-top:18px}
+  body.rail-open aside.rail{transform:none}
+  .mobile-only{display:inline-block}
+  main{width:100%}
+  header{padding:0 13px;height:58px;flex-basis:58px;gap:8px}
+  header .title{font-size:13.5px;gap:5px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header .title span{display:none}
+  .route{font-size:9.5px;padding:3px 8px;max-width:38vw;overflow:hidden;text-overflow:ellipsis}
+  .wf-entry{font-size:10px;padding:3px 9px}
+  #messages{padding:14px 12px 6px;gap:13px}
+  .composer-area{padding:6px 10px 10px}
+  .proto{min-height:44px;gap:5px;padding:4px 8px;justify-content:space-between}
+  .proto .row.label{display:none}
+  .proto .name{min-width:0;flex:1;font-size:9.5px;text-align:left}
+  .proto .tools{padding-left:5px}
+  .proto .tools button{padding:2px 5px;font-size:9px}
+  .proto .arrow{width:21px;height:21px;font-size:12px}
+  .toast{top:110px}
+  .drawer{top:auto;bottom:0;right:0;left:0;width:100%;max-height:72vh;border-radius:18px 18px 0 0;border-left:0;border-top:1px solid var(--line);transform:translateY(102%)}
+  body.drawer-open .drawer{transform:none}
+  .drawer-head{padding-top:9px}
+  .drawer-head:before{content:'';display:block;width:38px;height:4px;border-radius:4px;background:#d6e2da;margin:0 auto 2px}
+  .drawer-body{padding:9px 10px 18px}
+  .task{padding:10px 11px}
+  .task-meta{font-size:9.5px;gap:7px}
+  .batch-row{padding:8px}
+  .layer{inset:var(--topbar) 0 0;padding:0}
+  .layer-panel{border-radius:0;border:0}
+  .layer-head{padding:11px 12px}
+  .layer-banner{margin:8px 12px 0}
+  .layer-grid{grid-template-columns:1fr}
+  .layer-list{border-right:0;padding:9px}
+  .layer-detail{padding:11px 12px}
+  .only-mobile{display:inline-flex}
+  .layer-head{flex-direction:column;position:relative;padding-right:40px}
+  .layer-actions{width:100%;justify-content:flex-start}
+  .layer-actions .x{position:absolute;top:8px;right:10px}
+  .layer[data-view="list"] .layer-detail{display:none}
+  .layer[data-view="detail"] .layer-list{display:none}
+  .diff-table,.diff-table thead,.diff-table tbody,.diff-table tr,.diff-table th,.diff-table td{display:block}
+  .diff-table thead{display:none}
+  .diff-table tr{border:1px solid #eef2ef;border-radius:8px;margin-bottom:6px;overflow:hidden}
+  .diff-table td{border:0;padding:5px 8px}
+  .diff-table td:before{content:attr(data-label);display:block;font-size:8.5px;color:#8b9a90;letter-spacing:.5px}
+  .diff-table td.f{background:#fbfdfb}
+  .diff-table td.f:before{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+body.no-anim *{animation:none!important;transition:none!important}
+</style>
+</head>
+<body data-variant="A">
+
+<div class="proto" id="proto">
+  <div class="row label"><small>WAYFINDER #23</small><span>审计/撤销面板</span></div>
+  <div class="row">
+    <button class="arrow" data-act="prev" title="上一个变体（←）" aria-label="上一个变体">‹</button>
+    <span class="name" id="proto-name">A · 抽屉内下钻</span>
+    <button class="arrow" data-act="next" title="下一个变体（→）" aria-label="下一个变体">›</button>
+  </div>
+  <div class="tools">
+    <button data-act="reset">重置</button>
+    <button data-act="help">说明</button>
+  </div>
+</div>
+
+<div class="app">
+  <aside class="rail" id="rail">
+    <div class="brand">✧ 职向<small>YOUR CAREER AGENT</small></div>
+    <button class="entry">＋ 新的求职对话</button>
+    <button class="entry">⇄ 登录型网站</button>
+    <button class="entry">▥ 简历与投递</button>
+    <button class="entry">▤ 数据与日历</button>
+    <div class="group-label">你的求职对话</div>
+    <div class="sessions">
+      <button class="on">双选会 · 西南财大准备</button>
+      <button>简历修改 · 产品实习</button>
+      <button>公司调研 · 成都游戏行业</button>
+    </div>
+    <div class="foot">当前驱动：本机 Codex<br>资料保存在本机；任务内容会发送至你选择的模型服务。</div>
+  </aside>
+
+  <main>
+    <header>
+      <div class="title">
+        <button class="mobile-only" data-act="rail" aria-label="打开侧栏">☰</button>
+        职向 <span>求职智能体</span>
+      </div>
+      <div class="head-right">
+        <span class="route">当前：<b>本机 Codex</b> · 本轮 ≈¥0.8</span>
+        <button class="wf-entry" data-act="open-drawer">工作流 <span class="badge">2</span></button>
+      </div>
+    </header>
+
+    <div class="view">
+      <div id="messages">
+        <article class="msg user">帮我把西南财大 11 月 8 日双选会的参会单位整理进采集库，顺手核对一下为什么就业网抓不到。</article>
+        <article class="msg assistant">
+          <div class="role">✧ 职向</div>
+          <div class="body">
+            <p>这次要走视觉：就业网 robots 禁止自动抓取，只能用你之前存的截图和公众号原文。来源校对已经跑完，自动写入了 14 条，其中 12 条可撤销；审计与撤销都在右侧工作流里。</p>
+            <div class="calls">调用记录 · 本机 Codex · 4 次 · 09:41–09:56</div>
+          </div>
+        </article>
+      </div>
+      <div class="composer-area">
+        <div class="composer">
+          <div>继续追问，或让我处理下一条来源…</div>
+          <div class="bar"><span class="trace">任务与自动写入会留审计</span><button class="send" aria-label="发送">↑</button></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="scrim" id="scrim" data-act="close-drawer"></div>
+
+<aside class="drawer" id="drawer" aria-label="工作流面板">
+  <div class="drawer-head" id="drawer-head"></div>
+  <div class="drawer-body scroll" id="drawer-body"></div>
+  <div class="drawer-foot" id="drawer-foot"></div>
+</aside>
+
+<div class="layer" id="layer" data-view="list"></div>
+
+<dialog id="dlg-task">
+  <div class="dlg-body">
+    <h3>撤销本任务全部自动写入？</h3>
+    <ul>
+      <li>按批次从新到旧撤销：<b>3 批</b>，其中可撤销 <b>12 条</b>（2 批）。</li>
+      <li>采集器批次 <b>2 条</b>不可撤销（采集器写入只审计），会跳过并报告。</li>
+      <li>冲突项默认跳过、不覆盖当前值；撤销结果就地显示「已撤销 N / 冲突 M」。</li>
+      <li>跨库不保证原子：每批一个事务，意外错误即停并报告剩余批次。</li>
+      <li>撤销本身是新的自动写入，记入审计（新批次 + <code>undo_of</code>）；v1 不可 redo。</li>
+    </ul>
+    <div class="dlg-actions">
+      <button class="btn" data-act="cancel">取消</button>
+      <button class="btn warn" data-act="confirm-task">开始撤销</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="dlg-force">
+  <div class="dlg-body">
+    <h3>强制撤销这 1 条？</h3>
+    <div class="warn-box">
+      <b>中国移动通信集团四川有限公司 · 活动日期</b>
+      <div>你 10:12 手动改成了 <b>2026-11-12</b>；写入时的新值是 2026-11-10。</div>
+      <div>强制撤销会把旧值 <b>2026-11-08</b> 写回，覆盖你的手动修改。</div>
+    </div>
+    <p class="muted">记 <code>result=forced</code>；撤销同样记入审计；v1 不可 redo。</p>
+    <div class="dlg-actions">
+      <button class="btn" data-act="cancel">取消</button>
+      <button class="btn danger" data-act="confirm-force">强制撤销并覆盖</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="dlg-help">
+  <div class="help">
+    <h2>审计与撤销面板 · 三个变体</h2>
+    <p>同一个模型（<a href="https://github.com/Lumichelka/career-agent/issues/15" target="_blank">#15</a>）：批次 = 一次工具调用；任务可整撤；冲突默认跳过、可强制；采集器与确认事件不可撤销。</p>
+    <h3>A · 抽屉内下钻</h3>
+    <p>审计沿 <a href="https://github.com/Lumichelka/career-agent/issues/18" target="_blank">#18</a> 的 400px 工作流抽屉：任务卡 → 审计列表 → 批次详情，逐级返回。手机变底部抽屉（72vh）。</p>
+    <h3>B · 独立审阅层</h3>
+    <p>审计是「审阅」动作：从抽屉打开一个 1000px 层，左批次右 diff，两栏同时看；手机全屏，列表 → 详情。不是新一级页面，不加侧栏入口。</p>
+    <h3>C · 任务内就地展开</h3>
+    <p>不另开面板：批次与 diff 直接挂在任务卡下面，撤销结果就地出现；手机同一个底部抽屉里滚动。</p>
+    <h3>要看的六件事</h3>
+    <ol>
+      <li>按批次分组的列表是否一眼看得懂（批次、条数、谁写的）。</li>
+      <li>批次内新旧值 diff 怎么展开最顺手：折叠实体 / 宽表 / 就地展开。</li>
+      <li>撤销结果（已撤销 N / 冲突 M / 跳过 1 批）是否在动作发生的地方就能看到。</li>
+      <li>任务详情里的「撤销本任务全部自动写入」入口是否找得到、后果说清了没有。</li>
+      <li>冲突条的「强制撤销」二次确认是否足够吓人但不烦人。</li>
+      <li>390×844 下是否不横向溢出、diff 是否还能读。</li>
+    </ol>
+    <p class="muted">数字是演示数据：9 + 3 可撤销、2 条采集器、1 条确认。截图状态：<code>?variant=A&amp;state=conflict</code>。</p>
+    <div class="jump">
+      <button class="btn ghost" data-jump="task">任务卡</button>
+      <button class="btn ghost" data-jump="list">审计列表</button>
+      <button class="btn ghost" data-jump="conflict">撤销后冲突</button>
+      <button class="btn ghost" data-jump="forced">强制撤销后</button>
+    </div>
+    <button class="btn primary close" data-act="cancel">知道了</button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+<div class="debug" id="debug"></div>
+
+<script>
+(function(){
+  var $ = function(s, r){ return (r || document).querySelector(s); };
+  var $$ = function(s, r){ return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var body = document.body;
+  var q = new URLSearchParams(location.search);
+  var VARIANT_NAMES = {
+    A:'A · 抽屉内下钻',
+    B:'B · 独立审阅层',
+    C:'C · 任务内就地展开'
+  };
+  var VARIANT_ORDER = ['A','B','C'];
+  var variant = (q.get('variant') || 'A').toUpperCase();
+  if (!VARIANT_NAMES[variant]) variant = 'A';
+  var initState = q.get('state') || 'task';
+  var still = !!q.get('still');
+  if (still) body.classList.add('no-anim');
+
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+  var toastTimer;
+  function toast(text){ var t = $('#toast'); t.textContent = text; body.classList.add('toasting'); clearTimeout(toastTimer); toastTimer = setTimeout(function(){ body.classList.remove('toasting'); }, 3000); }
+
+  /* ---------------- mock data ---------------- */
+  var TASK = { id:'tsk_01JA9K2Q', title:'来源校对 · 西南财大双选会', actor:'本机 Codex', started:'09:41', ended:'09:56', evidence:3 };
+
+  var CREATE_NAMES = [
+    '中国电子科技集团公司第十研究所','成都飞机工业（集团）有限责任公司','四川长虹电子控股集团有限公司',
+    '京东方科技集团股份有限公司','华为技术有限公司成都研究所','中国移动通信集团四川有限公司',
+    '招商银行股份有限公司成都分行','天府软件园有限公司','西南财经大学校友企业联合招聘'
+  ];
+  function createEntity(name, i){
+    return {
+      id: 'ep_' + (101 + i),
+      name: name,
+      action: 'create',
+      fields: {
+        '单位名称': name,
+        '活动名称': '西南财经大学 2026 届秋季双选会',
+        '活动日期': '2026-11-08',
+        '城市': '成都',
+        '岗位类别': i % 3 === 0 ? '技术类' : (i % 3 === 1 ? '产品与运营' : '综合类'),
+        '来源': '西南财大就业网',
+        '来源链接': 'https://job.swufe.edu.cn/recruit/2026/fall/fair/company/' + (1000 + i),
+        '备注': i === 0 ? '展位 A-12（截图识别）' : ''
+      }
+    };
+  }
+  var ENTITIES = {
+    b1: CREATE_NAMES.map(function(n, i){ return createEntity(n, i); }),
+    b2: [
+      { id:'ep_201', name:'中国电子科技集团公司第十研究所', action:'update',
+        old:{ '岗位类别':'技术类' },
+        neu:{ '岗位类别':'研发类' } },
+      { id:'ep_202', name:'中国移动通信集团四川有限公司', action:'update',
+        old:{ '活动日期':'2026-11-08', '活动地点':'学生活动中心一楼' },
+        neu:{ '活动日期':'2026-11-10', '活动地点':'学生活动中心一楼 A 厅' },
+        conflict:{ field:'活动日期', current:'2026-11-12', editedAt:'10:12' } },
+      { id:'ep_203', name:'京东方科技集团股份有限公司', action:'update',
+        old:{ '活动地点':'学生活动中心一楼' },
+        neu:{ '活动地点':'体育馆西侧' } }
+    ],
+    b3: [
+      { id:'art_88', name:'西南财经大学 2026 届秋季双选会参会单位公布', action:'create',
+        fields:{ '标题':'西南财经大学 2026 届秋季双选会参会单位公布', '来源':'西南财大就业指导中心（公众号）', '发布时间':'2026-10-24 18:20', '摘要':'共 186 家单位，含展位号与岗位数。', '链接':'https://mp.weixin.qq.com/s/9fK2mQ…（已截断）' } },
+      { id:'art_89', name:'11 月 8 日双选会：到场单位与展位图', action:'create',
+        fields:{ '标题':'11 月 8 日双选会：到场单位与展位图', '来源':'西南财大就业指导中心（公众号）', '发布时间':'2026-10-25 09:02', '摘要':'现场展位图与入场指引。', '链接':'https://mp.weixin.qq.com/s/2bW7pL…（已截断）' } }
+    ]
+  };
+
+  var BATCHES = [
+    { id:'b1', time:'09:52:14', actor:'本机 Codex', actorType:'external_agent', tool:'career_recruit_project_save',
+      action:'create', entity:'recruit.event_projects', count:9, undoable:true, title:'新建 9 条招聘项目' },
+    { id:'b2', time:'09:54:02', actor:'本机 Codex', actorType:'external_agent', tool:'career_recruit_project_save',
+      action:'update', entity:'recruit.event_projects', count:3, undoable:true, title:'更新 3 条招聘项目', conflicts:1 },
+    { id:'b3', time:'09:55:31', actor:'采集器 · 西南财大公众号', actorType:'collector', tool:'career_source_article_ingest',
+      action:'create', entity:'wechat.articles', count:2, undoable:false, title:'采集 2 篇公众号文章',
+      reason:'COLLECTOR_BATCH_NOT_UNDOABLE' }
+  ];
+  var CONFIRM = { id:'cfm', time:'09:56:10', actor:'本机 Codex', tool:'career_profile_update', action:'confirm',
+    entity:'memory.profile', title:'写入长期画像', detail:'求职方向：产品经理 · 成都', undoable:false };
+
+  function batchById(id){ return id === 'cfm' ? CONFIRM : BATCHES.filter(function(b){ return b.id === id; })[0]; }
+  function entitiesFor(id){ return ENTITIES[id] || []; }
+
+  /* ---------------- state ---------------- */
+  var S;
+  function freshState(){
+    return {
+      b1:'idle', b2:'idle', task:'idle', taskDone:false,
+      busy:false, sel:null, filters:'all', mobileDetail:false
+    };
+  }
+  S = freshState();
+  var UI = { panel:'tasks', drawerOpen:false, layerOpen:false };
+
+  function tally(){
+    var undone = (S.b1 === 'undone' ? 9 : 0) + (S.b2 === 'done' || S.b2 === 'forced' ? 2 : 0) + (S.b2 === 'forced' ? 1 : 0);
+    var conflict = S.b2 === 'done' ? 1 : 0;
+    var forced = S.b2 === 'forced' ? 1 : 0;
+    var skipped = S.taskDone ? 1 : 0;
+    return { undone:undone, conflict:conflict, forced:forced, skipped:skipped };
+  }
+  function tallyHtml(){
+    var t = tally();
+    var h = '<div class="tally">';
+    if (t.undone) h += '<span class="ok">已撤销 ' + t.undone + '</span>';
+    if (t.conflict) h += '<span class="warn">冲突 ' + t.conflict + '（跳过，未覆盖）</span>';
+    if (t.forced) h += '<span class="ok">含强制 ' + t.forced + '</span>';
+    if (t.skipped) h += '<span class="calm">跳过 1 批 · 采集器</span>';
+    h += '</div>';
+    return h;
+  }
+  function anyUndone(){ return tally().undone > 0; }
+
+  /* ---------------- shared pieces ---------------- */
+  function taskMeta(){
+    return '<div class="task-meta"><span>' + TASK.actor + '</span><span>' + TASK.started + '–' + TASK.ended + '</span><span>证据 ' + TASK.evidence + '</span><span>自动写入 14 条</span></div>';
+  }
+  function undoAllLabel(){
+    var t = tally();
+    if (S.task === 'running') return '撤销中…';
+    if (S.taskDone) return '本任务已撤销 ' + t.undone + ' 条' + (t.conflict ? ' · 冲突待强制' : '');
+    return '撤销本任务全部自动写入';
+  }
+  function auditSummary(){
+    var h = '<div class="audit-sum">';
+    h += '<div class="audit-sum-head"><b>自动写入 14 条</b><span class="pill">3 批</span><span class="pill ' + (anyUndone() ? 'ok' : 'calm') + '">' + (anyUndone() ? '已撤销 ' + tally().undone : '可撤销 12') + '</span></div>';
+    if (anyUndone() && variant !== 'C') h += tallyHtml();
+    if (variant !== 'C'){
+      h += '<div class="task-actions">';
+      h += '<button class="btn warn" data-act="undo-task"' + (S.task === 'running' || S.taskDone ? ' disabled' : '') + '>' + undoAllLabel() + '</button>';
+      h += '<button class="btn" data-act="open-audit">查看审计明细</button>';
+      if (tally().conflict) h += '<button class="btn warn" data-act="force">强制撤销冲突 1 条</button>';
+      h += '</div>';
+      h += '<div class="undo-note">批次 = 一次工具调用；撤销按批次新→旧，冲突默认跳过并报告。</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function taskCard(){
+    var h = '<article class="task done">';
+    h += '<div class="task-head"><span class="dot"></span>';
+    h += '<div class="task-title">' + TASK.title + '<small>4 个来源 · 草稿 12 条</small></div>';
+    h += '<span class="task-state">已完成</span></div>';
+    h += taskMeta();
+    h += '<details class="more"><summary>证据</summary><div class="evidence">';
+    h += '<span class="ev">🖼 <b>就业网截图</b> · 09:41 · 412KB</span>';
+    h += '<span class="ev">📄 <b>DOM 快照</b> · 42KB</span>';
+    h += '<span class="ev">📰 <b>公众号原文</b> · 已截断 64KB</span>';
+    h += '</div></details>';
+    h += auditSummary();
+    if (variant === 'C') h += inlineAudit();
+    h += '</article>';
+    return h;
+  }
+
+  function runningCard(){
+    return '<article class="task running">' +
+      '<div class="task-head"><span class="dot pulse"></span>' +
+      '<div class="task-title">公司调研 · 成都游戏行业<small>外部 Agent</small></div>' +
+      '<span class="task-state">运行中</span></div>' +
+      '<div class="task-meta"><span>本机 Codex</span><span>01:12</span></div>' +
+      '<div class="progress"><i style="width:38%"></i></div>' +
+      '<div class="task-line">正在读取公开信息（2/5）</div></article>';
+  }
+
+  function chipsForBatch(b){
+    var h = '<div class="batch-chips">';
+    if (b.id === 'b1'){
+      if (S.b1 === 'undone') h += '<span class="pill ok">已撤销 9</span>';
+      else h += '<span class="pill ok">可撤销</span>';
+    } else if (b.id === 'b2'){
+      if (S.b2 === 'forced') h += '<span class="pill ok">已撤销 3 · 含强制 1</span>';
+      else if (S.b2 === 'done') h += '<span class="pill ok">已撤销 2</span><span class="pill warn">冲突 1</span>';
+      else h += '<span class="pill ok">可撤销</span>';
+    } else {
+      h += '<span class="pill calm">不可撤销 · 采集器</span>';
+    }
+    h += '</div>';
+    return h;
+  }
+  function batchRow(b, mode){
+    var sel = S.sel === b.id ? ' sel' : '';
+    var dot = b.actorType === 'collector' ? ' collector' : ' actor';
+    var h = '';
+    if (mode === 'button'){
+      h += '<button class="batch-row' + sel + '" data-act="open-batch" data-id="' + b.id + '">';
+    } else {
+      h += '<div class="batch-row' + sel + '" data-act="open-batch" data-id="' + b.id + '">';
+    }
+    h += '<span class="dot' + dot + '"></span>';
+    h += '<span class="batch-main"><span class="batch-title">' + esc(b.title) + '</span>';
+    h += '<span class="batch-sub">' + b.time + ' · ' + esc(b.actor) + '</span>';
+    h += chipsForBatch(b);
+    h += '</span>';
+    if (mode !== 'button') h += '<span class="chev">›</span>';
+    h += mode === 'button' ? '</button>' : '</div>';
+    return h;
+  }
+  function confirmRow(clickable){
+    var h = '<div class="batch-row confirm-row"' + (clickable ? ' data-act="open-batch" data-id="cfm"' : '') + '>';
+    h += '<span class="dot confirm"></span>';
+    h += '<span class="batch-main"><span class="batch-title">确认 · ' + CONFIRM.title + '</span>';
+    h += '<span class="batch-sub">' + CONFIRM.time + ' · ' + CONFIRM.actor + ' · 敏感写 · 你已确认</span>';
+    h += '<span class="batch-chips"><span class="pill dark">不可撤销</span></span></span>';
+    if (clickable) h += '<span class="chev">›</span>';
+    h += '</div>';
+    return h;
+  }
+  function confirmStatic(){
+    return '<div class="confirm-static"><b>确认 · ' + CONFIRM.title + '</b><small>' + CONFIRM.time + ' · ' + CONFIRM.detail + ' · 你已确认 · 不可撤销</small></div>';
+  }
+
+  function batchHead(b){
+    var h = '<div class="batch-head">';
+    h += '<h3>' + esc(b.title) + '</h3>';
+    h += '<div class="meta">' + b.time + ' · ' + esc(b.actor) + ' · ' + esc(b.tool) + ' · ' + esc(b.entity) + '</div>';
+    h += chipsForBatch(b);
+    h += '<div class="actions">';
+    if (b.undoable){
+      var done = (b.id === 'b1' && S.b1 === 'undone') || (b.id === 'b2' && S.b2 !== 'idle');
+      if (done) h += '<div class="muted">这一批已撤销' + (b.id === 'b2' ? '：已撤销 2 条，1 条冲突未覆盖' : ' 9 条') + '。</div>';
+      else h += '<button class="btn warn" data-act="undo-batch" data-id="' + b.id + '"' + (S.task === 'running' ? ' disabled' : '') + '>撤销这一批</button>';
+    } else {
+      h += '<div class="muted">采集器写入只审计，不可撤销（COLLECTOR_BATCH_NOT_UNDOABLE）。</div>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  /* ---------------- diff renderers ---------------- */
+  function rawJson(entity){
+    var oldV = entity.old || null;
+    var newV = entity.neu || entity.fields || null;
+    var h = '<details class="raw"><summary>原始 JSON（旧值 / 新值整行）</summary><div class="rawgrid">';
+    h += '<div><b class="muted">旧值</b><pre class="json">' + esc(oldV ? JSON.stringify(oldV, null, 2) : 'null（新建）') + '</pre></div>';
+    h += '<div><b class="muted">新值</b><pre class="json">' + esc(newV ? JSON.stringify(newV, null, 2) : 'null（删除）') + '</pre></div>';
+    h += '</div></details>';
+    return h;
+  }
+  function diffStack(entity){
+    var h = '<div class="diff">';
+    var fields = [];
+    if (entity.action === 'create'){
+      fields = Object.keys(entity.fields || {}).filter(function(k){ return entity.fields[k] !== ''; });
+      fields.forEach(function(k){
+        h += '<div class="dfield"><div class="fname">' + esc(k) + '</div><div class="fvals"><span class="none">旧：无（新建）</span><span class="arrow">→</span><span class="new">' + esc(entity.fields[k]) + '</span></div></div>';
+      });
+    } else {
+      var keys = Object.keys(entity.neu || {});
+      keys.forEach(function(k){
+        h += '<div class="dfield"><div class="fname">' + esc(k) + '</div><div class="fvals"><span class="old">' + esc(entity.old[k] == null ? '无' : entity.old[k]) + '</span><span class="arrow">→</span><span class="new">' + esc(entity.neu[k]) + '</span></div></div>';
+      });
+      if (entity.conflict && S.b2 !== 'idle'){
+        h += '<div class="current-note">当前值：' + esc(entity.conflict.field) + ' = <b>' + esc(entity.conflict.current) + '</b>（你 ' + entity.conflict.editedAt + ' 手动修改；不是你写入的 ' + esc(entity.neu[entity.conflict.field]) + '）</div>';
+      }
+    }
+    h += '</div>';
+    h += rawJson(entity);
+    return h;
+  }
+  function diffTable(entity){
+    var h = '<table class="diff-table"><thead><tr><th>字段</th><th>旧值</th><th>新值</th></tr></thead><tbody>';
+    if (entity.action === 'create'){
+      Object.keys(entity.fields || {}).filter(function(k){ return entity.fields[k] !== ''; }).forEach(function(k){
+        h += '<tr><td class="f" data-label="字段">' + esc(k) + '</td><td class="old" data-label="旧值">无（新建）</td><td class="new" data-label="新值">' + esc(entity.fields[k]) + '</td></tr>';
+      });
+    } else {
+      Object.keys(entity.neu || {}).forEach(function(k){
+        h += '<tr><td class="f" data-label="字段">' + esc(k) + '</td><td class="old" data-label="旧值">' + esc(entity.old[k] == null ? '无' : entity.old[k]) + '</td><td class="new" data-label="新值">' + esc(entity.neu[k]) + '</td></tr>';
+      });
+    }
+    h += '</tbody></table>';
+    if (entity.conflict && S.b2 !== 'idle'){
+      h += '<div class="current-note">当前值：' + esc(entity.conflict.field) + ' = <b>' + esc(entity.conflict.current) + '</b>（你 ' + entity.conflict.editedAt + ' 手动修改）</div>';
+    }
+    h += rawJson(entity);
+    return h;
+  }
+  function entityStatus(entity, batchId){
+    if (batchId === 'b3') return '<span class="pill calm">不可撤销</span>';
+    if (batchId === 'b1') return S.b1 === 'undone' ? '<span class="pill ok">已撤销</span>' : '';
+    if (entity.conflict){
+      if (S.b2 === 'forced') return '<span class="pill ok">已强制撤销</span>';
+      if (S.b2 === 'done') return '<span class="pill warn">冲突 · 跳过</span>';
+      return '';
+    }
+    return S.b2 === 'done' || S.b2 === 'forced' ? '<span class="pill ok">已撤销</span>' : '';
+  }
+  function conflictBar(){
+    if (S.b2 !== 'done') return '';
+    if (!S.sel || S.sel !== 'b2'){
+      if (variant !== 'C') return '';
+    }
+    var h = '<div class="conflict-bar">';
+    h += '<div class="cb-title">冲突 1 · 未覆盖</div>';
+    h += '<div class="cb-text"><b>中国移动通信集团四川有限公司</b> 的「活动日期」当前是 <b>2026-11-12</b>，不是你写入的 2026-11-10（10:12 手动修改）。</div>';
+    h += '<div class="cb-actions"><button class="btn warn" data-act="force">强制撤销（二次确认）</button><span class="muted">跳过不动是默认；强制会覆盖手动修改。</span></div>';
+    h += '</div>';
+    return h;
+  }
+  function undoNote(){
+    if (!anyUndone()) return '';
+    return '<div class="undo-note">本次撤销已作为新批次记入审计（新 batch_id + 逐条 undo_of）；v1 不可 redo。</div>';
+  }
+
+  /* ---------------- variant A: audit surface in drawer ---------------- */
+  function auditA(){
+    var h = '<div class="audit-scope"><span><b>本任务</b> · ' + TASK.title + '</span><button class="link" data-act="all-audit">全部审计 →</button></div>';
+    h += '<div class="audit-taskbar"><div class="bar-title">自动写入 <b>14 条</b> · 3 批 · 确认 1</div>';
+    if (anyUndone()) h += tallyHtml();
+    h += '<button class="btn warn" style="align-self:flex-start" data-act="undo-task"' + (S.task === 'running' || S.taskDone ? ' disabled' : '') + '>' + undoAllLabel() + '</button></div>';
+    if (S.sel){
+      var b = batchById(S.sel);
+      h += '<button class="back" data-act="back-list" style="align-self:flex-start">← 全部批次</button>';
+      if (b.id === 'cfm'){
+        h += '<div class="batch-block"><h3>确认 · ' + CONFIRM.title + '</h3><div class="trace">' + CONFIRM.time + ' · ' + CONFIRM.actor + ' · ' + CONFIRM.detail + '</div><div class="muted">确认事件不可撤销、不参与批量撤销；这里只展示。</div></div>';
+      } else {
+        h += batchHead(b);
+        h += conflictBar();
+        h += '<div class="entities">';
+        entitiesFor(b.id).forEach(function(entity, i){
+          var open = (S.sel === b.id && (entity.conflict || i === 0)) ? ' open' : '';
+          h += '<details class="entity-acc"' + open + '><summary><b>' + esc(entity.name) + '</b>' + entityStatus(entity, b.id) + '</summary><div class="acc-inner">' + diffStack(entity) + '</div></details>';
+        });
+        h += '</div>';
+        h += undoNote();
+      }
+    } else {
+      h += '<div class="batches">';
+      BATCHES.forEach(function(b){ h += batchRow(b, 'div'); });
+      h += '</div>' + confirmRow(true);
+      h += '<div class="audit-foot">永久保留 · 仅你可见 · 导出 / 清空在「全部审计」</div>';
+    }
+    return h;
+  }
+
+  /* ---------------- variant C: inline accordion ---------------- */
+  function inlineAudit(){
+    var h = '<div class="inline-audit" id="inline-audit">';
+    h += '<div class="ia-head"><span class="ia-title">审计与撤销 · 本任务</span>' + (anyUndone() ? tallyHtml() : '') + '</div>';
+    h += '<div class="ia-note">只记自动写入；批次 = 一次工具调用；撤销按批次新→旧。</div>';
+    h += '<button class="btn warn" data-act="undo-task"' + (S.task === 'running' || S.taskDone ? ' disabled' : '') + ' style="align-self:flex-start">' + undoAllLabel() + '</button>';
+    h += '<div class="batch-accs">';
+    BATCHES.forEach(function(b){
+      var open = S.sel === b.id ? ' open' : '';
+      var dot = b.actorType === 'collector' ? ' collector' : ' actor';
+      h += '<details class="batch-acc"' + open + ' data-acc="' + b.id + '"><summary>';
+      h += '<span class="dot' + dot + '"></span><span class="acc-main"><b>' + esc(b.title) + '</b><small>' + b.time + ' · ' + esc(b.actor) + ' · ' + esc(b.entity) + '</small></span>';
+      h += '<span class="batch-chips">' + (b.id === 'b1' ? (S.b1 === 'undone' ? '<span class="pill ok">已撤销 9</span>' : '<span class="pill ok">可撤销</span>') : b.id === 'b2' ? (S.b2 === 'forced' ? '<span class="pill ok">已撤销 3 · 含强制 1</span>' : S.b2 === 'done' ? '<span class="pill ok">已撤销 2</span><span class="pill warn">冲突 1</span>' : '<span class="pill ok">可撤销</span>') : '<span class="pill calm">不可撤销</span>') + '</span>';
+      h += '</summary><div class="acc-body">';
+      if (b.id === 'cfm'){ /* unused */ }
+      if (b.undoable){
+        var done = (b.id === 'b1' && S.b1 === 'undone') || (b.id === 'b2' && S.b2 !== 'idle');
+        if (done) h += '<div class="acc-actions"><span class="pill ok">这一批已撤销</span><span class="muted">' + (b.id === 'b2' ? '已撤销 2 条，1 条冲突未覆盖' : '已撤销 9 条') + '</span></div>';
+        else h += '<div class="acc-actions"><button class="btn warn" data-act="undo-batch" data-id="' + b.id + '"' + (S.task === 'running' ? ' disabled' : '') + '>撤销这一批</button><span class="muted">撤销后结果就地显示</span></div>';
+      } else {
+        h += '<div class="acc-actions"><span class="muted">采集器写入只审计，不可撤销（COLLECTOR_BATCH_NOT_UNDOABLE）。</span></div>';
+      }
+      if (b.id === 'b2') h += conflictBar();
+      entitiesFor(b.id).forEach(function(entity, i){
+        h += '<div class="entity"><div class="entity-head"><b>' + esc(entity.name) + '</b>' + entityStatus(entity, b.id) + '</div>' + diffStack(entity) + '</div>';
+      });
+      h += '</div></details>';
+    });
+    h += confirmStatic();
+    h += '</div>';
+    h += undoNote();
+    h += '</div>';
+    return h;
+  }
+
+  /* ---------------- variant B: layer ---------------- */
+  function filterParams(){
+    var f = S.filters;
+    if (f === 'all') return BATCHES.concat([CONFIRM]);
+    if (f === 'confirm') return [CONFIRM];
+    return BATCHES.filter(function(b){ return b.actorType === f; });
+  }
+  function filtersHtml(){
+    var h = '<div class="filters">';
+    var defs = [['all','全部 4'],['external_agent','外部 Agent 2'],['collector','采集器 1'],['confirm','确认 1']];
+    defs.forEach(function(d){
+      h += '<button class="chip' + (S.filters === d[0] ? ' on' : '') + '" data-act="filter" data-id="' + d[0] + '">' + d[1] + '</button>';
+    });
+    h += '</div>';
+    return h;
+  }
+  function batchDetailB(b){
+    var back = '<button class="btn ghost only-mobile" data-act="back-list" style="align-self:flex-start">← 批次列表</button>';
+    if (b.id === 'cfm'){
+      return back + '<div class="detail-head"><div class="row"><h3>确认 · ' + CONFIRM.title + '</h3><span class="pill dark">确认</span></div><div class="meta">' + CONFIRM.time + ' · ' + CONFIRM.actor + ' · ' + CONFIRM.tool + '</div></div>' +
+        '<div class="batch-block"><div class="trace">' + CONFIRM.detail + '</div><div class="muted">确认事件不可撤销、不参与批量撤销；与 write_audit 合并展示（action=confirm）。</div></div>';
+    }
+    var h = back + '<div class="detail-head"><div class="row"><h3>' + esc(b.title) + '</h3>' + chipsForBatch(b) + '</div>';
+    h += '<div class="meta">' + b.time + ' · ' + esc(b.actor) + ' · ' + esc(b.tool) + ' · ' + esc(b.entity) + '</div>';
+    h += '</div>';
+    h += conflictBar();
+    if (b.undoable){
+      var done = (b.id === 'b1' && S.b1 === 'undone') || (b.id === 'b2' && S.b2 !== 'idle');
+      if (done) h += '<div class="batch-block" style="flex-direction:row;align-items:center;flex-wrap:wrap"><span class="pill ok">这一批已撤销</span><span class="muted">' + (b.id === 'b2' ? '已撤销 2 条，1 条冲突未覆盖' : '已撤销 9 条') + '</span></div>';
+      else h += '<div class="batch-block" style="flex-direction:row;align-items:center;flex-wrap:wrap"><button class="btn warn" data-act="undo-batch" data-id="' + b.id + '"' + (S.task === 'running' ? ' disabled' : '') + '>撤销这一批</button><span class="muted">撤销结果就地写回状态</span></div>';
+    } else {
+      h += '<div class="batch-block"><span class="muted">采集器写入只审计，不可撤销（COLLECTOR_BATCH_NOT_UNDOABLE）。</span></div>';
+    }
+    entitiesFor(b.id).forEach(function(entity){
+      h += '<div class="batch-block"><div class="entity-head"><b>' + esc(entity.name) + '</b>' + entityStatus(entity, b.id) + '</div>' + diffTable(entity) + '</div>';
+    });
+    h += undoNote();
+    return h;
+  }
+  function layerB(){
+    var h = '<div class="layer-panel">';
+    h += '<div class="layer-head"><div class="lh-main"><h2>审计 · ' + TASK.title + '</h2>';
+    h += '<div class="sub">' + TASK.actor + ' · ' + TASK.started + '–' + TASK.ended + ' · 自动写入 14 条 · 3 批 · 确认 1</div></div>';
+    h += '<div class="layer-actions"><button class="btn warn" data-act="undo-task"' + (S.task === 'running' || S.taskDone ? ' disabled' : '') + '>' + undoAllLabel() + '</button>';
+    h += '<button class="btn ghost" data-act="export">导出</button><button class="x" data-act="close-layer" aria-label="关闭">×</button></div></div>';
+    if (anyUndone()){
+      h += '<div class="layer-banner">' + tallyHtml() + (tally().conflict ? '<button class="btn warn" data-act="force">强制撤销冲突 1 条</button>' : '') + '</div>';
+    }
+    h += '<div class="layer-grid">';
+    h += '<aside class="layer-list scroll">' + filtersHtml();
+    var rows = filterParams();
+    if (!rows.length){
+      h += '<div class="empty">这个来源没有自动写入。<br>换个筛选看看。</div>';
+    } else {
+      rows.forEach(function(b){
+        if (b.id === 'cfm'){ h += confirmRow(true); return; }
+        h += batchRow(b, 'button');
+      });
+    }
+    h += '</aside>';
+    h += '<section class="layer-detail scroll">';
+    if (S.sel){ h += batchDetailB(batchById(S.sel)); }
+    else { h += '<div class="empty">左侧选一个批次，<br>查看新旧值与撤销结果。</div>'; }
+    h += '</section></div></div>';
+    return h;
+  }
+
+  /* ---------------- drawer rendering ---------------- */
+  function tasksHead(){
+    return '<div class="line"><h2>工作流 · 2</h2><button class="x" data-act="close-drawer" aria-label="关闭">×</button></div><div class="sub">1 个已完成 · 1 个运行中</div>';
+  }
+  function auditHead(){
+    return '<div class="line"><button class="back" data-act="back-tasks">←</button><h2>审计明细</h2><button class="x" data-act="close-drawer" aria-label="关闭">×</button></div><div class="sub">本任务 · 仅你可见</div>';
+  }
+  function renderDrawer(){
+    var head = $('#drawer-head'), bodyEl = $('#drawer-body'), foot = $('#drawer-foot');
+    if (variant === 'A' && UI.panel === 'audit'){
+      head.innerHTML = auditHead();
+      bodyEl.innerHTML = auditA();
+      foot.textContent = '审计永久保留 · 导出 / 清空在全部审计';
+    } else {
+      head.innerHTML = tasksHead();
+      bodyEl.innerHTML = runningCard() + taskCard();
+      foot.textContent = variant === 'B' ? '审计在独立审阅层里打开；抽屉只放任务卡' : (variant === 'C' ? '审计与撤销跟着任务卡，不另开面板' : '任务卡放撤销摘要与入口；明细在审计里');
+    }
+  }
+
+  function renderLayer(){
+    var layer = $('#layer');
+    if (variant !== 'B' || !UI.layerOpen){ layer.innerHTML = ''; body.classList.remove('layer-open'); return; }
+    layer.innerHTML = layerB();
+    layer.dataset.view = S.sel ? 'detail' : 'list';
+    body.classList.add('layer-open');
+  }
+
+  function render(){
+    body.dataset.variant = variant;
+    $('#proto-name').textContent = VARIANT_NAMES[variant];
+    body.classList.toggle('drawer-open', UI.drawerOpen);
+    renderDrawer();
+    renderLayer();
+    updateDebug();
+  }
+
+  function updateDebug(){
+    var d = document.getElementById('debug');
+    if (!d) return;
+    var sw = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
+    d.textContent = 'variant=' + variant + ' state=' + initState + ' vw=' + window.innerWidth + ' sw=' + sw + ' ' + (sw > window.innerWidth ? 'OVERFLOW' : 'ok');
+  }
+
+  /* ---------------- actions ---------------- */
+  function openAudit(){
+    if (variant === 'B'){
+      UI.layerOpen = true; UI.drawerOpen = false; S.sel = null;
+      render();
+      return;
+    }
+    UI.drawerOpen = true;
+    if (variant === 'A'){ UI.panel = 'audit'; S.sel = null; }
+    if (variant === 'C'){
+      var el = document.getElementById('inline-audit');
+      if (el) el.scrollIntoView({block:'start'});
+    }
+    render();
+  }
+  function closeDrawer(){ UI.drawerOpen = false; render(); }
+  async function runBatchUndo(id){
+    if (S.task === 'running') return;
+    if (id === 'b1'){
+      if (S.b1 !== 'idle') return;
+      S.b1 = 'undone';
+    } else if (id === 'b2'){
+      if (S.b2 !== 'idle') return;
+      S.b2 = 'done';
+    }
+    S.sel = id;
+    render();
+    var t = tally();
+    toast('已撤销 ' + t.undone + (t.conflict ? ' / 冲突 ' + t.conflict + '（跳过）' : '') + '；撤销已记入审计');
+  }
+  function openTaskDialog(){
+    if (S.task === 'running') return;
+    $('#dlg-task').showModal();
+  }
+  async function runTaskUndo(){
+    closeDialogs();
+    S.task = 'running';
+    render();
+    await sleep(650);
+    S.b1 = 'undone';
+    S.b2 = 'done';
+    S.taskDone = true;
+    S.task = 'done';
+    render();
+    toast('已撤销 11 / 冲突 1（跳过）/ 跳过 1 批（采集器）；撤销已记入审计');
+  }
+  function openForceDialog(){
+    $('#dlg-force').showModal();
+  }
+  function runForce(){
+    closeDialogs();
+    S.b2 = 'forced';
+    S.taskDone = true;
+    render();
+    toast('已强制撤销 1 条，记 result=forced；当前值已被覆盖');
+  }
+  function closeDialogs(){
+    $$('dialog[open]').forEach(function(d){ d.close(); });
+  }
+  function reset(){
+    closeDialogs();
+    S = freshState();
+    UI = { panel:'tasks', drawerOpen:true, layerOpen:false };
+    initState = 'task';
+    history.replaceState(null, '', '?variant=' + variant);
+    render();
+  }
+  function setVariant(next){
+    if (VARIANT_ORDER.indexOf(next) < 0) return;
+    closeDialogs();
+    variant = next;
+    S = freshState();
+    UI = { panel:'tasks', drawerOpen:true, layerOpen:false };
+    initState = 'task';
+    history.replaceState(null, '', '?variant=' + variant);
+    render();
+  }
+  function jumpState(st){
+    location.search = '?variant=' + variant + '&state=' + st + '&still=1';
+  }
+
+  /* ---------------- events ---------------- */
+  document.addEventListener('click', function(e){
+    var jump = e.target.closest('[data-jump]');
+    if (jump){ closeDialogs(); jumpState(jump.dataset.jump); return; }
+    var el = e.target.closest('[data-act]');
+    if (!el) return;
+    var act = el.dataset.act, id = el.dataset.id;
+    switch (act){
+      case 'prev': setVariant(VARIANT_ORDER[(VARIANT_ORDER.indexOf(variant) + 2) % 3]); break;
+      case 'next': setVariant(VARIANT_ORDER[(VARIANT_ORDER.indexOf(variant) + 1) % 3]); break;
+      case 'reset': reset(); break;
+      case 'help': $('#dlg-help').showModal(); break;
+      case 'cancel': closeDialogs(); break;
+      case 'rail': body.classList.toggle('rail-open'); break;
+      case 'open-drawer': UI.drawerOpen = true; render(); break;
+      case 'close-drawer': closeDrawer(); break;
+      case 'open-audit': openAudit(); break;
+      case 'open-batch':
+        if (variant === 'C'){ S.sel = id; render(); break; }
+        S.sel = id; UI.mobileDetail = true; render(); break;
+      case 'back-list': S.sel = null; UI.mobileDetail = false; if (variant === 'A') UI.panel = 'audit'; render(); break;
+      case 'back-tasks': UI.panel = 'tasks'; S.sel = null; render(); break;
+      case 'undo-task': openTaskDialog(); break;
+      case 'confirm-task': runTaskUndo(); break;
+      case 'undo-batch': runBatchUndo(id); break;
+      case 'force': openForceDialog(); break;
+      case 'confirm-force': runForce(); break;
+      case 'close-layer': UI.layerOpen = false; UI.drawerOpen = true; render(); break;
+      case 'filter': S.filters = id; render(); break;
+      case 'export': toast('导出 JSON / CSV 不在本原型范围（#15 已定）'); break;
+      case 'all-audit': toast('全局（跨任务）审计、筛选、导出与清空不在本原型范围'); break;
+      case 'export-all': toast('导出 JSON / CSV 不在本原型范围'); break;
+    }
+  });
+  document.addEventListener('keydown', function(e){
+    var tag = (e.target && e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+    if (e.key === 'ArrowLeft'){ e.preventDefault(); setVariant(VARIANT_ORDER[(VARIANT_ORDER.indexOf(variant) + 2) % 3]); }
+    if (e.key === 'ArrowRight'){ e.preventDefault(); setVariant(VARIANT_ORDER[(VARIANT_ORDER.indexOf(variant) + 1) % 3]); }
+    if (e.key === 'Escape'){ if ($('dialog[open]')) return; if (UI.layerOpen){ UI.layerOpen = false; UI.drawerOpen = true; render(); } else if (UI.drawerOpen){ closeDrawer(); } }
+  });
+  window.addEventListener('resize', updateDebug);
+
+  /* ---------------- initial state ---------------- */
+  function applyInitial(){
+    if (initState === 'help'){ $('#dlg-help').showModal(); }
+    if (variant === 'B'){
+      if (initState !== 'task'){ UI.layerOpen = true; UI.drawerOpen = false; }
+      else { UI.drawerOpen = true; }
+    } else {
+      UI.drawerOpen = true;
+    }
+    if (initState === 'list'){
+      if (variant === 'A'){ UI.panel = 'audit'; S.sel = null; }
+      if (variant === 'B'){ S.sel = null; }
+      if (variant === 'C'){ S.sel = null; }
+    }
+    if (initState === 'detail' || initState === 'conflict' || initState === 'forced' || initState === 'confirm' || initState === 'tconfirm'){
+      S.sel = 'b2';
+      if (variant === 'A') UI.panel = 'audit';
+      if (variant === 'B'){ UI.layerOpen = true; UI.drawerOpen = false; }
+    }
+    if (initState === 'conflict' || initState === 'forced' || initState === 'confirm'){
+      S.b1 = 'undone'; S.b2 = 'done'; S.taskDone = true; S.task = 'done';
+    }
+    if (initState === 'forced'){ S.b2 = 'forced'; }
+    if (initState === 'tconfirm'){
+      S.sel = null;
+      if (variant === 'A') UI.panel = 'audit';
+    }
+    render();
+    if (initState === 'confirm'){ setTimeout(function(){ $('#dlg-force').showModal(); }, 60); }
+    if (initState === 'tconfirm'){ setTimeout(function(){ $('#dlg-task').showModal(); }, 60); }
+    if (initState === 'conflict' || initState === 'forced'){
+      requestAnimationFrame(function(){
+        if (variant === 'C'){
+          var el = document.querySelector('.conflict-bar');
+          var sc = el && el.closest('.drawer-body');
+          if (el && sc){
+            var r = el.getBoundingClientRect(), c = sc.getBoundingClientRect();
+            if (r.top < c.top || r.bottom > c.bottom) sc.scrollTop += r.top - c.top - 150;
+          }
+        }
+      });
+    }
+  }
+  applyInitial();
+})();
+</script>
+</body>
+</html>
