@@ -7,6 +7,7 @@ import * as platform from './handlers/platform.mjs';
 import * as resume from './handlers/resume.mjs';
 import * as interview from './handlers/interview.mjs';
 import * as company from './handlers/company.mjs';
+import * as profile from './handlers/profile.mjs';
 
 export const HANDLERS = {
   'recruit.events': recruit.events,
@@ -14,6 +15,7 @@ export const HANDLERS = {
   'recruit.project': recruit.project,
   'recruit.sources': recruit.sourceStates,
   'recruit.bulkWrite': recruit.bulkWrite,
+  'profile.write': profile.profileWrite,
   'search.public': search.publicSearch,
   'search.company': search.companyResearch,
   'platform.status': platform.status,

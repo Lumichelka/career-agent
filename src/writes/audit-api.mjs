@@ -4,11 +4,10 @@ import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {hasAuditSchema, listAuditBatches} from './audit-store.mjs';
+import {WRITE_DOMAINS} from './domains.mjs';
 
-// 每个自动写入域一个库；当前只有招聘域（#30 的画像域接入时往这里加一行）。
-export const AUDIT_DOMAINS = [
-  {domain: 'recruit', file: 'recruit.db'}
-];
+// 每个自动写入域一个库；域清单与写网关共用，新增域只改 domains.mjs。
+export const AUDIT_DOMAINS = WRITE_DOMAINS;
 
 export function readAudit({dir, userId, taskId = '', batchId = '', limit = 50} = {}) {
   if (!dir || !userId) return {batches: [], counts: {batches: 0, rows: 0}, filters: {taskId, batchId, limit}};

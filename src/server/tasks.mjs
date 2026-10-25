@@ -130,6 +130,18 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+// Windows 上目标 JSON 偶尔被杀毒/索引或并发读取短暂占用，rename 会返回 EPERM/EBUSY；短暂重试即可。
+async function renameTaskFile(tmp, file, attempts = 6) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await rename(tmp, file);
+    } catch (error) {
+      if (!['EPERM', 'EBUSY'].includes(error.code) || attempt >= attempts) throw error;
+      await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
+    }
+  }
+}
+
 function abortRace(signal) {
   return new Promise((resolve, reject) => {
     const onAbort = () => reject(abortedError());
@@ -200,7 +212,7 @@ export class TaskManager {
       await mkdir(dirname(file), {recursive: true});
       const tmp = file + '.tmp';
       await writeFile(tmp, payload, 'utf8');
-      await rename(tmp, file);
+      await renameTaskFile(tmp, file);
     });
     this.writes.set(task.id, next);
     return next;
@@ -248,6 +260,31 @@ export class TaskManager {
     return {ok: false, reason: 'missing'};
   }
 
+  // 确认接口处理完一条待确认后调用：没有剩余待确认时把任务从 waiting_confirmation 收尾。
+  // finalize=false 表示这个任务还有别的待确认：只把已接受的写入条数并进任务卡，暂不收尾。
+  async applyConfirmation(userId, taskId, {state = 'succeeded', phase = '确认已处理', counts = null, error = null, finalize = true} = {}) {
+    const task = await this.read(userId, String(taskId || ''));
+    if (!task) return null;
+    if (counts) {
+      // 调用方只在真实接受（非幂等重放）时传 counts，避免重复接受重复累加。
+      const rows = Number(counts.rows) || 0;
+      if (rows > 0) { task.counts.writes = (Number(task.counts.writes) || 0) + rows; task.counts.batches = (Number(task.counts.batches) || 0) + 1; }
+    }
+    if (finalize && task.state === 'waiting_confirmation') {
+      task.state = TASK_STATES.includes(state) ? state : 'succeeded';
+      task.phase = String(phase || '确认已处理').slice(0, 200);
+      task.finishedAt = nowIso();
+      task.durationMs = task.startedAt ? Date.now() - Date.parse(task.startedAt) : 0;
+      if (error && typeof error === 'object') {
+        task.error = {code: String(error.code || 'CONFIRMATION_EXPIRED').slice(0, 60), message: String(error.message || '').slice(0, 500)};
+        if (error.recovery) task.error.recovery = String(error.recovery).slice(0, 200);
+      }
+    }
+    task.updatedAt = nowIso();
+    await this.persist(task);
+    return publicTask(task);
+  }
+
   async setDraft(userId, {taskId, draftId, action}) {
     const target = {save: 'saved', discard: 'discarded'}[action];
     if (!target) return {ok: false, reason: 'invalid-action'};
@@ -279,6 +316,8 @@ export class TaskManager {
     let release = null;
 
     const baseEmit = event => { try { emit(event); } catch { /* 客户端断开不影响任务记录 */ } };
+    // 敏感写入要求用户确认：任务停在 waiting_confirmation，等接受/拒绝接口处理后收尾。
+    let awaitingConfirmation = false;
     const snapshot = () => ({
       taskId: task.id, state: task.state, phase: task.phase, counts: {...task.counts},
       title: task.title, sourceName: task.sourceName,
@@ -288,6 +327,8 @@ export class TaskManager {
     const emitProgress = extra => baseEmit({type: 'progress', taskId: task.id, state: task.state, phase: task.phase, counts: {...task.counts}, ...extra, at: nowIso()});
     const touch = () => { task.updatedAt = nowIso(); };
 
+    // 事件触发的状态写入要排队收尾：先落 waiting_confirmation，再落 succeeded，事件顺序才稳定。
+    const stateWrites = [];
     const setState = async (state, extra = {}) => {
       task.state = state;
       if (extra.phase) task.phase = String(extra.phase).slice(0, 200);
@@ -296,6 +337,11 @@ export class TaskManager {
       const payload = snapshot();
       await this.persist(task);
       baseEmit({type: 'task', ...payload, at: nowIso()});
+    };
+    const deferState = (...args) => {
+      const write = setState(...args);
+      stateWrites.push(write.catch(() => {}));
+      return write;
     };
     const setPhase = text => {
       const phase = String(text || '').trim().slice(0, 200);
@@ -377,20 +423,21 @@ export class TaskManager {
             if (event.evidence) void addEvidence(event.evidence);
             break;
           case 'platform_required':
-            void setState('waiting_confirmation', {phase: '等待你完成登录或确认'});
+            void deferState('waiting_confirmation', {phase: '等待你完成登录或确认'});
             break;
           case 'platform_resolved':
           case 'confirm_resolved':
-            if (task.state === 'waiting_confirmation') void setState('running', {phase: '继续执行'});
+            if (task.state === 'waiting_confirmation') void deferState('running', {phase: '继续执行'});
             break;
           case 'confirm_required':
-            void setState('waiting_confirmation', {phase: '等待确认'});
+            if (event.confirmId) awaitingConfirmation = true;
+            void deferState('waiting_confirmation', {phase: '等待确认'});
             break;
           case 'blocked':
-            void setState('blocked', {phase: String(event.reason || '任务受阻')});
+            void deferState('blocked', {phase: String(event.reason || '任务受阻')});
             break;
           case 'task_state':
-            if (TASK_STATES.includes(event.state)) void setState(event.state, {phase: event.phase});
+            if (TASK_STATES.includes(event.state)) void deferState(event.state, {phase: event.phase});
             break;
           default:
             break;
@@ -420,7 +467,18 @@ export class TaskManager {
       }));
       execution.catch(() => {});
       const result = await Promise.race([execution, abortRace(controller.signal)]);
+      // 待确认任务要先落 waiting_confirmation 的事件，再决定是否收尾，事件顺序才稳定。
+      if (awaitingConfirmation) await Promise.allSettled(stateWrites);
 
+      if (awaitingConfirmation && task.state === 'waiting_confirmation') {
+        // 执行体已经交付，但敏感写入还等用户确认：保持待确认，收尾交给确认接口。
+        task.phase = '等待确认';
+        task.durationMs = Date.now() - started;
+        touch();
+        await this.persist(task);
+        emitTask();
+        return {task: publicTask(task), result, error: null};
+      }
       if (task.state === 'running' || task.state === 'waiting_confirmation' || task.state === 'blocked') {
         task.state = 'succeeded';
         task.phase = '任务完成';
