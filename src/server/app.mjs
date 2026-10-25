@@ -120,9 +120,8 @@ http.createServer(async (req, res) => {
       return res.end(html);
     }
     if (req.method === 'GET' && url.pathname === '/wechat') {
-      const html = (await readFile(join(root, 'src', 'web', 'wechat.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
-      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
-      return res.end(html);
+      res.writeHead(302, {Location: '/recruit?tab=sources&type=wechat'});
+      return res.end();
     }
 
     if (req.method === 'GET' && url.pathname === '/companies') {

@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS wechat_accounts(
 );
 CREATE TABLE IF NOT EXISTS wechat_articles(
   id TEXT PRIMARY KEY, account_id TEXT, title TEXT, url TEXT UNIQUE,
-  published_at TEXT, summary TEXT, content TEXT, event_id TEXT, created_at TEXT
+  published_at TEXT, summary TEXT, content TEXT, event_id TEXT, created_at TEXT,
+  has_recruitment TEXT, analysis_summary TEXT, extracted_json TEXT,
+  project_count INTEGER DEFAULT 0, analyzed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_wechat_articles_account ON wechat_articles(account_id);
 `;
@@ -27,10 +29,21 @@ export class WeChatStore {
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    this.migrate();
     this.seed();
   }
   static open(file) { return new WeChatStore(file); }
   close() { try { this.db.close(); } catch { /* 已关闭 */ } }
+
+  migrate() {
+    const cols = new Set(this.db.prepare('PRAGMA table_info(wechat_articles)').all().map(r => r.name));
+    for (const [name, ddl] of [
+      ['has_recruitment', 'TEXT'], ['analysis_summary', 'TEXT'], ['extracted_json', 'TEXT'],
+      ['project_count', 'INTEGER DEFAULT 0'], ['analyzed_at', 'TEXT']
+    ]) {
+      if (!cols.has(name)) this.db.exec(`ALTER TABLE wechat_articles ADD COLUMN ${name} ${ddl}`);
+    }
+  }
 
   seed() {
     const count = this.db.prepare('SELECT COUNT(*) c FROM wechat_accounts').get().c;
@@ -71,7 +84,7 @@ export class WeChatStore {
     return r ? {id: r.id, name: r.name, school: r.school, category: r.category, biz: r.biz} : null;
   }
 
-  saveArticle({accountId, title, url, publishedAt = '', summary = '', content = '', eventId = ''}) {
+  saveArticle({accountId, title, url, publishedAt = '', summary = '', content = '', eventId = '', hasRecruitment = '', analysisSummary = '', extractedJson = '', projectCount = 0, analyzedAt = ''}) {
     const name = String(title || '').trim().slice(0, 200);
     const link = String(url || '').trim().slice(0, 500);
     if (!name || !/^https?:\/\//.test(link)) throw new Error('文章标题和链接必填');
@@ -79,12 +92,25 @@ export class WeChatStore {
     const existing = this.db.prepare('SELECT id FROM wechat_articles WHERE url=?').get(link);
     const id = existing?.id || randomUUID();
     if (existing) {
-      this.db.prepare('UPDATE wechat_articles SET account_id=?,title=?,published_at=?,summary=?,content=?,event_id=COALESCE(NULLIF(?,\'\'),event_id) WHERE id=?')
-        .run(accountId || '', name, publishedAt, summary, content, eventId, id);
+      this.db.prepare(`UPDATE wechat_articles SET account_id=?,title=?,published_at=?,summary=?,content=?,
+        event_id=COALESCE(NULLIF(?,''),event_id),has_recruitment=?,analysis_summary=?,extracted_json=?,project_count=?,analyzed_at=? WHERE id=?`)
+        .run(accountId || '', name, publishedAt, summary, content, eventId,
+          String(hasRecruitment || '').slice(0, 20), String(analysisSummary || '').slice(0, 2000),
+          String(extractedJson || '').slice(0, 20000), Number(projectCount) || 0, String(analyzedAt || '').slice(0, 40), id);
     } else {
-      this.db.prepare(`INSERT INTO wechat_articles(id,account_id,title,url,published_at,summary,content,event_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)`)
-        .run(id, accountId || '', name, link, publishedAt, summary, content, eventId, now);
+      this.db.prepare(`INSERT INTO wechat_articles(id,account_id,title,url,published_at,summary,content,event_id,created_at,has_recruitment,analysis_summary,extracted_json,project_count,analyzed_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(id, accountId || '', name, link, publishedAt, summary, content, eventId, now,
+          String(hasRecruitment || '').slice(0, 20), String(analysisSummary || '').slice(0, 2000),
+          String(extractedJson || '').slice(0, 20000), Number(projectCount) || 0, String(analyzedAt || '').slice(0, 40));
     }
+    return this.getArticle(id);
+  }
+
+  saveAnalysis(id, analysis) {
+    this.db.prepare(`UPDATE wechat_articles SET has_recruitment=?,analysis_summary=?,extracted_json=?,project_count=?,analyzed_at=? WHERE id=?`)
+      .run(String(analysis.hasRecruitment || 'uncertain').slice(0, 20), String(analysis.summary || '').slice(0, 2000),
+        JSON.stringify(analysis).slice(0, 20000), (analysis.projects || []).length, new Date().toISOString(), id);
     return this.getArticle(id);
   }
 
@@ -114,6 +140,9 @@ function rowToArticle(r) {
   return {
     id: r.id, accountId: r.account_id, title: r.title, url: r.url,
     publishedAt: r.published_at, summary: r.summary, content: r.content,
-    eventId: r.event_id, createdAt: r.created_at
+    eventId: r.event_id, createdAt: r.created_at,
+    hasRecruitment: r.has_recruitment || '', analysisSummary: r.analysis_summary || '',
+    extractedJson: r.extracted_json || '', projectCount: Number(r.project_count) || 0,
+    analyzedAt: r.analyzed_at || ''
   };
 }

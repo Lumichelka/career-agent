@@ -2,7 +2,8 @@
 import {join} from 'node:path';
 import {WeChatStore} from './store.mjs';
 import {fetchText} from '../recruit/fetch.mjs';
-import {parseArticleHtml, extractDraft} from '../recruit/manual.mjs';
+import {parseArticleHtml} from '../recruit/manual.mjs';
+import {analyzeArticle} from './analyze.mjs';
 
 export function bizOf(url) {
   try { return new URL(url).searchParams.get('__biz') || ''; } catch { return ''; }
@@ -53,8 +54,16 @@ export async function handleWechat({method, pathname, url, body, dir}) {
           accountId: account.id, title, url: link, publishedAt,
           summary: text.slice(0, 300), content: text
         });
-        const draft = extractDraft({text: title + '\n' + text, title, url: link});
-        return {json: {article, draft, account}};
+        const analysis = analyzeArticle({title, text, url: link});
+        const saved = store.saveAnalysis(article.id, analysis);
+        return {json: {article: saved, analysis, draft: analysis.draft, account}};
+      }
+      if (pathname.startsWith('articles/') && pathname.endsWith('/analyze')) {
+        const id = pathname.split('/')[1];
+        const article = store.getArticle(id);
+        if (!article) return {status: 404, json: {error: '文章不存在'}};
+        const analysis = analyzeArticle({title: article.title, text: article.content || article.summary || '', url: article.url});
+        return {json: {article: store.saveAnalysis(id, analysis), analysis}};
       }
       if (pathname.startsWith('articles/') && pathname.endsWith('/link')) {
         const id = pathname.split('/')[1];

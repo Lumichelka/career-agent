@@ -7,6 +7,7 @@ import {runCollection, htmlToText, normalize} from './collect.mjs';
 import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
+import {WeChatStore} from '../wechat/store.mjs';
 
 const MAX_DAYS = 180;
 
@@ -36,7 +37,17 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
     if (pathname === 'sources') {
       const data = withStore(dir, store => ({sources: store.sourceStates(), runs: store.recentRuns(10), stats: store.stats()}));
       const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', capabilities: s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}}]));
-      return {json: {...data, catalog}};
+      let wechat = {accounts: [], stats: {accounts: 0, articles: 0}};
+      try {
+        const ws = WeChatStore.open(join(dir, 'wechat.db'));
+        try {
+          wechat = {
+            accounts: ws.listAccounts().map(a => ({...a, sourceId: 'wechat:' + a.id, sourceType: 'wechat', enabled: true})),
+            stats: ws.stats()
+          };
+        } finally { ws.close(); }
+      } catch { /* 公众号库尚未建立时不影响招聘来源 */ }
+      return {json: {...data, catalog, wechat}};
     }
     if (pathname === 'events') {
       const {from, to, days} = range(url);
