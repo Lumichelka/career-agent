@@ -1,0 +1,42 @@
+{
+  "events": [
+    {
+      "title": "西南财经大学2026届秋季双选会",
+      "startAt": "2026-11-05T09:00:00+08:00",
+      "endAt": "",
+      "venue": "柳林校区体育馆",
+      "school": "西南财经大学",
+      "city": "成都",
+      "kind": "双选会"
+    }
+  ],
+  "projects": [
+    {
+      "eventRef": 0,
+      "company": "中国银行四川省分行",
+      "title": "管理培训生",
+      "positions": "专业不限",
+      "requirements": "",
+      "applyMode": "网申",
+      "applyUrl": "https://example.com/jobs/boc"
+    },
+    {
+      "eventRef": 0,
+      "company": "四川发展（控股）有限责任公司",
+      "title": "",
+      "positions": "",
+      "requirements": "本科及以上",
+      "applyMode": "现场投递",
+      "applyUrl": ""
+    },
+    {
+      "eventRef": 0,
+      "company": "成都银行股份有限公司",
+      "title": "综合柜员",
+      "positions": "",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    }
+  ]
+}

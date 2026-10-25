@@ -25,6 +25,7 @@ import {InboundMcp} from '../mcp/inbound.mjs';
 import {createInboundHttp} from './inbound-http.mjs';
 import {handleAudit} from '../writes/audit-api.mjs';
 import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
+import {createSourceCheckService} from '../source-check/pipeline.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -35,7 +36,8 @@ export async function createApp({
   root = fileURLToPath(new URL('../..', import.meta.url)),
   host = '127.0.0.1',
   port = 0,
-  taskLimits = {}
+  taskLimits = {},
+  sourceCheck = {}
 } = {}) {
 if (!dataDir) throw new Error('createApp 需要 dataDir：准备数据目录是进程级入口（index.mjs）的职责');
 await mkdir(dataDir, {recursive: true});
@@ -47,6 +49,14 @@ const running = new Map(), taskEvents = new Map(), loginWaiters = new Map(), log
 const failureStreaks = new Map();
 // 任务闸与任务记录：每用户 2 / 全局 8 / 排队 120s；记录落在 users/<id>/tasks/，供抽屉刷新。
 const taskManager = new TaskManager({dataDir, gate: new TaskGate(taskLimits), maxDurationMs: taskLimits.maxDurationMs});
+// 来源校对：浏览器读取与视觉抽取可注入，确定性测试不启动真实浏览器/视觉 API；live 走真实实现。
+const sourceCheckService = createSourceCheckService({
+  dataDir,
+  taskManager,
+  ...(sourceCheck.browserReader ? {browserReader: sourceCheck.browserReader} : {}),
+  ...(sourceCheck.extractor ? {extractor: sourceCheck.extractor} : {}),
+  ...(sourceCheck.visionCall ? {visionCall: sourceCheck.visionCall} : {})
+});
 let actualPort = Number(port);
 let localOrigin = 'http://127.0.0.1:' + actualPort;
 let allowedHosts = new Set();
@@ -251,6 +261,13 @@ const server = http.createServer(async (req, res) => {
       const out = await handleAudit({dir, userId: user.id, url});
       return send(res, out.json);
     }
+    // 来源校对的截图/抽取证据：只从本人任务目录取，文件名白名单。
+    if (req.method === 'GET' && url.pathname === '/api/source-check/evidence') {
+      const out = await sourceCheckService.readEvidence({userId: user.id, taskId: url.searchParams.get('taskId'), file: url.searchParams.get('file')});
+      if (!out) return send(res, {error: '没有这份证据'}, 404);
+      res.writeHead(200, {'Content-Type': out.type, 'Cache-Control': 'no-store'});
+      return res.end(out.body);
+    }
     // 敏感写入的挂起确认：默认只列本人未处理、未过期的；state=all 供任务卡审计区看已接受/已拒绝记录。
     if (req.method === 'GET' && url.pathname === '/api/confirmations') {
       const out = listConfirmations({
@@ -325,6 +342,12 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/mcp/clients/regenerate') {
         const out = await inboundMcp.regenerateClient({userId: user.id, id: String(body.id || '')});
         return send(res, out.json, out.status);
+      }
+
+      // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
+      if (url.pathname === '/api/source-check/start') {
+        const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId});
+        return send(res, out.json, out.status || 200);
       }
 
       // 接受/拒绝敏感写入确认：身份只来自当前登录用户；确认不属于本人时按不存在处理。

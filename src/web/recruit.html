@@ -127,7 +127,7 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
       <button class="primary" id="collect-all">采集全部已接入源</button>
       <button id="manual-open">＋ 公众号 / 手动导入</button>
       <button id="probe">检查各源连通性</button>
-      <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。</span>
+      <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。采集器禁用时可用来源卡「来源校对」：应用内浏览器只读列表与一场详情各一次并截图，不调用采集器。</span>
     </div>
     <div class="sources" id="sources"><div class="empty">正在读取信息源…</div></div>
     <details class="panel" style="margin-top:14px;padding:12px">
@@ -215,7 +215,7 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
 <script>
 const TOKEN='SESSION_TOKEN';
 const el=s=>document.querySelector(s);
-let catalog={},sourceState=[];
+let catalog={},sourceState=[],sourceManual={};
 function toast(text){const t=el('#toast');t.textContent=text;t.classList.add('show');clearTimeout(t._timer);t._timer=setTimeout(()=>t.classList.remove('show'),3200)}
 async function api(path,body){
   const r=await fetch('/api/recruit/'+path,{method:body?'POST':'GET',headers:{'x-career-token':TOKEN,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
@@ -245,6 +245,7 @@ function renderSources(sources,wechat){
   for(const a of wechat?.accounts||[]){const key=a.school||'未归类';if(!wxBySchool.has(key))wxBySchool.set(key,[]);wxBySchool.get(key).push(a);}
   const shown=new Set();
   const rows=[];
+  const manualLine=s=>{const m=sourceManual[s.id];return m?'<div class="src-sub manual-read">最近手动读取 '+esc(String(m.at||'').slice(0,16).replace('T',' '))+' · '+esc(m.reason||'')+'</div>':''};
   const statusBadge=s=>{
     if(!s.enabled)return '<span class="badge off">未接入</span>';
     const st=s.last_status||'待采集';
@@ -258,7 +259,7 @@ function renderSources(sources,wechat){
     for(const s of list){
       const proj=catalog[s.id]?.capabilities?.projects||'none';
       const note=(s.last_error||catalog[s.id]?.note||s.note||'').slice(0,140);
-      rows.push('<div class="src-row"><div class="src-name"><b>'+esc(s.name)+'</b>'+statusBadge(s)+'<div class="src-sub" title="'+esc(note)+'">'+esc(note||(s.school+' · '+(s.channel||'')))+'</div></div><div>'+esc(s.channel||s.mode)+'</div><div>'+esc(s.school)+'</div><div>'+(s.last_count||0)+' 条</div><div>'+esc(proj==='none'?'—':proj)+'</div><div class="src-actions"><button data-collect="'+esc(s.id)+'" '+(s.enabled?'':'disabled')+'>采集</button><a href="'+esc(s.list_url)+'" target="_blank" rel="noopener noreferrer">原站 ↗</a></div></div>');
+      rows.push('<div class="src-row"><div class="src-name"><b>'+esc(s.name)+'</b>'+statusBadge(s)+'<div class="src-sub" title="'+esc(note)+'">'+esc(note||(s.school+' · '+(s.channel||'')))+'</div>'+manualLine(s)+'</div><div>'+esc(s.channel||s.mode)+'</div><div>'+esc(s.school)+'</div><div>'+(s.last_count||0)+' 条</div><div>'+esc(proj==='none'?'—':proj)+'</div><div class="src-actions">'+(catalog[s.id]?.sourceCheck?'<button data-source-check="'+esc(s.id)+'" title="用应用内浏览器读取列表与一场活动详情各一次，不调用采集器">来源校对</button>':'')+'<button data-collect="'+esc(s.id)+'" '+(s.enabled?'':'disabled')+'>采集</button><a href="'+esc(s.list_url)+'" target="_blank" rel="noopener noreferrer">原站 ↗</a></div></div>');
       const key=s.school||'';
       if(wxBySchool.has(key)&&!shown.has(key)){shown.add(key);rows.push(...wxBySchool.get(key).map(accountRow));}
     }
@@ -311,7 +312,7 @@ function renderRuns(runs){
 async function loadAll(){
   try{
     const s=await api('sources');
-    catalog=s.catalog||{};renderSources(s.sources,s.wechat);renderRuns(s.runs);loadWechatArticles();window.__stats=s.stats;
+    catalog=s.catalog||{};sourceManual=s.manualReads||{};renderSources(s.sources,s.wechat);renderRuns(s.runs);loadWechatArticles();window.__stats=s.stats;
     await loadCalendar(el('#cal-month').value||monthNow());
   }catch(e){toast(e.message)}
 }
@@ -331,6 +332,16 @@ async function collect(ids,label){
 
 el('#collect-all').onclick=()=>collect([],'采集');
 el('#refresh').onclick=()=>loadAll();
+async function startSourceCheck(sourceId,button){
+  if(button)button.disabled=true;
+  try{
+    const resp=await fetch('/api/source-check/start',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({sourceId})});
+    const d=await resp.json().catch(()=>({error:'返回格式异常'}));
+    if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));
+    // 数据页只负责发起：立刻切回对话并打开抽屉，不再多弹一次确认。
+    location.href='/chat?session='+encodeURIComponent(d.sessionId)+'&workflow=open';
+  }catch(e){toast(e.message);if(button)button.disabled=false}
+}
 function showView(view){const isSources=view==='sources';el('#sources-panel').hidden=!isSources;el('#calendar-panel').hidden=isSources;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('primary',b.dataset.view===view));}
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>showView(b.dataset.view));
 showView(new URLSearchParams(location.search).get('tab')==='sources'?'sources':'calendar');
@@ -340,6 +351,7 @@ el('#cal-today').onclick=()=>loadCalendar(monthNow());
 el('#cal-month').onchange=()=>loadCalendar(el('#cal-month').value);
 document.addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.sourceCheck){await startSourceCheck(b.dataset.sourceCheck,b);return}
   if(b.dataset.collect){await collect([b.dataset.collect],'采集 '+b.dataset.collect);return}
   if(b.dataset.export){const f=b.dataset.export;try{const r=await fetch('/api/recruit/export.'+f+'?days='+days(),{headers:{'x-career-token':TOKEN}});if(!r.ok)throw new Error('导出失败');const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='zhixiang-schedule.'+f;a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);toast('已导出 '+f.toUpperCase())}catch(err){toast(err.message)}return}
   if(b.dataset.wxDraft){if(!wxDraft)return;el('#m-title').value=wxDraft.title||'';el('#m-start').value=wxDraft.startAt?wxDraft.startAt.slice(0,16):'';el('#m-venue').value=wxDraft.venue||'';el('#m-city').value=wxDraft.city||'';el('#m-company').value=wxDraft.company||'';el('#m-school').value=wxDraft.school||'公众号导入';el('#m-kind2').value=wxDraft.kind||'其他';el('#m-apply').value=wxDraft.applyMode||'';el('#m-notes').value=wxDraft.notes||'';manualPreview=wxArticle?.content||'';el('#m-draft').hidden=false;manualDialog.showModal();return}

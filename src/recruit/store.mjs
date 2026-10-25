@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS event_projects(
 CREATE TABLE IF NOT EXISTS raw_pages(
   url TEXT PRIMARY KEY, source_id TEXT, title TEXT, text TEXT, fetched_at TEXT, hash TEXT
 );
+-- 来源校对：最近一次手动浏览器读取与原因；与采集器的 last_run/last_status 分开存，互不覆盖。
+CREATE TABLE IF NOT EXISTS source_manual_reads(
+  source_id TEXT PRIMARY KEY, task_id TEXT, session_id TEXT, at TEXT, status TEXT, reason TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_events_start ON events(start_at);
 CREATE INDEX IF NOT EXISTS idx_events_school ON events(school);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
@@ -116,6 +120,24 @@ export class RecruitStore {
 
   sourceStates() {
     return this.db.prepare('SELECT * FROM sources ORDER BY category, school').all();
+  }
+
+  recordManualRead({sourceId, taskId = '', sessionId = '', status = 'succeeded', reason = ''}) {
+    this.db.prepare(`INSERT INTO source_manual_reads(source_id,task_id,session_id,at,status,reason) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(source_id) DO UPDATE SET task_id=excluded.task_id,session_id=excluded.session_id,at=excluded.at,status=excluded.status,reason=excluded.reason`)
+      .run(String(sourceId), String(taskId || ''), String(sessionId || ''), new Date().toISOString(), String(status || ''), String(reason || '').slice(0, 200));
+  }
+
+  manualReads() {
+    const rows = this.db.prepare('SELECT * FROM source_manual_reads').all();
+    return Object.fromEntries(rows.map(row => [row.source_id, {
+      sourceId: row.source_id,
+      taskId: row.task_id || '',
+      sessionId: row.session_id || '',
+      at: row.at || '',
+      status: row.status || '',
+      reason: row.reason || ''
+    }]));
   }
 
   markSource(id, {status, error = '', count = 0}) {
