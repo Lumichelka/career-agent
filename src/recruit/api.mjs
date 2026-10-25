@@ -7,6 +7,7 @@ import {runCollection, htmlToText, normalize} from './collect.mjs';
 import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
+import {parseRenderedText} from './browser.mjs';
 import {WeChatStore} from '../wechat/store.mjs';
 
 const MAX_DAYS = 180;
@@ -36,7 +37,7 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   if (method === 'GET') {
     if (pathname === 'sources') {
       const data = withStore(dir, store => ({sources: store.sourceStates(), runs: store.recentRuns(10), stats: store.stats()}));
-      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: typeof s.parseList === 'function'}}]));
+      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: true}}]));
       let wechat = {accounts: [], stats: {accounts: 0, articles: 0}};
       try {
         const ws = WeChatStore.open(join(dir, 'wechat.db'));
@@ -104,16 +105,17 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
       let source;
       try { source = sourceById(String(body?.sourceId || '')); } catch { source = null; }
       if (!source) return {status: 400, json: {error: '未知信息源'}};
-      if (typeof source.parseList !== 'function') return {status: 400, json: {error: '该源还没有可用的解析器；请改用公众号/手动活动导入'}};
       const raw = String(body?.html || body?.text || '');
       if (raw.trim().length < 20) return {status: 400, json: {error: '请粘贴来源页 HTML 或正文'}};
       let json = null;
       if (source.mode === 'json') {
         try { json = JSON.parse(raw); } catch { return {status: 400, json: {error: '该源是 JSON 接口，请粘贴接口返回的 JSON'}}; }
       }
-      let items;
-      try { items = source.parseList(source.mode === 'json' ? '' : raw, source, json) || []; }
-      catch (e) { return {status: 400, json: {error: '解析失败：' + e.message}}; }
+      let items = [];
+      try {
+        if (typeof source.parseList === 'function') items = source.parseList(source.mode === 'json' ? '' : raw, source, json) || [];
+        if (!items.length && source.mode !== 'json') items = parseRenderedText(htmlToText(raw), source);
+      } catch (e) { return {status: 400, json: {error: '解析失败：' + e.message}}; }
       const preview = [];
       for (const item of items.slice(0, 80)) {
         if (!item?.url && body?.url) item.url = String(body.url);

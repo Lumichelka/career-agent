@@ -26,3 +26,26 @@ test('手工来源页：预览不写库，确认后才写', async () => {
     check.close();
   } finally { await rm(dir, {recursive: true, force: true}); }
 });
+
+test('手工来源页：无专用解析器时走通用文本抽取', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-manual-source-'));
+  try {
+    const html = '<div>2026-11-01 09:00 某公司校园宣讲会 成都校区一教101</div>';
+    let out = await handleRecruit({method: 'POST', pathname: 'source-parse', body: {sourceId: 'uibe-career', html}, dir});
+    assert.equal(out.status || 200, 200);
+    assert.equal(out.json.count, 1);
+    out = await handleRecruit({method: 'POST', pathname: 'source-parse', body: {sourceId: 'uibe-career', html: '<div>没有日期和标题</div>'}, dir});
+    assert.equal(out.status, 400);
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test('手工来源页：未知源/JSON 格式错误给出原因', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-manual-source-'));
+  try {
+    let out = await handleRecruit({method: 'POST', pathname: 'source-parse', body: {sourceId: 'nope', html: '<div>2026-11-01 09:00 某活动</div>'}, dir});
+    assert.equal(out.status, 400);
+    out = await handleRecruit({method: 'POST', pathname: 'source-parse', body: {sourceId: 'swpu-jobfair', html: '<html>not json</html>'}, dir});
+    assert.equal(out.status, 400);
+    assert.match(out.json.error, /JSON/);
+  } finally { await rm(dir, {recursive: true, force: true}); }
+});
