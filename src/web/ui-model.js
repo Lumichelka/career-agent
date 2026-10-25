@@ -281,4 +281,23 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupContextPanel, {once: true});
   else setTimeout(setupContextPanel, 0);
+  function setupMobileSidebar() {
+    if (document.getElementById('mobile-sidebar')) return;
+    const header = document.querySelector('header');
+    const aside = document.querySelector('aside');
+    if (!header || !aside) return;
+    const b = document.createElement('button');
+    b.id = 'mobile-sidebar';
+    b.textContent = '☰';
+    b.setAttribute('aria-label', '打开对话列表');
+    b.style.cssText = 'display:none;margin-right:8px;border:0;background:#edf3e9;border-radius:8px;padding:5px 9px;font-size:16px;cursor:pointer';
+    header.prepend(b);
+    const style = document.createElement('style');
+    style.textContent = '@media(max-width:750px){#mobile-sidebar{display:inline-block!important}aside.open{display:flex!important;position:fixed;z-index:40;inset:0 auto 0 0;width:min(82vw,300px);box-shadow:0 0 50px #1f3a2e55}}';
+    document.head.appendChild(style);
+    b.onclick = () => aside.classList.toggle('open');
+    aside.addEventListener('click', e => { if (e.target.closest('#sessions button')) aside.classList.remove('open'); });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupMobileSidebar, {once: true});
+  else setTimeout(setupMobileSidebar, 0);
 })();
