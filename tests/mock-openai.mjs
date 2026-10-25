@@ -15,6 +15,9 @@ function decide(body) {
   const last = messages[messages.length - 1] || {role: 'user', content: ''};
   const all = messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join('\n');
   const userText = typeof last.content === 'string' ? last.content : '';
+  if (body.tools?.length && /研究这个招聘项目/.test(userText)) {
+    return {toolCalls: [{id: 'call_career_recruit_projects', name: 'career_recruit_projects', args: '{\"days\":30}'}]};
+  }
   if (body.tools?.length && /请调用 career_platform_status/.test(userText)) {
     return {toolCalls: [{id: 'call_career_platform_status', name: 'career_platform_status', args: '{}'}]};
   }
