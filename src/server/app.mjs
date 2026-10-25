@@ -1,6 +1,7 @@
 import {Accounts} from './accounts.mjs';
-import {ModelSettings, validateModelSettings, backendLabel} from '../model/model-settings.mjs';
+import {ModelSettings, validateModelSettings} from '../model/model-settings.mjs';
 import {presetOptions, decorateChatError} from '../model/providers.mjs';
+import {BACKEND_CHOICES, MAX_IMAGE_BYTES, BackendChoice, isImageAttachment, normalizeImageAttachment, publicBackends, resolveTurn, selectBackend} from '../model/backends.mjs';
 import {runApiModel, probeApi} from '../model/api-model.mjs';
 import {runDiagnostics} from '../model/diag.mjs';
 import {KeyVault} from '../model/keyvault.mjs';
@@ -73,7 +74,8 @@ async function tenant(user) {
     const vault = await new KeyVault(tenantData).init();
     const model = await new ModelSettings(home, vault).load();
     model.allowEnvironmentKey = false; // 不继承服务器环境变量里的 Key，避免账号之间串用
-    return {dir: tenantData, models: model, platforms: new PlatformBrowser(home), vault};
+    const backends = await new BackendChoice(tenantData).load();
+    return {dir: tenantData, models: model, backends, platforms: new PlatformBrowser(home), vault};
   })());
   return tenants.get(user.id);
 }
@@ -169,8 +171,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/backends.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/backends.js': 'src/web/backends.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -208,7 +210,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (!user) return send(res, {error: '请先登录自己的测试账号'}, 401);
 
-    const {dir, models, platforms} = await tenant(user);
+    const {dir, models, backends, platforms} = await tenant(user);
 
     if (url.pathname === '/api/auth/me') return send(res, {user: {name: user.name, id: user.id}});
     if (req.method === 'GET' && url.pathname.startsWith('/api/platform/screenshot/')) {
@@ -227,6 +229,9 @@ const server = http.createServer(async (req, res) => {
       return send(res, {ok: true});
     }
     if (req.method === 'GET' && url.pathname === '/api/model') return send(res, models.public());
+    if (req.method === 'GET' && url.pathname === '/api/backends') {
+      return send(res, publicBackends({settings: models.public(), choice: backends, user}));
+    }
     if (req.method === 'GET' && url.pathname === '/api/model/presets') return send(res, {presets: presetOptions()});
     if (req.method === 'GET' && url.pathname === '/api/memory') {
       const sessionId = url.searchParams.get('session') || '';
@@ -285,7 +290,9 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST') {
       let raw = '';
-      for await (const b of req) { raw += b.toString(); if (raw.length > 400000) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
+      // 聊天允许带图片：base64 后约 10.7MB；其他接口维持原有 400KB 上限。
+      const bodyLimit = url.pathname === '/api/chat' ? 12 * 1024 * 1024 : 400000;
+      for await (const b of req) { raw += b.toString(); if (raw.length > bodyLimit) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
       const body = JSON.parse(raw || '{}');
 
       // 入站 /mcp 的开关与 client 凭据：任何登录用户都能开，但开启要二次确认。
@@ -336,6 +343,11 @@ const server = http.createServer(async (req, res) => {
         const out = await handleCompany({method: 'POST', pathname: url.pathname.slice('/api/'.length), body, dir});
         if (!out) return send(res, {error: '未知的公司档案接口'}, 404);
         return send(res, out.json, out.status || 200);
+      }
+      if (url.pathname === '/api/backends/select') {
+        const out = await selectBackend({settings: models.public(), choice: backends, user, kind: String(body.kind || '')});
+        if (!out.ok) return send(res, {error: out.message, code: out.code, configTarget: out.configTarget || ''}, out.status);
+        return send(res, {ok: true, current: out.current, choices: out.choices, nextTurn: true});
       }
       if (url.pathname === '/api/model/save') {
         if (body.mode === 'codex' && user.name !== 'owner') throw Error('共同测试请配置自己的 API 或本地模型');
@@ -411,8 +423,41 @@ const server = http.createServer(async (req, res) => {
         if (running.has(s.id)) return send(res, {error: '当前对话正在执行任务'}, 409);
         const text = String(body.message || '').trim();
         if (text.length > 8000) return send(res, {error: '问题过长，请拆分到8000字以内'}, 400);
-        const attachments = (Array.isArray(body.attachments) ? body.attachments : []).slice(0, 5).filter(a => typeof a.name === 'string' && typeof a.text === 'string' && a.text.length <= 40000);
+        const requestedBackend = String(body.backend || '').trim();
+        if (requestedBackend && !BACKEND_CHOICES.includes(requestedBackend)) return send(res, {error: '未知的后端'}, 400);
+        // 附件：文本沿用旧形状；图片统一成 {type:'image', mime, dataUrl, bytes}，只在本轮内存里用，不写进会话。
+        const attachments = [];
+        for (const item of (Array.isArray(body.attachments) ? body.attachments : []).slice(0, 5)) {
+          if (!item || typeof item.name !== 'string') continue;
+          if (isImageAttachment(item)) {
+            const image = normalizeImageAttachment(item);
+            if (!image) return send(res, {error: '图片无法读取或单张超过 8MB'}, 413);
+            attachments.push(image);
+          } else if (typeof item.text === 'string' && item.text.length <= 40000) {
+            attachments.push({name: item.name, text: item.text});
+          }
+        }
+        const images = attachments.filter(item => item.type === 'image');
+        const totalImageBytes = images.reduce((sum, item) => sum + item.bytes, 0);
+        if (totalImageBytes > MAX_IMAGE_BYTES) return send(res, {error: '图片总量超过 8MB，请压缩或减少图片后重试'}, 413);
         if (!text && !attachments.length) return send(res, {error: '请输入问题或上传资料'}, 400);
+        const lock = body.lock === true;
+        // 能力解析：当前后端不满足本轮能力就停下来给候选卡，不静默降级。
+        const turn = resolveTurn({settings: models.public(), choice: backends, user, requested: requestedBackend, attachments});
+        if (!turn.ok) {
+          res.writeHead(200, {'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'});
+          const guide = turn.candidates.some(card => card.configured) ? '' : '还没有可用的候选后端，请先到「模型与接口设置」完成配置。';
+          const emitBlocked = event => { if (!res.destroyed) res.write(JSON.stringify(event) + '\n'); };
+          emitBlocked({type: 'status', text: '正在检查本轮所需的后端能力'});
+          emitBlocked({type: 'candidate_required', code: 'CANDIDATE_REQUIRED', capabilities: turn.capabilities, current: turn.current, candidates: turn.candidates, message: turn.message, guide});
+          emitBlocked({type: 'error', code: 'CANDIDATE_REQUIRED', text: turn.message + (guide ? ' ' + guide : ''), candidates: turn.candidates});
+          res.end();
+          return;
+        }
+        // 会话历史只存图片的元数据，不存 dataUrl。
+        const historyAttachments = attachments.map(item => item.type === 'image'
+          ? {name: item.name, type: 'image', mime: item.mime, bytes: item.bytes}
+          : {name: item.name, text: item.text});
         const controller = new AbortController();
         running.set(s.id, controller);
         owners.set(s.id, user);
@@ -432,6 +477,9 @@ const server = http.createServer(async (req, res) => {
         res.on('close', () => { if (!res.writableEnded) controller.abort(); });
         try {
           const modelConfig = models.snapshot();
+          // 锁定只锁本轮：失败时不再走备用接口（回退建议本身归 #33）。
+          const executionConfig = lock ? {...modelConfig, fallback: null} : modelConfig;
+          const backend = turn.backend;
           // 任务生命周期（排队/运行/终态、15 分钟上限、证据与草稿）交给 TaskManager；执行体仍是原来的 runAgent。
           const outcome = await taskManager.run({
             userId: user.id,
@@ -442,17 +490,19 @@ const server = http.createServer(async (req, res) => {
             emit,
             describeError: e => decorateChatError(e.message, !!modelConfig.apiKey),
             execute: async ({task, signal, emit: runEmit, addDraft}) => {
-              if (modelConfig.mode === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
+              if (backend.kind === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
               const profile = (await loadProfile(dir)).facts;
               const skill = await selectSkill(root, text).catch(() => null);
               const result = await runAgent({
                 root,
-                modelCall: options => modelConfig.mode === 'codex'
+                modelCall: options => backend.kind === 'codex'
                   ? runModel({...options, taskBridgeToken})
-                  : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir, userId: user.id, taskId: task.id, actorRef: backendLabel(modelConfig)}}),
+                  : runApiModel({...options, config: {...executionConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir, userId: user.id, taskId: task.id, actorRef: backend.label}}),
+                backend,
+                images,
                 session: s,
                 message: text || '请阅读附件并询问我希望完成什么任务。',
-                attachments,
+                attachments: historyAttachments,
                 profile,
                 skill,
                 onEvent: runEmit,
@@ -463,13 +513,14 @@ const server = http.createServer(async (req, res) => {
             }
           });
           if (outcome.error) {
+            // #33 的 fallback_suggested 事件与「换 X 重试」一次点击回退从这里扩展；本次只保证锁定状态下不回退。
             // 排队超时/执行失败/取消：TaskManager 已经写过 error 事件，这里只收尾会话与任务记录。
             s.lastTask = {...s.lastTask, status: outcome.task.state === 'cancelled' ? 'stopped' : 'failed', error: outcome.task.error?.message || outcome.error.message, taskId: outcome.task.id};
             await save(dir, s);
             await recordTask(dir, {sessionId: s.id, title: s.title, status: 'failed', error: s.lastTask.error}).catch(() => {});
           } else {
             const result = outcome.result;
-            s.messages.push({role: 'user', content: text, attachments}, {role: 'assistant', backend: backendLabel(modelConfig), content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
+            s.messages.push({role: 'user', content: text, attachments: historyAttachments}, {role: 'assistant', backend: backend.label, backendKind: backend.kind, locked: lock, calls: result.calls, content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
             s.memory = result.memory.slice(0, 5000);
             s.lastTask = {...s.lastTask, status: 'complete', taskId: outcome.task.id, quality: result.quality, durationMs: result.durationMs, finishedAt: new Date().toISOString()};
             if (result.artifact.content.trim()) s.artifacts.push({id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()});

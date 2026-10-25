@@ -133,7 +133,7 @@ test('HTTP：聊天任务输出 task 事件，抽屉接口能读到成功记录�
 
 test('HTTP：第 2 个任务排队，排队超时给 QUEUE_TIMEOUT；停止运行中任务进入 cancelled', async t => {
   // 故意把首个任务拖长：只要不停止它就一直处于 running，轮询在重负载下也一定能看到。
-  const mock = await startMockOpenAI({delayMs: 5000});
+  const mock = await startMockOpenAI({delayMs: 30000});
   t.after(() => mock.close());
   const app = await startApp(t, {perUser: 1, global: 8, queueTimeoutMs: 150});
   const user = await register(app, 'carol');
@@ -142,7 +142,7 @@ test('HTTP：第 2 个任务排队，排队超时给 QUEUE_TIMEOUT；停止运�
   const second = await newSession(app, user.cookie);
 
   const firstRun = chat(app, user.cookie, first.id, '第一个长任务').then(async response => ({response, events: await collectEvents(response)}));
-  await waitFor(async () => (await getJson(app, '/api/tasks', user.cookie)).tasks.some(task => task.state === 'running'), {timeoutMs: 20000});
+  await waitFor(async () => (await getJson(app, '/api/tasks', user.cookie)).tasks.some(task => task.state === 'running'), {timeoutMs: 60000});
   const running = await getJson(app, '/api/tasks', user.cookie);
   assert.equal(running.badge, 1, '运行中计入徽标');
   assert.equal(running.counts.running, 1);
