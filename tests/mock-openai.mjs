@@ -1,4 +1,5 @@
 // 测试用的假 OpenAI 接口：支持流式/非流式、工具调用、以及规划/执行/复核三个阶段。
+// 也支持 Anthropic Messages 与 OpenAI Responses 两种协议，以及 usage 的几种回传方式。
 // 目的：不依赖真实 API Key 也能验证整条链路。
 import http from 'node:http';
 
@@ -30,18 +31,60 @@ function decide(body) {
   return {text: JSON.stringify(base)};
 }
 
-export async function startMockOpenAI({port = 0, delayMs = 0} = {}) {  const state = {requests: [], failNext: 0, status: 200};
+function usageValues(usage) {
+  if (usage === 'none' || usage === false) return null;
+  if (usage && typeof usage === 'object') return {input: Number(usage.input) || 0, output: Number(usage.output) || 0};
+  return {input: 11, output: 7};
+}
+
+function chatUsage(value) {
+  return {prompt_tokens: value.input, completion_tokens: value.output, total_tokens: value.input + value.output};
+}
+
+function structuredUsage(value) {
+  return {input_tokens: value.input, output_tokens: value.output, total_tokens: value.input + value.output};
+}
+
+// usage: 'standard'（OpenAI 风格最后一块/非流式）| 'empty-choices'（Kimi 独立统计块）| 'none'
+export async function startMockOpenAI({port = 0, delayMs = 0, usage = 'standard'} = {}) {
+  const state = {requests: [], paths: [], failNext: 0, status: 200, usage};
   const server = http.createServer(async (req, res) => {
-    if (!req.url.startsWith('/v1/chat/completions')) { res.writeHead(404); res.end('{}'); return; }
+    const path = new URL(req.url, 'http://mock').pathname;
+    const isChat = path.endsWith('/chat/completions');
+    const isMessages = path.endsWith('/messages');
+    const isResponses = path.endsWith('/responses');
+    if (!isChat && !isMessages && !isResponses) { res.writeHead(404); res.end('{}'); return; }
     let raw = '';
     for await (const chunk of req) raw += chunk;
     let body = {};
     try { body = JSON.parse(raw); } catch { /* 保持空对象 */ }
     state.requests.push(body);
+    state.paths.push(path);
     if (state.status && state.status !== 200) { res.writeHead(state.status, {'content-type': 'application/json'}); res.end('{"error":"mock status"}'); return; }
     if (state.failNext > 0) { state.failNext--; res.writeHead(429, {'content-type': 'application/json'}); res.end('{"error":"rate limited"}'); return; }
     const answer = decide(body);
     if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    const value = usageValues(state.usage);
+
+    if (isMessages) {
+      res.writeHead(200, {'content-type': 'application/json; charset=utf-8'});
+      res.end(JSON.stringify({
+        id: 'msg_mock', type: 'message', role: 'assistant',
+        content: [{type: 'text', text: answer.text || ''}],
+        ...(value ? {usage: structuredUsage(value)} : {})
+      }));
+      return;
+    }
+
+    if (isResponses) {
+      res.writeHead(200, {'content-type': 'application/json; charset=utf-8'});
+      res.end(JSON.stringify({
+        id: 'resp_mock', object: 'response',
+        output: [{type: 'message', role: 'assistant', content: [{type: 'output_text', text: answer.text || ''}]}],
+        ...(value ? {usage: structuredUsage(value)} : {})
+      }));
+      return;
+    }
 
     if (body.stream) {
       res.writeHead(200, {'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache'});
@@ -51,6 +94,12 @@ export async function startMockOpenAI({port = 0, delayMs = 0} = {}) {  const sta
       } else {
         for (const piece of answer.text.match(/[\s\S]{1,24}/g) || []) send({choices: [{delta: {content: piece}}]});
       }
+      if (value && state.usage === 'empty-choices') {
+        // Kimi：choices 为空的独立统计块，位于 [DONE] 之前。
+        send({choices: [], usage: chatUsage(value)});
+      } else {
+        send({choices: [{delta: {}, finish_reason: 'stop'}], ...(value ? {usage: chatUsage(value)} : {})});
+      }
       res.write('data: [DONE]\n\n');
       res.end();
       return;
@@ -58,9 +107,9 @@ export async function startMockOpenAI({port = 0, delayMs = 0} = {}) {  const sta
 
     res.writeHead(200, {'content-type': 'application/json; charset=utf-8'});
     if (answer.toolCalls) {
-      res.end(JSON.stringify({choices: [{message: {role: 'assistant', content: '', tool_calls: answer.toolCalls.map(t => ({id: t.id, type: 'function', function: {name: t.name, arguments: t.args}}))}}]}));
+      res.end(JSON.stringify({choices: [{message: {role: 'assistant', content: '', tool_calls: answer.toolCalls.map(t => ({id: t.id, type: 'function', function: {name: t.name, arguments: t.args}}))}}], ...(value ? {usage: chatUsage(value)} : {})}));
     } else {
-      res.end(JSON.stringify({choices: [{message: {role: 'assistant', content: answer.text}}]}));
+      res.end(JSON.stringify({choices: [{message: {role: 'assistant', content: answer.text}}], ...(value ? {usage: chatUsage(value)} : {})}));
     }
   });
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));

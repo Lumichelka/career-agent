@@ -3,8 +3,11 @@ const terms=s=>{const out=new Set();for(const word of String(s).toLowerCase().ma
 export function buildContext(session,message,attachments=[],profileFacts=[]){
   const query=terms(message), docs=new Map();
   for(const a of [...(session.messages||[]).flatMap(m=>m.attachments||[]),...attachments]){
-    const id=createHash('sha256').update(a.name+'\n'+a.text).digest('hex');
-    docs.set(id,{id,name:a.name,text:a.text,current:attachments.includes(a)});
+    // 图片只给占位文字：dataUrl 不进入资料上下文，也不进日志或证据。
+    const text=typeof a.text==='string'?a.text:a.type==='image'?'[图片附件：'+a.name+'（'+(a.mime||'图片')+'）]':'';
+    if(!text)continue;
+    const id=createHash('sha256').update(a.name+'\n'+text).digest('hex');
+    docs.set(id,{id,name:a.name,text,current:attachments.includes(a)});
   }
   const packets=[];
   for(const d of docs.values())for(let start=0;start<d.text.length;start+=1050){
