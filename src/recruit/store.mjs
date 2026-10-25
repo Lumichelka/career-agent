@@ -291,6 +291,11 @@ export class RecruitStore {
     return row ? rowToEvent(row) : null;
   }
 
+  getProject(id) {
+    const row = this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(id);
+    return row ? rowToProject(row) : null;
+  }
+
   recordRun(run) {
     this.db.prepare('INSERT INTO runs(id,source_id,started_at,finished_at,status,fetched,created,updated,message) VALUES(?,?,?,?,?,?,?,?,?)')
       .run(run.id, run.sourceId, run.startedAt, run.finishedAt, run.status, run.fetched || 0, run.created || 0, run.updated || 0, run.message || '');

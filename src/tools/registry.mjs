@@ -92,6 +92,48 @@ export const TOOLS = [
     }
   },
   {
+    name: 'career_recruit_projects',
+    title: '查询招聘项目',
+    description: '从本机已采集的活动下查询招聘项目（单位/岗位/要求/投递/来源）。项目来源是高校就业网或公众号；平台工具只用于研究岗位要求和薪资，不在这里登记岗位或投递。',
+    permission: 'read',
+    handler: 'recruit.projects',
+    timeoutMs: 8000,
+    parameters: {
+      type: 'object',
+      properties: {
+        days: {type: 'number', minimum: 1, maximum: 180, description: '未来天数，默认 30'},
+        school: {type: 'string', maxLength: 30, description: '学校名，可选'},
+        company: {type: 'string', maxLength: 60, description: '单位名，可选'},
+        q: {type: 'string', maxLength: 60, description: '关键词（单位/岗位/要求），可选'},
+        limit: {type: 'number', minimum: 1, maximum: 100, description: '最多返回条数，默认 50'}
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'career_recruit_project',
+    title: '招聘项目详情',
+    description: '读取单个招聘项目及其所属活动、来源链接，用于后续研究该公司/岗位要求。',
+    permission: 'read',
+    handler: 'recruit.project',
+    timeoutMs: 8000,
+    parameters: {
+      type: 'object',
+      properties: {id: {type: 'string', maxLength: 64, description: '项目 id'}},
+      required: ['id'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'career_source_health',
+    title: '招聘来源健康',
+    description: '列出高校就业网/公众号来源的列表、详情、项目能力与最近状态；ok 只在列表解析成功时使用。',
+    permission: 'read',
+    handler: 'recruit.sources',
+    timeoutMs: 8000,
+    parameters: {type: 'object', properties: {}, additionalProperties: false}
+  },
+  {
     name: 'career_company_research',
     title: '公司调研',
     description: '调研一家用人单位：查询公开信息（行业、规模、口碑、校招动态），返回搜索摘要与链接。未配置搜索服务时如实说明，不得编造公司评价或待遇。',

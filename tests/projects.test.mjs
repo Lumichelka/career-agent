@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {handleRecruit} from '../src/recruit/api.mjs';
+import {callTool} from '../src/tools/execute.mjs';
 
 function baseEvent(id = 'a'.repeat(24)) {
   return {
@@ -111,5 +112,25 @@ test('来源项目同步：幂等、手工保留、连续缺失移除', async ()
       const events = store.listEvents({from: '2026-10-01T00:00:00+08:00', to: '2026-12-01T00:00:00+08:00', withProjects: true});
       assert.equal(events[0].projects.some(p => p.company === '乙公司'), false);
     } finally { store.close(); }
+  });
+});
+
+test('Agent 工具：项目列表/详情/来源健康', async () => {
+  await withDir(async dir => {
+    const store = RecruitStore.open(join(dir, 'recruit.db'));
+    store.upsertEvent(baseEvent());
+    store.syncProjects('a'.repeat(24), 'swpu-jobfair', [{company: '甲公司', title: '数据分析', sourceKey: '1'}]);
+    const project = store.listProjects('a'.repeat(24))[0];
+    store.close();
+    const ctx = {config: {recruitDir: dir}};
+    const list = await callTool('career_recruit_projects', {days: 30}, ctx);
+    assert.equal(list.status, 'readable');
+    assert.equal(list.projects[0].company, '甲公司');
+    const detail = await callTool('career_recruit_project', {id: project.id}, ctx);
+    assert.equal(detail.project.title, '数据分析');
+    assert.equal(detail.event.id, 'a'.repeat(24));
+    const health = await callTool('career_source_health', {}, ctx);
+    assert.equal(health.status, 'readable');
+    assert.ok(health.count >= 15);
   });
 });

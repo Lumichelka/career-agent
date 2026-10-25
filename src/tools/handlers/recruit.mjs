@@ -1,4 +1,72 @@
 import {join} from 'node:path';
+import {SOURCES, sourceHealth} from '../../recruit/sources/index.mjs';
+
+function ctxDir(ctx) { return ctx.config?.recruitDir; }
+
+// 项目列表：日历/来源数据的项目视角，供 Agent 选项目后研究。
+export async function projects(args, ctx) {
+  const dir = ctxDir(ctx);
+  if (!dir) return {status: 'unavailable', message: '当前任务没有关联招聘数据库。', projects: []};
+  const days = Math.min(180, Math.max(1, Number(args.days) || 30));
+  const {RecruitStore} = await import('../../recruit/store.mjs');
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  try {
+    const from = new Date().toISOString().slice(0, 10) + 'T00:00:00+08:00';
+    const to = new Date(Date.now() + days * 86400000).toISOString();
+    const events = store.listEvents({from, to, limit: 300, school: args.school || undefined, withProjects: true});
+    const q = String(args.q || '').trim().toLowerCase();
+    const company = String(args.company || '').trim().toLowerCase();
+    const out = [];
+    for (const e of events) {
+      for (const p of e.projects || []) {
+        if (company && !String(p.company || '').toLowerCase().includes(company)) continue;
+        if (q && !(p.company + ' ' + p.title + ' ' + p.positions).toLowerCase().includes(q)) continue;
+        out.push({
+          id: p.id, eventId: e.id, eventTitle: e.title, school: e.school, kind: e.kind, startAt: e.startAt,
+          company: p.company, title: p.title, positions: p.positions,
+          applyMode: p.applyMode, applyUrl: p.applyUrl, sourceUrl: p.sourceUrl || e.sourceUrl,
+          sourceId: p.sourceId
+        });
+      }
+    }
+    return {
+      status: out.length ? 'readable' : 'empty',
+      notice: '项目来自高校就业网/公众号；平台仅用于研究岗位要求和薪资，不在这里登记岗位或投递。',
+      count: out.length,
+      projects: out.slice(0, Math.min(100, Number(args.limit) || 50))
+    };
+  } finally { store.close(); }
+}
+
+export async function project(args, ctx) {
+  const dir = ctxDir(ctx);
+  if (!dir) return {status: 'unavailable', message: '当前任务没有关联招聘数据库。'};
+  const {RecruitStore} = await import('../../recruit/store.mjs');
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  try {
+    const p = store.getProject(String(args.id || ''));
+    if (!p) return {status: 'not_found', message: '没有这个招聘项目'};
+    const e = store.getEvent(p.eventId);
+    return {status: 'readable', project: p, event: e};
+  } finally { store.close(); }
+}
+
+export async function sourceStates(args, ctx) {
+  const dir = ctxDir(ctx);
+  if (!dir) return {status: 'unavailable', message: '当前任务没有关联招聘数据库。', sources: []};
+  const {RecruitStore} = await import('../../recruit/store.mjs');
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  try {
+    store.syncSources(SOURCES);
+    const states = store.sourceStates();
+    return {
+      status: 'readable',
+      notice: 'ok 只在列表解析成功时使用；项目阶段失败会标 list_only 或给出原因。',
+      count: states.length,
+      sources: states.map(s => ({...sourceHealth(SOURCES.find(x => x.id === s.id) || {id: s.id, name: s.name, enabled: !!s.enabled, mode: s.mode, category: s.category}), lastStatus: s.last_status, lastCount: s.last_count, lastError: s.last_error, lastRun: s.last_run}))
+    };
+  } finally { store.close(); }
+}
 
 // 读取本机招聘库：按日历列出活动与一对多的招聘项目；行程冲突/通勤规划已暂停。
 export async function events(args, ctx) {

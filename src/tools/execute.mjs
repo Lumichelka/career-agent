@@ -10,6 +10,9 @@ import * as company from './handlers/company.mjs';
 
 export const HANDLERS = {
   'recruit.events': recruit.events,
+  'recruit.projects': recruit.projects,
+  'recruit.project': recruit.project,
+  'recruit.sources': recruit.sourceStates,
   'search.public': search.publicSearch,
   'search.company': search.companyResearch,
   'platform.status': platform.status,
