@@ -340,3 +340,73 @@ export async function probeApi(config, {fetchImpl = null} = {}) {
   if (!okay) throw new Error('接口可访问，但返回格式不符合所选协议');
   return {ok: true, message: '模型接口已返回所选协议的有效响应；完整工具调用能力请点“一键体检”。'};
 }
+
+// 视觉抽取：单次 JSON 往返，只带截图与提示词，不声明工具、不进入工具循环。
+// 来源校对用它把两张截图转成活动/单位 JSON；失败即抛出带错误码与恢复建议的错误，不写库。
+export async function runVisionJson({config = {}, prompt = '', images = [], fetchImpl = null, signal = null, timeoutMs = 120000} = {}) {
+  if (!config || config.mode === 'codex' || !config.baseUrl || !config.model) {
+    const error = new Error('还没有可用的视觉模型 API，无法从截图抽取。');
+    error.code = 'VISION_NOT_CONFIGURED';
+    error.recovery = '在「模型与接口设置」里配置支持读图的模型 API（如 deepseek-flash）后重试。';
+    throw error;
+  }
+  const protocol = config.protocol || 'chat';
+  const parts = imageContentFor(protocol, images);
+  if (!parts || !parts.length) {
+    const error = new Error('视觉抽取需要截图，但这次没有可发送的图片。');
+    error.code = 'VISION_IMAGES_REQUIRED';
+    error.recovery = '重新发起来源校对；仍失败就改用手动导入。';
+    throw error;
+  }
+  const content = protocol === 'messages'
+    ? [...parts, {type: 'text', text: prompt}]
+    : protocol === 'responses'
+      ? [{type: 'input_text', text: prompt}, ...parts]
+      : [{type: 'text', text: prompt}, ...parts];
+  const messages = [{role: 'user', content}];
+  const maxTokens = Math.min(Number(config.maxTokens) || 4096, 8192);
+  const body = protocol === 'chat'
+    ? {model: config.model, messages, stream: false, response_format: {type: 'json_object'}, max_tokens: maxTokens, temperature: config.temperature ?? 0.1}
+    : protocol === 'messages'
+      ? {model: config.model, messages, max_tokens: maxTokens, temperature: config.temperature ?? 0.1}
+      : {model: config.model, input: messages, max_output_tokens: maxTokens};
+  const doFetch = fetchImpl || makeFetch(config.proxy);
+  let res;
+  try {
+    res = await postWithRetry({config, body, doFetch, signal, timeoutMs});
+  } catch (error) {
+    const wrapped = new Error('视觉模型请求失败：' + String(error?.message || error).slice(0, 200));
+    wrapped.code = /timeout|timed out|aborted/i.test(String(error?.message)) ? 'VISION_REQUEST_TIMEOUT' : 'VISION_CONNECT_FAILED';
+    wrapped.recovery = '检查接口地址与网络后重试；失败时不会写入任何数据。';
+    throw wrapped;
+  }
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300);
+    const error = new Error('视觉模型返回 HTTP ' + res.status + (detail ? '：' + detail.replace(/\s+/g, ' ').slice(0, 160) : ''));
+    error.code = res.status === 401 || res.status === 403 ? 'VISION_AUTH_FAILED' : res.status === 429 ? 'VISION_RATE_LIMITED' : 'VISION_REQUEST_FAILED';
+    error.recovery = '检查模型 Key、额度与型号后重试；失败时不会写入任何数据。';
+    throw error;
+  }
+  const data = await res.json().catch(() => null);
+  if (!data) {
+    const error = new Error('视觉模型没有返回 JSON。');
+    error.code = 'VISION_INVALID_RESULT';
+    error.recovery = '重试一次；仍失败就改用人工导入。';
+    throw error;
+  }
+  const rawText = protocol === 'chat'
+    ? (data.choices?.[0]?.message?.content || '')
+    : protocol === 'messages'
+      ? (data.content || []).filter(item => item.type === 'text').map(item => item.text).join('')
+      : (data.output || []).filter(item => item.type === 'message').flatMap(item => item.content || []).filter(item => item.type === 'output_text').map(item => item.text).join('');
+  let json;
+  try { json = parseJsonLoose(rawText); } catch { json = null; }
+  if (!json || typeof json !== 'object' || Array.isArray(json)) {
+    const error = new Error('视觉模型返回的不是 JSON 对象。');
+    error.code = 'VISION_INVALID_RESULT';
+    error.recovery = '重试一次；仍失败就改用人工导入。';
+    throw error;
+  }
+  return {json, text: cleanJsonText(rawText), usage: normalizeUsage(data.usage, protocol)};
+}
+

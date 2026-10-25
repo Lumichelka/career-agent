@@ -258,6 +258,17 @@ export class TaskManager {
     const task = await this.read(userId, String(taskId || ''));
     if (!task) return {ok: false, reason: 'missing'};
     if (FINAL_TASK_STATES.includes(task.state)) return {ok: false, reason: 'finished', task: publicTask(task)};
+    // 受阻任务已经没有执行体在跑：取消就是把它收尾为 cancelled，用户可自行重试。
+    if (task.state === 'blocked' || task.state === 'queued') {
+      task.state = 'cancelled';
+      task.phase = '已取消';
+      task.error = null;
+      task.finishedAt = nowIso();
+      task.durationMs = task.startedAt ? Date.now() - Date.parse(task.startedAt) : 0;
+      task.updatedAt = nowIso();
+      await this.persist(task);
+      return {ok: true, task: publicTask(task)};
+    }
     return {ok: false, reason: 'missing'};
   }
 
@@ -323,9 +334,11 @@ export class TaskManager {
   }
 
   // 一次任务 = 排队 → 执行 → 终态；执行体拿到的 emit 会被补充 task/progress/evidence 事件。
-  async run({userId, sessionId, title = '', sourceName = '对话', signal, emit = () => {}, execute, describeError, onFailure}) {
+  async run({userId, sessionId, title = '', sourceName = '对话', signal, emit = () => {}, execute, describeError, onFailure, onCreate}) {
     if (typeof execute !== 'function') throw new Error('任务需要执行体');
     const task = await this.create({userId, sessionId, title, sourceName});
+    // 调用方（如来源校对入口）需要在任务一创建就拿到 id 并立即返回，不必等执行完。
+    if (typeof onCreate === 'function') { try { await onCreate(publicTask(task)); } catch { /* 通知失败不影响任务 */ } }
     const started = Date.now();
     const controller = new AbortController();
     const onExternalAbort = () => controller.abort();
@@ -458,9 +471,13 @@ export class TaskManager {
             if (event.confirmId) awaitingConfirmation = true;
             void deferState('waiting_confirmation', {phase: '等待确认'});
             break;
-          case 'blocked':
-            void deferState('blocked', {phase: String(event.reason || '任务受阻')});
+          case 'blocked': {
+            const reason = String(event.reason || event.message || '任务受阻').slice(0, 200);
+            task.error = {code: String(event.code || 'BLOCKED').slice(0, 60), message: reason.slice(0, 500)};
+            if (event.recovery) task.error.recovery = String(event.recovery).slice(0, 200);
+            void deferState('blocked', {phase: reason});
             break;
+          }
           case 'task_state':
             if (TASK_STATES.includes(event.state)) void deferState(event.state, {phase: event.phase});
             break;
@@ -504,7 +521,8 @@ export class TaskManager {
         emitTask();
         return {task: publicTask(task), result, error: null};
       }
-      if (task.state === 'running' || task.state === 'waiting_confirmation' || task.state === 'blocked') {
+      // blocked 是活动态（等用户取消/处理），不能被任务收尾改成 succeeded。
+      if (task.state === 'running' || task.state === 'waiting_confirmation') {
         task.state = 'succeeded';
         task.phase = '任务完成';
         task.undo = {available: false, summary: '本次任务没有自动写入记录。', undone: 0, conflicts: 0};

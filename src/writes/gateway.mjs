@@ -321,7 +321,8 @@ export class WriteGateway {
     const fingerprint = fingerprintOf(payload ?? {});
     const confirm = String(confirmId ?? '').trim();
     const boundKey = String(confirmationKey || key).trim();
-    const sourceJson = sourceRef === null || sourceRef === undefined ? '' : JSON.stringify(sourceRef);
+    // 字符串来源（如 artifact:02-detail.png）原样落库；对象/数组仍序列化成 JSON。
+    const sourceJson = sourceRef === null || sourceRef === undefined ? '' : typeof sourceRef === 'string' ? sourceRef : JSON.stringify(sourceRef);
 
     if (sensitivity === 'sensitive' && !confirm) {
       return this.#requestConfirmation({tool, fingerprint, key, entity, entityId, action, preview, sourceRef: sourceJson, payload: payload ?? {}});
