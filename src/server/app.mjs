@@ -24,6 +24,7 @@ import {createToolExecutor} from '../tools/execute.mjs';
 import {InboundMcp} from '../mcp/inbound.mjs';
 import {createInboundHttp} from './inbound-http.mjs';
 import {handleAudit} from '../writes/audit-api.mjs';
+import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
 import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
@@ -174,8 +175,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/backends.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/backends.js': 'src/web/backends.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/audit.js': 'src/web/audit.js', '/backends.js': 'src/web/backends.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -250,6 +251,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/audit') {
       const out = await handleAudit({dir, userId: user.id, url});
       return send(res, out.json);
+    }
+    // 撤销预检：只读当前值并标出冲突行，供审阅层与强制确认弹窗使用。
+    if (req.method === 'GET' && url.pathname === '/api/audit/preview') {
+      const out = handleUndoPreview({dir, userId: user.id, url});
+      return send(res, out.json, out.status);
     }
     // 敏感写入的挂起确认：默认只列本人未处理、未过期的；state=all 供任务卡审计区看已接受/已拒绝记录。
     if (req.method === 'GET' && url.pathname === '/api/confirmations') {
@@ -327,6 +333,20 @@ const server = http.createServer(async (req, res) => {
         return send(res, out.json, out.status);
       }
 
+      // 撤销：单批或整任务。撤销本身是新的写入（新 batch_id + undo_of），响应带计数与逐行结果。
+      if (url.pathname === '/api/audit/undo/batch' || url.pathname === '/api/audit/undo/task') {
+        const isTask = url.pathname.endsWith('/task');
+        const out = isTask
+          ? await handleUndoTask({dir, userId: user.id, body})
+          : await handleUndoBatch({dir, userId: user.id, body});
+        const taskId = String(out.json?.taskId || '');
+        if (taskId && out.json?.undo) {
+          const task = await taskManager.applyUndo(user.id, taskId, {undo: out.json.undo, markUndone: out.json.undo.allUndone === true});
+          if (task) out.json.task = task;
+        }
+        return send(res, out.json, out.status);
+      }
+
       // 接受/拒绝敏感写入确认：身份只来自当前登录用户；确认不属于本人时按不存在处理。
       if (url.pathname === '/api/confirmations/accept' || url.pathname === '/api/confirmations/reject') {
         const confirmId = String(body.confirmId || '').trim();
@@ -345,6 +365,11 @@ const server = http.createServer(async (req, res) => {
               counts: accepted && !out.duplicate ? out.counts : null,
               finalize: !left.confirmations.length
             });
+            // 确认写入发生在任务收尾之后：补算撤销摘要，任务卡上仍能撤销这批写入。
+            if (out.task) {
+              const undo = summarizeTaskUndo({dir, userId: user.id, taskId: out.task.id});
+              out.task = await taskManager.applyUndo(user.id, out.task.id, {undo}) || out.task;
+            }
           }
           return send(res, out);
         } catch (error) {
@@ -566,6 +591,7 @@ const server = http.createServer(async (req, res) => {
             signal: controller.signal,
             emit,
             describeError: e => decorateChatError(e.message, !!modelConfig.apiKey),
+            describeUndo: ({task}) => summarizeTaskUndo({dir, userId: user.id, taskId: task.id}),
             // 失败后最多给一条建议：锁定、本轮已有工具成功、建议满 3 次、连续失败超过 3 次都不给。
             onFailure: async ({error}) => {
               if (['QUEUE_TIMEOUT', 'TASK_TIMEOUT', 'CANCELLED'].includes(error?.code)) return null;

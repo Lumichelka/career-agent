@@ -309,6 +309,22 @@ export class TaskManager {
     return publicTask(task);
   }
 
+  // 撤销接口处理完一批/整个任务后更新任务卡：全部撤销才把任务标为 undone，
+  // 否则保留终态只更新撤销摘要，前端只渲染这份摘要与后端计数。
+  async applyUndo(userId, taskId, {undo = null, markUndone = false} = {}) {
+    const task = await this.read(userId, String(taskId || ''));
+    if (!task) return null;
+    if (undo && typeof undo === 'object') task.undo = {...undo};
+    if (markUndone && FINAL_TASK_STATES.includes(task.state)) {
+      task.state = 'undone';
+      task.phase = '已撤销';
+      if (task.undo) task.undo = {...task.undo, available: false, allUndone: true};
+    }
+    task.updatedAt = nowIso();
+    await this.persist(task);
+    return publicTask(task);
+  }
+
   async setDraft(userId, {taskId, draftId, action}) {
     const target = {save: 'saved', discard: 'discarded'}[action];
     if (!target) return {ok: false, reason: 'invalid-action'};
@@ -323,7 +339,7 @@ export class TaskManager {
   }
 
   // 一次任务 = 排队 → 执行 → 终态；执行体拿到的 emit 会被补充 task/progress/evidence 事件。
-  async run({userId, sessionId, title = '', sourceName = '对话', signal, emit = () => {}, execute, describeError, onFailure}) {
+  async run({userId, sessionId, title = '', sourceName = '对话', signal, emit = () => {}, execute, describeError, describeUndo, onFailure}) {
     if (typeof execute !== 'function') throw new Error('任务需要执行体');
     const task = await this.create({userId, sessionId, title, sourceName});
     const started = Date.now();
@@ -512,6 +528,13 @@ export class TaskManager {
       task.finishedAt = nowIso();
       task.durationMs = Date.now() - started;
       touch();
+      // 撤销摘要来自写入审计：任务卡据此显示「可撤销 N 条」与入口。
+      if (typeof describeUndo === 'function') {
+        try {
+          const described = await describeUndo({task: publicTask(task)});
+          if (described && typeof described === 'object') task.undo = described;
+        } catch { /* 摘要算不出来不影响任务收尾 */ }
+      }
       await this.persist(task);
       emitTask();
       return {task: publicTask(task), result, error: null};
@@ -549,6 +572,12 @@ export class TaskManager {
         } catch { /* 建议算不出来不影响报错 */ }
       }
       touch();
+      if (typeof describeUndo === 'function') {
+        try {
+          const described = await describeUndo({task: publicTask(task)});
+          if (described && typeof described === 'object') task.undo = described;
+        } catch { /* 摘要算不出来不影响失败收尾 */ }
+      }
       await this.persist(task);
       emitTask();
       if (task.fallback) baseEmit({type: 'fallback_suggested', taskId: task.id, ...task.fallback, at: nowIso()});

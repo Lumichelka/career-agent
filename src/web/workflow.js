@@ -24,7 +24,7 @@ const GROUPS = [
   {id: 'failed', label: '失败'}
 ];
 
-const state = {tasks: [], confirmations: [], counts: {}, badge: 0, open: false, error: '', confirmError: '', loaded: false};
+const state = {tasks: [], confirmations: [], counts: {}, badge: 0, open: false, error: '', confirmError: '', loaded: false, undoNotes: {}};
 
 // 敏感写入确认：待确认区展示脱敏预览与接受/拒绝；已处理记录并入审计区且不可撤销。
 const TOOL_LABELS = {career_profile_write: '写入长期画像'};
@@ -105,15 +105,33 @@ function draftBlock(task) {
   return '<section class="task-block task-drafts"><h5>草稿</h5>' + rows + '</section>';
 }
 
+// 撤销结果只显示后端给的计数，前端不自己算成功/冲突条数。
+function undoResultText(counts) {
+  const undone = Number(counts?.undone) || 0;
+  const conflicts = Number(counts?.conflicts) || 0;
+  const failed = Number(counts?.failed) || 0;
+  const forced = Number(counts?.forced) || 0;
+  return '已撤销 ' + undone + ' / 冲突 ' + conflicts + ' / 失败 ' + failed + (forced ? '（强制 ' + forced + '）' : '');
+}
+
 function undoBlock(task) {
-  const undo = task.undo;
+  const undo = task.undo || {};
+  const rows = Number(undo.rows) || 0;
+  const available = undo.available === true;
+  const conflicts = Number(undo.conflicts) || 0;
   let text = '本次任务没有自动写入记录。';
-  if (undo?.summary) text = undo.summary;
-  else if (undo?.available === true) text = '可撤销 ' + (undo.count || 0) + ' 条自动写入。';
-  else if (task.state === 'succeeded') text = '撤销摘要将在写入审计接入后显示。';
+  if (undo.summary) text = undo.summary;
+  else if (available) text = '可撤销 ' + (Number(undo.remaining ?? undo.rows) || 0) + ' 条自动写入。';
   else if (task.state === 'undone') text = '本次任务已撤销。';
-  const button = '<button type="button" data-task-action="undo" disabled title="写网关与审计接入后可用">撤销本任务全部自动写入</button>';
-  return '<section class="task-block task-undo"><h5>撤销摘要</h5><p class="placeholder">' + escape(text) + '</p><div class="task-actions">' + button + '</div></section>';
+  const note = state.undoNotes[task.id]
+    ? '<p class="placeholder undo-note" role="status">' + escape(state.undoNotes[task.id]) + '</p>'
+    : '';
+  const auditButton = '<button type="button" data-task-action="audit"' + (rows > 0 || task.state === 'undone' ? '' : ' disabled') + '>查看审计明细</button>';
+  const undoButton = '<button type="button" data-task-action="undo-task"' + (available ? '' : ' disabled') + '>撤销本任务全部自动写入</button>';
+  const forceButton = conflicts > 0 && available
+    ? '<button type="button" data-task-action="undo-task-force">强制撤销冲突 ' + conflicts + ' 条</button>'
+    : '';
+  return '<section class="task-block task-undo"><h5>撤销摘要</h5><p class="placeholder">' + escape(text) + '</p>' + note + '<div class="task-actions">' + auditButton + undoButton + forceButton + '</div></section>';
 }
 
 // 回退建议落在失败任务卡上：刷新/重开抽屉后仍看得到；点击与对话区共用同一个按钮动作。
@@ -241,10 +259,23 @@ document.addEventListener('click', async event => {
   const taskId = cardElement?.dataset.taskId;
   if (!taskId) return;
   const action = button.dataset.taskAction;
+  if (action === 'audit') {
+    window.__audit?.openTask(taskId);
+    return;
+  }
+  if (action === 'undo-task-force') {
+    window.__audit?.openForceTask(taskId);
+    return;
+  }
   button.disabled = true;
   try {
     if (action === 'stop') await zx.api('tasks/stop', {taskId});
     else if (action === 'save' || action === 'discard') await zx.api('tasks/draft', {taskId, draftId: button.dataset.draftId, action});
+    else if (action === 'undo-task') {
+      const out = await zx.api('audit/undo/task', {taskId});
+      state.undoNotes[taskId] = undoResultText(out.counts);
+      window.__audit?.refresh();
+    }
     await refresh();
   } catch (error) {
     state.error = error.message;

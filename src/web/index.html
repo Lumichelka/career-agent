@@ -67,7 +67,92 @@ body.workflow-open main{margin-right:400px}
 @media(max-width:420px){
  header>div>span{display:none}
  .workflow-toggle{gap:2px}
-}</style><aside><div class="brand">✧ 职向<small>YOUR CAREER AGENT</small></div><button class="new" id="new">＋ 新的求职对话</button><button class="new platform-launch" id="platforms">⇄ 登录型网站</button><div class="sessions" id="sessions"></div><div class="foot"><span id="engine-label" hidden></span><button id="model-settings">模型与接口设置</button><br><button id="memory">查看本次记忆</button><br><button id="account-logout">退出账号</button><br>资料保存在本机；任务内容会发送至你选择的模型服务。</div></aside><main><header><div><button class="mobile" id="mobile-new">＋</button><button class="mobile" id="mobile-platforms" aria-label="连接平台">⇄</button><button class="mobile" id="mobile-model" aria-label="模型设置">⚙</button>职向 <span>求职智能体</span></div><span>● 联网检索 · 求职规划</span><button id="workflow-toggle" class="workflow-toggle" aria-expanded="false" aria-controls="workflow-drawer" aria-label="工作流，没有进行中的任务"><span class="wf-badge-label">工作流 · </span><span id="workflow-count">0</span></button></header><div id="messages"></div><div class="composer-area"><div id="platform-gate" hidden></div><div id="status" role="status" aria-live="polite"></div><div class="composer"><div id="attachments"></div><form id="chat"><textarea id="input" placeholder="告诉我你的求职需求，或上传简历开始……" aria-label="向职向提问"></textarea><div class="bar"><div><button type="button" id="attach" title="上传简历、岗位或经验资料" aria-label="上传资料">＋</button><input hidden id="files" type="file" accept=".txt,.md,.json,.docx,.pdf,image/png,image/jpeg,image/webp,image/gif" multiple></div><div><button type="button" id="stop" hidden>■ 停止</button><button class="send" id="send" aria-label="发送">↑</button></div></div></form></div><div class="hint">会主动检索公开资料，读取结果后继续处理。岗位和简历内容请核对来源与事实。</div></div></main><div id="workflow-scrim" hidden></div><div id="workflow-drawer" role="region" aria-label="工作流" aria-hidden="true"><div class="workflow-head"><div><strong>工作流</strong><span id="workflow-summary">0 个任务</span></div><button id="workflow-close" aria-label="关闭工作流" type="button">×</button></div><div id="workflow-body" class="workflow-body"><p class="workflow-empty">还没有任务。发起一次对话后，进度、证据与草稿会出现在这里。</p></div></div><dialog id="dialog"><div id="dialog-content"></div><button id="close">关闭</button></dialog><div id="account-screen" style="position:fixed;inset:0;background:#f4f6f0;z-index:9999;display:grid;place-items:center"><form id="account-form" style="width:min(390px,90vw);background:white;padding:32px;border:1px solid #d7e1d9;border-radius:20px;display:grid;gap:14px"><h2 style="margin:0;color:#236c50">职向 · 共同测试</h2><p>使用独立账号保存你的对话、简历和模型配置。</p><input id="account-name" placeholder="账号（字母、数字，3至32位）" autocomplete="username" required><input id="account-password" type="password" placeholder="密码（至少10位）" autocomplete="current-password" required><button type="submit">登录</button><button type="button" id="account-register">创建测试账号</button><p id="account-error" role="alert"></p><small>首次使用的账号信息见数据目录中的「首次登录.txt」（Windows 默认在 %LOCALAPPDATA%\ZhiXiang）。分享包中不含原有账号。</small></form></div><script type="module">
+}
+/* 审计审阅层：抽屉之上的独立层，桌面 1000 两栏，手机全屏列表 → 详情。 */
+#audit-layer{position:fixed;inset:0;z-index:70;background:#0b1f1866;display:flex;align-items:center;justify-content:center;padding:24px;min-width:0}
+#audit-layer[hidden]{display:none}
+body.audit-open{overflow:hidden}
+.audit-shell{width:min(1000px,100%);max-width:100vw;max-height:86vh;background:#fff;border:1px solid #d9e6dd;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;min-width:0;box-shadow:0 24px 70px #08211633}
+.audit-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e6ede8;flex:0 0 auto;min-width:0}
+.audit-head button{border:1px solid #e1e9e3;background:#f7faf7;border-radius:8px;padding:4px 9px;font-size:11px;color:#3f6f57;white-space:nowrap}
+.audit-head button[aria-pressed="true"]{background:#e7f3e9;border-color:#9fc4ac;color:#1f6a4c;font-weight:600}
+.audit-title{display:flex;align-items:baseline;gap:8px;min-width:0;flex:1;overflow:hidden}
+.audit-title strong{font-size:14px;color:#1f4d3b;white-space:nowrap}
+.audit-title small{font-size:10px;color:#82948a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#audit-close{padding:4px 9px;font-size:15px;line-height:1}
+.audit-summary{flex:0 0 auto;border-bottom:1px solid #e6ede8;background:#f4faf5;padding:9px 14px;font-size:11px;color:#3f6f57;min-width:0;overflow-wrap:anywhere}
+.audit-summary .audit-chip{margin-left:6px}
+.audit-main{display:grid;grid-template-columns:320px minmax(0,1fr);min-height:0;flex:1;min-width:0}
+.audit-batches{overflow-y:auto;overflow-x:hidden;border-right:1px solid #e6ede8;padding:10px;display:flex;flex-direction:column;gap:7px;min-width:0}
+.audit-batches-hint{font-size:10px;color:#8b9b91;margin:0 2px 2px;line-height:1.6}
+.audit-batch{border:1px solid #e2eae4;background:#fff;border-radius:10px;padding:8px 9px;cursor:pointer;min-width:0;overflow-wrap:anywhere}
+.audit-batch[aria-selected="true"]{border-color:#9fc4ac;background:#f2f9f3;box-shadow:0 0 0 1px #cfe4d5 inset}
+.audit-batch-head{display:flex;align-items:baseline;justify-content:space-between;gap:6px;min-width:0}
+.audit-batch-head b{font-size:11px;color:#2b5541;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.audit-batch-head small{font-size:9px;color:#93a297;white-space:nowrap}
+.audit-batch-meta{font-size:10px;color:#7d8f84;margin-top:3px;line-height:1.6}
+.audit-batch-actions{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap}
+.audit-batch-actions button{border:1px solid #d9e5dc;background:#fff;border-radius:6px;padding:2px 7px;font-size:9px;color:#3f6f57}
+.audit-batch-actions button[disabled]{opacity:.5;cursor:default}
+.audit-detail{overflow-y:auto;overflow-x:hidden;padding:12px 14px;min-width:0}
+.audit-detail h3{font-size:13px;color:#264a3a;margin:0 0 3px;overflow-wrap:anywhere}
+.audit-detail-note{font-size:10px;color:#8b9b91;margin:0 0 8px;overflow-wrap:anywhere}
+.audit-row{border:1px solid #e6ede8;border-radius:10px;padding:8px 9px;margin-bottom:9px;min-width:0;overflow-wrap:anywhere}
+.audit-row-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.audit-row-head b{font-size:11px;color:#315844;overflow-wrap:anywhere}
+.audit-row-head small{font-size:9px;color:#93a297;overflow-wrap:anywhere}
+.audit-chip{display:inline-flex;align-items:center;border:1px solid #dfe8e1;background:#f7faf8;color:#60776a;border-radius:20px;padding:0 7px;font-size:9px;line-height:1.7;white-space:nowrap}
+.audit-chip.chip-ready{color:#1f6a4c;border-color:#b6d6c1;background:#eaf5ed}
+.audit-chip.chip-undo{color:#1f6a4c;border-color:#c3ddcb;background:#f1f8f2}
+.audit-chip.chip-conflict{color:#8a5b16;border-color:#e8d3a8;background:#fdf6e7}
+.audit-chip.chip-forced{color:#7a3f7c;border-color:#e2c6e3;background:#faf1fb}
+.audit-chip.chip-failed{color:#95523f;border-color:#ecd0c6;background:#fdf1ec}
+.audit-diff{width:100%;border-collapse:collapse;table-layout:fixed;margin-top:6px;font-size:10px}
+.audit-diff th,.audit-diff td{border-top:1px solid #eef2ee;padding:3px 5px;text-align:left;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}
+.audit-diff th{color:#82948a;font-weight:600;background:#fafcfa}
+.audit-diff td.audit-field{color:#5f7268;width:22%}
+.audit-diff td.audit-old{color:#7a5a4a;width:39%}
+.audit-diff td.audit-new{color:#2b6045;width:39%}
+.audit-diff td em{font-style:normal;color:#a7b3aa}
+.audit-conflict-inline{margin-top:6px;border:1px solid #e8d3a8;background:#fdf9ef;border-radius:8px;padding:6px 8px;font-size:10px;color:#6b4f17;overflow-wrap:anywhere}
+.audit-conflict-inline pre{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:120px;overflow:auto;font-family:inherit;font-size:10px}
+.audit-raw{margin-top:6px}
+.audit-raw summary{font-size:10px;color:#5d7d6c;cursor:pointer}
+.audit-raw pre{margin:4px 0 0;background:#f7faf7;border:1px solid #eef2ee;border-radius:7px;padding:6px;font-size:9px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
+.audit-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px;flex-wrap:wrap}
+.audit-actions button,.audit-conflict-bar button{border:1px solid #d9e5dc;background:#fff;border-radius:7px;padding:4px 9px;font-size:10px;color:#3f6f57}
+.audit-actions button[disabled]{opacity:.5;cursor:default}
+.audit-conflict-bar{flex:0 0 auto;border-top:1px solid #e8d3a8;background:#fdf9ef;padding:8px 14px;font-size:11px;color:#6b4f17;display:flex;align-items:center;justify-content:space-between;gap:9px;flex-wrap:wrap;min-width:0}
+.audit-conflict-bar[hidden]{display:none}
+.audit-conflict-bar button{border-color:#dcc08a;color:#6b4f17;background:#fff}
+.audit-empty{font-size:11px;color:#86968c;line-height:1.9;margin:0;overflow-wrap:anywhere}
+#audit-force-dialog{border:0;border-radius:14px;padding:0;width:min(520px,92vw);max-width:92vw;background:#fff;box-shadow:0 24px 70px #08211640}
+#audit-force-dialog::backdrop{background:#0b1f1880}
+.audit-force-form{padding:16px 18px;display:grid;gap:10px;min-width:0}
+.audit-force-form h3{margin:0;font-size:14px;color:#6b4f17}
+.audit-force-warning{margin:0;font-size:11px;color:#7a5a4a;line-height:1.8;overflow-wrap:anywhere}
+.audit-force-item{border:1px solid #e8d3a8;background:#fdf9ef;border-radius:9px;padding:7px 9px;min-width:0}
+.audit-force-item b{font-size:11px;color:#6b4f17;overflow-wrap:anywhere}
+.audit-force-item p{margin:4px 0 0;font-size:10px;color:#7a5a4a;line-height:1.7;overflow-wrap:anywhere}
+.audit-force-pair{display:grid;grid-template-columns:44px minmax(0,1fr);gap:6px;margin-top:4px;font-size:10px;color:#6b4f17;min-width:0}
+.audit-force-pair pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:110px;overflow:auto;font-family:inherit;font-size:10px;background:#fff;border:1px solid #f0e2c8;border-radius:6px;padding:4px 6px;min-width:0}
+.audit-force-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:2px;flex-wrap:wrap}
+.audit-force-actions button{border:1px solid #d9e5dc;background:#fff;border-radius:8px;padding:6px 12px;font-size:11px;color:#3f6f57}
+.audit-force-actions button[data-force-confirm]{border-color:#c38a3a;background:#a46322;color:#fff}
+@media(max-width:750px){
+ #audit-layer{padding:0}
+ .audit-shell{width:100%;height:100dvh;max-height:none;border:0;border-radius:0}
+ .audit-main{grid-template-columns:minmax(0,1fr)}
+ .audit-detail{display:none}
+ #audit-layer.show-detail .audit-batches{display:none}
+ #audit-layer.show-detail .audit-detail{display:block}
+ .audit-back-label{display:none}
+ .audit-head{padding:10px 11px}
+ .audit-summary{padding:8px 11px}
+ .audit-batches{padding:9px;border-right:0}
+ .audit-detail{padding:10px 11px}
+}
+</style><aside><div class="brand">✧ 职向<small>YOUR CAREER AGENT</small></div><button class="new" id="new">＋ 新的求职对话</button><button class="new platform-launch" id="platforms">⇄ 登录型网站</button><div class="sessions" id="sessions"></div><div class="foot"><span id="engine-label" hidden></span><button id="model-settings">模型与接口设置</button><br><button id="memory">查看本次记忆</button><br><button id="account-logout">退出账号</button><br>资料保存在本机；任务内容会发送至你选择的模型服务。</div></aside><main><header><div><button class="mobile" id="mobile-new">＋</button><button class="mobile" id="mobile-platforms" aria-label="连接平台">⇄</button><button class="mobile" id="mobile-model" aria-label="模型设置">⚙</button>职向 <span>求职智能体</span></div><span>● 联网检索 · 求职规划</span><button id="workflow-toggle" class="workflow-toggle" aria-expanded="false" aria-controls="workflow-drawer" aria-label="工作流，没有进行中的任务"><span class="wf-badge-label">工作流 · </span><span id="workflow-count">0</span></button></header><div id="messages"></div><div class="composer-area"><div id="platform-gate" hidden></div><div id="status" role="status" aria-live="polite"></div><div class="composer"><div id="attachments"></div><form id="chat"><textarea id="input" placeholder="告诉我你的求职需求，或上传简历开始……" aria-label="向职向提问"></textarea><div class="bar"><div><button type="button" id="attach" title="上传简历、岗位或经验资料" aria-label="上传资料">＋</button><input hidden id="files" type="file" accept=".txt,.md,.json,.docx,.pdf,image/png,image/jpeg,image/webp,image/gif" multiple></div><div><button type="button" id="stop" hidden>■ 停止</button><button class="send" id="send" aria-label="发送">↑</button></div></div></form></div><div class="hint">会主动检索公开资料，读取结果后继续处理。岗位和简历内容请核对来源与事实。</div></div></main><div id="workflow-scrim" hidden></div><div id="workflow-drawer" role="region" aria-label="工作流" aria-hidden="true"><div class="workflow-head"><div><strong>工作流</strong><span id="workflow-summary">0 个任务</span></div><button id="workflow-close" aria-label="关闭工作流" type="button">×</button></div><div id="workflow-body" class="workflow-body"><p class="workflow-empty">还没有任务。发起一次对话后，进度、证据与草稿会出现在这里。</p></div></div><dialog id="dialog"><div id="dialog-content"></div><button id="close">关闭</button></dialog><div id="account-screen" style="position:fixed;inset:0;background:#f4f6f0;z-index:9999;display:grid;place-items:center"><form id="account-form" style="width:min(390px,90vw);background:white;padding:32px;border:1px solid #d7e1d9;border-radius:20px;display:grid;gap:14px"><h2 style="margin:0;color:#236c50">职向 · 共同测试</h2><p>使用独立账号保存你的对话、简历和模型配置。</p><input id="account-name" placeholder="账号（字母、数字，3至32位）" autocomplete="username" required><input id="account-password" type="password" placeholder="密码（至少10位）" autocomplete="current-password" required><button type="submit">登录</button><button type="button" id="account-register">创建测试账号</button><p id="account-error" role="alert"></p><small>首次使用的账号信息见数据目录中的「首次登录.txt」（Windows 默认在 %LOCALAPPDATA%\ZhiXiang）。分享包中不含原有账号。</small></form></div><script type="module">
 const token='SESSION_TOKEN',el=s=>document.querySelector(s);let current=null,busy=false,attachments=[],controller=null,activePlan=null;const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,body){const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:{'x-career-token':token,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const d=await r.json();if(!r.ok)throw new Error(d.error);return d}
 async function refreshList(){const d=await api('sessions');el('#sessions').innerHTML=d.sessions.map(s=>'<button data-session="'+escape(s.id)+'" class="'+(s.id===current?.id?'selected':'')+'">'+escape(s.title)+'</button>').join('')}
@@ -136,4 +221,4 @@ async function signIn(register=false){try{await api('auth/'+(register?'register'
 el('#account-form').onsubmit=e=>{e.preventDefault();signIn()};el('#account-register').onclick=()=>signIn(true);
 el('#account-logout').onclick=async()=>{if(busy){showError('请先停止当前任务再退出');return}await api('auth/logout',{});location.reload()};
 startAccount().catch(()=>{});
-window.__zxLoadSession=async id=>{current=await api('session/'+id);render();await refreshList()};window.__zx={api,el,escape,refreshModelLabel,showError,currentSession:()=>current};</script><script type="module" src="/ui-model.js"></script><script type="module" src="/inbound.js"></script><script type="module" src="/capabilities.js"></script><script type="module" src="/memory.js"></script><script type="module" src="/artifact.js"></script><script type="module" src="/workflow.js"></script><script type="module" src="/backends.js"></script></html>
+window.__zxLoadSession=async id=>{current=await api('session/'+id);render();await refreshList()};window.__zx={api,el,escape,refreshModelLabel,showError,currentSession:()=>current};</script><script type="module" src="/ui-model.js"></script><script type="module" src="/inbound.js"></script><script type="module" src="/capabilities.js"></script><script type="module" src="/memory.js"></script><script type="module" src="/artifact.js"></script><script type="module" src="/workflow.js"></script><script type="module" src="/audit.js"></script><script type="module" src="/backends.js"></script></html>
