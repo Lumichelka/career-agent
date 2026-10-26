@@ -141,7 +141,8 @@ test('GET /api/recruit/sources 返回每源新鲜度字段', async t => {
   store.close();
   const {handleRecruit} = await import('../src/recruit/api.mjs');
   const res = await handleRecruit({method: 'GET', pathname: 'sources', url: new URL('http://x/sources'), body: null, dir});
-  assert.equal(res.json.sources.length, 13, '13 个源都返回');
+  assert.equal(res.json.sources.length, 15, '13 个注册源 + 2 个墓碑源都返回');
+  assert.ok(res.json.sources.some(x => x.id === 'nankai-recruitment' && x.orphaned), '墓碑源要带 orphaned 标记');
   const s = res.json.sources.find(x => x.id === 'scu-employ');
   assert.equal(s.lastFetched, 5);
   assert.equal(s.lastCreated, 2);
