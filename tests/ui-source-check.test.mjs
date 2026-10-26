@@ -7,6 +7,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {createApp} from '../src/server/app.mjs';
+import {SourceCheckBlockedError} from '../src/source-check/browser.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
@@ -254,4 +255,89 @@ test('来源卡「来源校对」→ 切回对话并打开抽屉；390 宽不溢
   assert.match(updatedText, /最近手动读取/);
   assert.match(updatedText, /采集器已禁用/);
   assert.ok(!updatedText.includes('已接入'), '记了手动读取也不能显示已接入');
+});
+
+test('来源卡「AI 兜底」：手动入口、明示不是自动采集、阻断后不自动切换、点击才跑 operator 任务', {timeout: 180000}, async t => {
+  const pageModel = operatorPage({loginAfterGoto: false});
+  const capture = {};
+  const blockedReader = async () => { throw new SourceCheckBlockedError('来源页需要登录或验证，已停止读取。'); };
+  const dir = await mkdtemp(join(tmpdir(), 'zx-ui-ai-fallback-'));
+  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0, sourceCheck: {browserReader: blockedReader, operator: {launch: operatorLauncher(pageModel, capture)}}});
+  t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
+
+  const browser = await launchBrowser(t, app.port);
+  if (!browser) return;
+  t.after(() => browser.close());
+  const context = await browser.newContext({viewport: {width: 390, height: 844}});
+  const page = await context.newPage();
+  await page.goto(app.origin + '/chat');
+  await page.waitForSelector('#account-name', {state: 'visible'});
+  await page.fill('#account-name', 'ui-ai-fallback');
+  await page.fill('#account-password', 'correct-horse-battery');
+  await page.click('#account-register');
+  await page.waitForFunction(() => document.querySelector('#account-screen')?.style.display === 'none', null, {timeout: 15000});
+  const cookie = (await context.cookies(app.origin)).map(item => item.name + '=' + item.value).join('; ');
+  const apiHeaders = {'Content-Type': 'application/json', 'x-career-token': app.token, cookie};
+
+  // 公众号账号也要有「AI 兜底」（复用 wechat playbook）。
+  const accountResponse = await fetch(app.origin + '/api/wechat/accounts', {method: 'POST', headers: apiHeaders, body: JSON.stringify({name: '西财校招', school: '西南财经大学'})});
+  assert.equal(accountResponse.status, 200);
+  const account = (await accountResponse.json()).account;
+
+  // 确定性 source-check 被阻断：任务标 blocked，但绝不自动切 AI。
+  const startedResponse = await fetch(app.origin + '/api/source-check/start', {method: 'POST', headers: apiHeaders, body: JSON.stringify({sourceId: 'swufe-xjh'})});
+  assert.equal(startedResponse.status, 200);
+  const started = await startedResponse.json();
+  const deadline = Date.now() + 20000;
+  let tasks = [];
+  while (Date.now() < deadline) {
+    tasks = (await (await fetch(app.origin + '/api/tasks', {headers: apiHeaders})).json()).tasks;
+    if (tasks.some(task => task.id === started.taskId && ['blocked', 'failed'].includes(task.state))) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert.equal(tasks.find(task => task.id === started.taskId)?.state, 'blocked');
+  assert.equal(tasks.length, 1, '确定性来源被阻断后不能自动产生 AI 兜底任务');
+  assert.ok(!JSON.stringify(tasks).includes('AI 兜底'));
+
+  await page.goto(app.origin + '/recruit?tab=sources');
+  await page.waitForSelector('#sources .src-row', {state: 'visible', timeout: 15000});
+
+  // UI 明示：这张卡上的入口是兜底，不是自动采集。
+  const panelText = await page.locator('#sources-panel').innerText();
+  assert.match(panelText, /这是兜底，不是自动采集/);
+
+  // 健康的确定性源也有手动入口（用户点击即可），只是不提示「建议兜底」。
+  assert.equal(await page.locator('[data-ai-fallback="uibe-career"]').count(), 1);
+  assert.equal(await page.locator('[data-ai-fallback="swufe-xjh"]').count(), 1);
+
+  const swufeRow = page.locator('#sources .src-row', {has: page.locator('[data-ai-fallback="swufe-xjh"]')});
+  await swufeRow.waitFor({state: 'visible', timeout: 15000});
+  const swufeText = await swufeRow.innerText();
+  assert.match(swufeText, /AI 兜底/);
+  assert.match(swufeText, /确定性采集被阻断/, '确定性来源被阻断后提示可以手动兜底');
+  const swufeButton = page.locator('[data-ai-fallback="swufe-xjh"]');
+  assert.equal(await swufeButton.isDisabled(), false, '手动入口可点');
+  assert.equal(await swufeButton.getAttribute('data-playbook'), 'swufe-xjh');
+  assert.match(await swufeButton.getAttribute('title'), /不是自动采集/);
+
+  // 公众号账号行也有入口，并指向 wechat playbook。
+  const wxRow = page.locator('#sources .src-row', {has: page.locator('[data-ai-fallback="wechat:' + account.id + '"]')});
+  await wxRow.waitFor({state: 'visible', timeout: 15000});
+  assert.match(await wxRow.innerText(), /西财校招/);
+  assert.equal(await page.locator('[data-ai-fallback="wechat:' + account.id + '"]').getAttribute('data-playbook'), 'wechat');
+
+  // 用户点击才运行：复用 operator 任务，playbook 入口成为第一步。
+  await swufeButton.click();
+  await page.waitForURL(url => url.pathname === '/chat' && url.searchParams.get('workflow') === 'open' && !!url.searchParams.get('session'), {timeout: 20000});
+  const succeededCard = page.locator('#workflow-drawer .task-card[data-state="succeeded"]');
+  await succeededCard.waitFor({state: 'visible', timeout: 30000});
+  const cardText = await succeededCard.innerText();
+  assert.match(cardText, /AI 兜底/);
+  assert.match(cardText, /西南财经大学/);
+  assert.match(cardText, /打开页面/);
+  assert.match(cardText, /成功/);
+
+  const after = (await (await fetch(app.origin + '/api/tasks', {headers: apiHeaders})).json()).tasks;
+  assert.equal(after.length, 2, '点击后恰好新增一个兜底任务');
+  assert.equal(after.filter(task => String(task.title).includes('AI 兜底')).length, 1);
 });

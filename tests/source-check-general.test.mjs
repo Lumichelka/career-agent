@@ -11,7 +11,9 @@ import {resolveSource, resolveSourceCheckTarget, SOURCE_CHECK_NOTES} from '../sr
 import {normalizeSourceCheckUrl, sourceCheckEnabled, sourceCheckConfig, selectDetailHref} from '../src/source-check/config.mjs';
 import {buildExtractionPrompt, normalizeExtraction} from '../src/source-check/extract.mjs';
 import {operatorProfileDir} from '../src/config/paths.mjs';
-import {checkOperatorUrl, classifyDangerousAction, actionScreenshotName, OPERATOR_MAX_ACTIVE_MS, executeOperatorPlan, OPERATOR_LAUNCH_OPTIONS} from '../src/source-check/operator.mjs';
+import {checkOperatorUrl, classifyDangerousAction, actionScreenshotName, OPERATOR_MAX_ACTIVE_MS, executeOperatorPlan, OPERATOR_LAUNCH_OPTIONS, normalizeOperatorSteps} from '../src/source-check/operator.mjs';
+import {SourceCheckBlockedError} from '../src/source-check/browser.mjs';
+import {listPlaybooks, loadPlaybook, playbookForSource, playbookSteps} from '../src/source-check/playbook.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
@@ -748,4 +750,153 @@ test('来源卡 catalog：财经院校与浏览器登录形态都标记 sourceCh
   for (const id of ['sufe-xjh', 'scu-employ']) {
     assert.equal(sources.catalog[id].sourceCheck, false, id + ' catalog 不应标记 sourceCheck');
   }
+});
+
+// ---- AI 兜底与 playbook（#58）----
+
+test('playbook：UIBE/SWUFE/WeChat 各一份，front matter 含入口/domains/成功标志/禁止动作/抽取提示', async () => {
+  const playbooks = await listPlaybooks();
+  assert.deepEqual(playbooks.map(item => item.id).sort(), ['swufe-xjh', 'uibe-career', 'wechat']);
+  for (const pb of playbooks) {
+    assert.ok(pb.title, pb.id + ' 缺标题');
+    assert.ok(pb.entry.length >= 1, pb.id + ' 缺入口');
+    for (const url of pb.entry) assert.match(url, /^https:\/\//, pb.id + ' 入口必须是 https：' + url);
+    assert.ok(pb.domains.length >= 1, pb.id + ' 缺 domains');
+    assert.ok(pb.successMarkers.length >= 1, pb.id + ' 缺成功标志');
+    assert.ok(pb.forbiddenActions.length >= 1, pb.id + ' 缺 forbiddenActions');
+    assert.ok(pb.extractHints.length >= 1, pb.id + ' 缺抽取提示');
+    assert.ok(pb.markdown.length > 200, pb.id + ' 缺 Markdown 正文');
+    const host = new URL(pb.entry[0]).hostname;
+    assert.ok(pb.domains.some(domain => host === domain || host.endsWith('.' + domain)), pb.id + ' domains 必须覆盖入口主机 ' + host);
+  }
+
+  assert.equal((await loadPlaybook('uibe-career')).id, 'uibe-career');
+  assert.equal((await loadPlaybook('wechat:wx-anything')).id, 'wechat', '公众号账号复用同一份 wechat playbook');
+  assert.equal(await loadPlaybook('sufe-xjh'), null, '没有 playbook 的源返回 null');
+  assert.equal((await playbookForSource('wechat:abc')).id, 'wechat');
+  assert.equal((await playbookForSource('swufe-xjh')).id, 'swufe-xjh');
+  assert.equal(await playbookForSource('sufe-xjh'), null, '采集器源不自动拥有 AI 兜底');
+
+  const pb = await loadPlaybook('uibe-career');
+  const steps = playbookSteps(pb);
+  assert.equal(steps[0].action, 'goto');
+  assert.equal(steps[0].url, pb.entry[0], 'playbook 入口成为第一步 goto');
+  assert.equal(steps.at(-1).action, 'screenshot');
+  assert.ok(steps.length >= 2);
+  assert.doesNotThrow(() => normalizeOperatorSteps(steps, {source: {listUrl: steps[0].url}}), 'playbook 生成的动作必须能过 operator 校验');
+});
+
+test('AI 兜底入口：operator start 接受 sourceId+playbook，用 playbook 入口生成步骤并标明是兜底', {timeout: 60000}, async t => {
+  const page = fakeOperatorPage();
+  const capture = {};
+  const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}});
+  const user = await register(app, 'ai-fallback-user');
+
+  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'uibe-career', playbook: 'uibe-career'});
+  assert.equal(started.mode, 'operator');
+  assert.equal(started.fallback, true, '响应要标明这是手动兜底');
+  assert.equal(started.playbook, 'uibe-career');
+  assert.match(started.title, /AI 兜底/);
+  assert.match(started.title, /对外经济贸易大学/);
+
+  const finished = await waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', user.cookie);
+    const task = listed.tasks.find(item => item.id === started.taskId);
+    return task && ['succeeded', 'failed'].includes(task.state) ? task : null;
+  });
+  assert.equal(finished.state, 'succeeded', '兜底任务应完成：' + JSON.stringify(finished.error));
+  assert.match(finished.title, /AI 兜底/);
+  assert.equal(capture.options.options.headless, false, '兜底仍然用可见窗口');
+
+  // playbook 的入口成为第一步 goto，而不是退回源注册表的 listUrl。
+  const goes = page.calls.filter(call => call.action === 'goto').map(call => call.url);
+  assert.equal(goes[0], 'https://career.uibe.edu.cn/front/channel.jspa?channelId=766&parentId=625');
+
+  // 兜底也是一次手动读取：来源卡要能显示原因，但不改写采集器 last_run。
+  const sources = await getJson(app, '/api/recruit/sources', user.cookie);
+  assert.match(sources.manualReads['uibe-career'].reason, /AI 兜底/);
+
+  const mismatch = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'swufe-xjh', playbook: 'uibe-career'}, 400);
+  assert.equal(mismatch.code, 'PLAYBOOK_SOURCE_MISMATCH');
+  const unknown = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'uibe-career', playbook: 'nope'}, 400);
+  assert.equal(unknown.code, 'UNKNOWN_PLAYBOOK');
+  assert.equal((await getJson(app, '/api/tasks', user.cookie)).tasks.length, 1, '被拒绝的兜底请求不排队任务');
+});
+
+test('来源卡 AI 兜底能力：有 playbook 的源与公众号账号标记 aiFallback，采集器源不标记', {timeout: 30000}, async t => {
+  const app = await startApp(t, {browserReader: fakeReader('https://x/d'), extractor: fakeExtractor()});
+  const user = await register(app, 'ai-fallback-catalog');
+
+  const sources = await getJson(app, '/api/recruit/sources', user.cookie);
+  assert.equal(sources.catalog['uibe-career'].aiFallback.available, true);
+  assert.equal(sources.catalog['uibe-career'].aiFallback.playbookId, 'uibe-career');
+  assert.equal(sources.catalog['swufe-xjh'].aiFallback.playbookId, 'swufe-xjh');
+  assert.match(sources.catalog['uibe-career'].aiFallback.note, /这是兜底，不是自动采集/);
+  assert.equal(sources.catalog['sufe-xjh'].aiFallback.available, false, '采集器源没有 AI 兜底');
+  assert.equal(sources.catalog['ncss'].aiFallback.available, false);
+
+  const created = await postJson(app, '/api/wechat/accounts', user.cookie, {name: '西财校招', school: '西南财经大学'});
+  const accountId = created.account.id;
+  const withAccount = await getJson(app, '/api/recruit/sources', user.cookie);
+  const account = withAccount.wechat.accounts.find(item => item.id === accountId);
+  assert.ok(account, '公众号账号要出现在来源卡数据里');
+  assert.equal(account.aiFallback.available, true);
+  assert.equal(account.aiFallback.playbookId, 'wechat');
+  assert.match(account.aiFallback.note, /这是兜底，不是自动采集/);
+
+  const playbooks = await getJson(app, '/api/source-check/playbooks', user.cookie);
+  assert.deepEqual(playbooks.playbooks.map(item => item.id).sort(), ['swufe-xjh', 'uibe-career', 'wechat']);
+  for (const pb of playbooks.playbooks) {
+    assert.ok(pb.entry.length >= 1);
+    assert.ok(pb.domains.length >= 1);
+    assert.ok(pb.successMarkers.length >= 1);
+    assert.ok(pb.forbiddenActions.length >= 1);
+    assert.ok(pb.extractHints.length >= 1);
+    assert.ok(!Object.hasOwn(pb, 'markdown'), '列表接口不返回整篇正文');
+  }
+});
+
+test('AI 兜底也能用于公众号账号：wechat:<id> 用 wechat playbook 的入口生成步骤', {timeout: 30000}, async t => {
+  const page = fakeOperatorPage();
+  const capture = {};
+  const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}});
+  const user = await register(app, 'ai-fallback-wechat');
+
+  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'wechat:abc-123', playbook: 'wechat'});
+  assert.equal(started.fallback, true);
+  assert.equal(started.playbook, 'wechat');
+  assert.equal(started.sourceId, 'wechat:abc-123', '公众号账号保留自己的来源 id，便于来源卡记最近手动读取');
+
+  const finished = await waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', user.cookie);
+    const task = listed.tasks.find(item => item.id === started.taskId);
+    return task && ['succeeded', 'failed'].includes(task.state) ? task : null;
+  });
+  assert.equal(finished.state, 'succeeded', '公众号兜底任务应完成：' + JSON.stringify(finished.error));
+  const goes = page.calls.filter(call => call.action === 'goto').map(call => call.url);
+  assert.equal(goes[0], 'https://mp.weixin.qq.com/');
+
+  const sources = await getJson(app, '/api/recruit/sources', user.cookie);
+  assert.match(sources.manualReads['wechat:abc-123'].reason, /AI 兜底/);
+});
+
+test('不自动切换：确定性来源被阻断/失败后不会自动启动 AI 兜底', {timeout: 60000}, async t => {
+  const blocked = async () => { throw new SourceCheckBlockedError('来源页需要登录或验证，已停止读取。'); };
+  const app = await startApp(t, {browserReader: blocked, extractor: fakeExtractor()});
+  const user = await register(app, 'no-auto-fallback');
+
+  const started = await postJson(app, '/api/source-check/start', user.cookie, {sourceId: 'swufe-xjh'});
+  const finished = await waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', user.cookie);
+    const task = listed.tasks.find(item => item.id === started.taskId);
+    return task && ['blocked', 'failed'].includes(task.state) ? task : null;
+  });
+  assert.equal(finished.state, 'blocked');
+  assert.ok(!String(finished.title).includes('AI 兜底'));
+
+  // 失败/阻断只是「值得点兜底」的信号，不是触发器：再等一会儿也不能自己冒出一个兜底任务。
+  await wait(300);
+  const listed = await getJson(app, '/api/tasks', user.cookie);
+  assert.equal(listed.tasks.length, 1, '阻断后不能自动排队 AI 兜底任务');
+  assert.equal(listed.tasks.filter(task => String(task.title).includes('AI 兜底')).length, 0);
 });

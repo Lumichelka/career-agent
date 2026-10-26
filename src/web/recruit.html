@@ -43,6 +43,8 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .src-actions{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
 .src-actions button{padding:4px 7px;font-size:10.5px;border-radius:6px}
 .src-actions a{font-size:10.5px}
+.src-actions .fallback{background:#fbf7ef;border-color:#e7dcc8;color:#7a5c2e}
+.fallback-hint{color:#8a5a2b}
 @media(max-width:860px){.src-head{display:none}.src-row{grid-template-columns:1fr 1fr;gap:3px 8px}.src-actions{grid-column:1/-1}}
 .source.on{border-color:#cfe2d4;background:#fbfefb}
 .source h3{margin:0;font-size:13px;font-weight:600;display:flex;gap:7px;align-items:center}
@@ -132,7 +134,7 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
       <button class="primary" id="collect-all">采集全部已接入源</button>
       <button id="manual-open">＋ 公众号 / 手动导入</button>
       <button id="probe">检查各源连通性</button>
-      <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。采集器禁用时可用来源卡「来源校对」：应用内浏览器只读列表与一场详情各一次并截图，不调用采集器。</span>
+      <span class="note" style="margin:0">只抓公开页面，遵守 robots.txt 与限速；失败会记录原因，不会编造活动。采集器禁用时可用来源卡「来源校对」：应用内浏览器只读列表与一场详情各一次并截图，不调用采集器。来源卡的「AI 兜底」是手动后备入口——这是兜底，不是自动采集：确定性采集失败、被阻断或你主动点击时才运行，不会自动切换。</span>
     </div>
     <div class="toolbar" style="margin-bottom:12px">
       <input type="text" id="sc-url" placeholder="粘贴任意活动/招聘会列表页 URL（http/https）" title="对任意来源页做来源校对：应用内浏览器只读列表与一场详情各一次，不调用采集器，不绕过登录/验证。">
@@ -306,6 +308,14 @@ function renderSources(sources,wechat){
   const shown=new Set();
   const rows=[];
   const manualLine=s=>{const m=sourceManual[s.id];return m?'<div class="src-sub manual-read">最近手动读取 '+esc(String(m.at||'').slice(0,16).replace('T',' '))+' · '+esc(m.reason||'')+'</div>':''};
+  // AI 兜底是手动入口（ADR 0003）：有 playbook 的源才显示按钮；失败/阻断只提示「可以兜底」，绝不自动切换。
+  const fallbackButton=(sourceId,fallback)=>fallback?.available?'<button data-ai-fallback="'+esc(sourceId)+'" data-playbook="'+esc(fallback.playbookId)+'" title="'+esc(fallback.note)+'" class="fallback">AI 兜底</button>':'';
+  const fallbackHint=s=>{
+    const read=sourceManual[s.id];
+    if(read?.status==='blocked')return '确定性采集被阻断，可手动点「AI 兜底」';
+    if(s.failureStreak>0||/^(failed|error)$/i.test(String(s.last_status||'')))return '确定性采集失败'+(s.failureStreak?' '+s.failureStreak+' 次':'')+'，可手动点「AI 兜底」';
+    return '';
+  };
   const statusBadge=s=>{
     if(s.orphaned)return '<span class="badge err">来源已下线</span>';
     if(!s.enabled)return '<span class="badge off">未接入</span>';
@@ -323,7 +333,7 @@ function renderSources(sources,wechat){
     if(s.failureStreak>0) html+='<div><span class="flag bad">连续失败 '+esc(s.failureStreak)+' 次</span></div>';
     return html;
   };
-  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b>'+(a.feedUrl?'<span class="badge ok">已订阅</span>':'<span class="badge off">未订阅</span>')+'<div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.biz?' · biz '+esc(String(a.biz).slice(0,10)):' · biz 待识别')+(a.lastArticleAt?' · 最近文章 '+esc(String(a.lastArticleAt).slice(0,10)):'')+(a.lastSyncAt?' · 同步 '+esc(shortStamp(a.lastSyncAt)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions">'+(a.feedUrl?'<button data-wx-sync="'+esc(a.id)+'">同步</button>':'')+'<a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
+  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b>'+(a.feedUrl?'<span class="badge ok">已订阅</span>':'<span class="badge off">未订阅</span>')+'<div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.biz?' · biz '+esc(String(a.biz).slice(0,10)):' · biz 待识别')+(a.lastArticleAt?' · 最近文章 '+esc(String(a.lastArticleAt).slice(0,10)):'')+(a.lastSyncAt?' · 同步 '+esc(shortStamp(a.lastSyncAt)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions">'+fallbackButton(a.sourceId||('wechat:'+a.id),a.aiFallback)+(a.feedUrl?'<button data-wx-sync="'+esc(a.id)+'">同步</button>':'')+'<a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
   const group={};
   for(const s of sources)(group[s.category] ||= []).push(s);
   for(const [cat,list] of Object.entries(group)){
@@ -331,7 +341,8 @@ function renderSources(sources,wechat){
     for(const s of list){
       const proj=catalog[s.id]?.capabilities?.projects||'none';
       const note=(s.last_error||catalog[s.id]?.note||s.note||'').slice(0,140);
-      rows.push('<div class="src-row"><div class="src-name"><b>'+esc(s.name)+'</b>'+statusBadge(s)+'<div class="src-sub" title="'+esc(note)+'">'+esc(note||(s.school+' · '+(s.channel||'')))+'</div>'+manualLine(s)+'</div><div>'+esc(s.channel||s.mode)+'</div><div>'+esc(s.school)+'</div><div>'+freshCell(s)+'</div><div>'+esc(proj==='none'?'—':proj)+'</div><div class="src-actions">'+(catalog[s.id]?.sourceCheck?'<button data-source-check="'+esc(s.id)+'" title="用应用内浏览器读取列表与一场活动详情各一次，不调用采集器">来源校对</button>':'')+'<button data-collect="'+esc(s.id)+'" '+(s.enabled?'':'disabled')+'>采集</button><a href="'+esc(s.list_url)+'" target="_blank" rel="noopener noreferrer">原站 ↗</a></div></div>');
+      const hint=fallbackHint(s);
+      rows.push('<div class="src-row"><div class="src-name"><b>'+esc(s.name)+'</b>'+statusBadge(s)+'<div class="src-sub" title="'+esc(note)+'">'+esc(note||(s.school+' · '+(s.channel||'')))+'</div>'+manualLine(s)+(hint?'<div class="src-sub fallback-hint">'+esc(hint)+'</div>':'')+'</div><div>'+esc(s.channel||s.mode)+'</div><div>'+esc(s.school)+'</div><div>'+freshCell(s)+'</div><div>'+esc(proj==='none'?'—':proj)+'</div><div class="src-actions">'+(catalog[s.id]?.sourceCheck?'<button data-source-check="'+esc(s.id)+'" title="用应用内浏览器读取列表与一场活动详情各一次，不调用采集器">来源校对</button>':'')+fallbackButton(s.id,catalog[s.id]?.aiFallback)+'<button data-collect="'+esc(s.id)+'" '+(s.enabled?'':'disabled')+'>采集</button><a href="'+esc(s.list_url)+'" target="_blank" rel="noopener noreferrer">原站 ↗</a></div></div>');
       const key=s.school||'';
       if(wxBySchool.has(key)&&!shown.has(key)){shown.add(key);rows.push(...wxBySchool.get(key).map(accountRow));}
     }
@@ -441,6 +452,16 @@ async function startSourceCheck(sourceId,button,url){
     location.href='/chat?session='+encodeURIComponent(d.sessionId)+'&workflow=open';
   }catch(e){toast(e.message);if(button)button.disabled=false}
 }
+// AI 兜底：用户点按钮才发起（ADR 0003）。复用 source-check operator 任务与证据，不另起一套采集。
+async function startAiFallback(sourceId,playbook,button){
+  if(button)button.disabled=true;
+  try{
+    const resp=await fetch('/api/source-check/operator/start',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({sourceId,playbook})});
+    const d=await resp.json().catch(()=>({error:'返回格式异常'}));
+    if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));
+    location.href='/chat?session='+encodeURIComponent(d.sessionId)+'&workflow=open';
+  }catch(e){toast(e.message);if(button)button.disabled=false}
+}
 el('#sc-url-go').onclick=()=>{
   const url=(el('#sc-url').value||'').trim();
   if(!url){toast('请先粘贴要校对的列表页 URL');return}
@@ -456,6 +477,7 @@ el('#cal-today').onclick=()=>loadCalendar(monthNow());
 el('#cal-month').onchange=()=>loadCalendar(el('#cal-month').value);
 document.addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.aiFallback){await startAiFallback(b.dataset.aiFallback,b.dataset.playbook,b);return}
   if(b.dataset.sourceCheck){await startSourceCheck(b.dataset.sourceCheck,b);return}
   if(b.dataset.collect){await collect([b.dataset.collect],'采集 '+b.dataset.collect);return}
   if(b.dataset.wxSync){b.disabled=true;try{const r=await fetch('/api/wechat/accounts/'+b.dataset.wxSync+'/sync',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:'{}'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));toast('同步完成：新增 '+(d.imported||0)+' 篇');await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}
