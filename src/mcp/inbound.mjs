@@ -6,6 +6,7 @@ import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import {join, dirname} from 'node:path';
 import {Server, createMcpHandler} from '@modelcontextprotocol/server';
 import {getTool, inboundTools} from '../tools/registry.mjs';
+import {EXTERNAL_PREFIX, mergeToolSurface} from '../agents/tools.mjs';
 
 const TOKEN_MARK = 'zxmcp_';
 const TOKEN_HEX = 48;            // 24 字节随机数的十六进制长度
@@ -78,7 +79,10 @@ function publicClient(record) {
     revokedAt: record.revokedAt || '',
     consentAt: record.consentAt || '',
     toolCount: Array.isArray(record.tools) ? record.tools.length : 0,
-    tools: Array.isArray(record.tools) ? record.tools : []
+    tools: Array.isArray(record.tools) ? record.tools : [],
+    // 签发后新出现的工具（本地升级或上游扩权）：只提示，凭据继续有效，绝不自动重发/撤销。
+    newTools: [],
+    newToolCount: 0
   };
 }
 
@@ -99,11 +103,16 @@ async function readJson(file, fallback) {
 
 export class InboundMcp {
   // callTool({userId, tool, name, args}) 由应用注入：入站调用要落到凭据所属账号的数据与配置上。
-  constructor({dataDir, accounts, callTool, getOrigin = () => 'http://127.0.0.1'}) {
+  // forward（#38）：{listTools(userId, {clientId, clientName}), callTool({userId, clientId, clientName, name, args, signal})}，
+  // 转发到该用户启用的外部 Agent；不传时入站只暴露本地工具（#37 的行为）。
+  // 入站转发调用计入该用户在途额度由 #36 的统一上游闸完成：连接层每次出站调用都 acquire 一次，
+  // 转发只是复用那条连接，所以这里不重复占额（否则同一次调用会占两个额度甚至自己排队自己）。
+  constructor({dataDir, accounts, callTool, getOrigin = () => 'http://127.0.0.1', forward = null}) {
     if (!dataDir) throw new Error('InboundMcp 需要 dataDir');
     this.dataDir = dataDir;
     this.accounts = accounts;
     this.callTool = callTool;
+    this.forward = forward;
     this.getOrigin = getOrigin;
     this.configFile = join(dataDir, 'mcp-inbound.json');
     this.state = {enabled: false};
@@ -165,8 +174,32 @@ export class InboundMcp {
     await writeFile(this.configFile, JSON.stringify(this.state, null, 2), 'utf8');
   }
 
-  async #statusJson(userId) {
+  // 当前工具面（本地 + 该用户启用 Agent 的上游，命名同出站）。
+  // forward 不可用或上游连不上时只回本地工具：一个 Agent 挂掉不拖垮整个入站列表。
+  async #currentNames(userId) {
+    const names = inboundTools().map(tool => tool.name);
+    if (!this.forward) return names;
+    try {
+      const surface = await this.forward.listTools(userId, {});
+      for (const tool of surface?.tools || []) if (tool?.name) names.push(tool.name);
+    } catch { /* 上游不可用不影响本地工具 */ }
+    return names;
+  }
+
+  // 签发时快照 vs 当前工具：多出来的只提示（newTools），不重发凭据、不撤销。
+  async #clientViews(userId) {
     const list = await this.#loadClients(userId);
+    const current = await this.#currentNames(userId);
+    return list.map(record => {
+      const view = publicClient(record);
+      const known = new Set(Array.isArray(record.tools) ? record.tools : []);
+      view.newTools = current.filter(name => !known.has(name));
+      view.newToolCount = view.newTools.length;
+      return view;
+    });
+  }
+
+  async #statusJson(userId) {
     const origin = this.getOrigin();
     const port = Number(new URL(origin).port) || 0;
     return {
@@ -175,7 +208,7 @@ export class InboundMcp {
       enabledBy: this.state.enabledBy?.name || '',
       url: origin + '/mcp',
       audience: audience(origin, port),
-      clients: list.map(publicClient)
+      clients: await this.#clientViews(userId)
     };
   }
 
@@ -194,7 +227,7 @@ export class InboundMcp {
         json: {
           code: 'NEEDS_CONFIRMATION',
           error: '开启对外 MCP 需要二次确认',
-          warning: '开启后，持有本实例签发凭据的外部 AI 可以读取你的本机求职数据；凭据只属于你，关闭开关不会撤销已签凭据。'
+          warning: '开启后，持有本实例签发凭据的外部 AI 可以读取你的本机求职数据；如果你启用了外部 Agent，它们的工具也会并入入站列表，转发调用会把内容发给该 Agent（签发凭据即视为同意）。凭据只属于你，关闭开关不会撤销已签凭据。'
         }
       };
     }
@@ -218,12 +251,14 @@ export class InboundMcp {
       }
       const token = newToken();
       const now = new Date().toISOString();
+      // 签发即首次同意：记录当时的完整工具集快照（本地 + 已启用上游），之后扩权只提示。
+      const snapshot = await this.#currentNames(userId);
       const record = {
         id: randomUUID(),
         name: clean,
         prefix: token.slice(0, PREFIX_CHARS),
         hash: hashToken(token),
-        tools: inboundTools().map(tool => tool.name),
+        tools: snapshot,
         createdAt: now,
         consentAt: now,
         lastUsedAt: '',
@@ -263,7 +298,7 @@ export class InboundMcp {
       record.hash = hashToken(token);
       record.prefix = token.slice(0, PREFIX_CHARS);
       record.regeneratedAt = new Date().toISOString();
-      record.tools = inboundTools().map(tool => tool.name);
+      record.tools = await this.#currentNames(userId);
       await this.#persist(userId);
       this.index.set(record.hash, {userId, clientId: record.id, name: record.name});
       const url = this.getOrigin() + '/mcp';
@@ -310,36 +345,75 @@ export class InboundMcp {
     });
   }
 
+  // 本地工具定义：参数仍来自统一注册表；写工具用 readOnlyHint=false 标出来。
+  #localToolDefs() {
+    return inboundTools().map(tool => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.parameters,
+      annotations: {
+        readOnlyHint: tool.permission !== 'write',
+        destructiveHint: tool.permission === 'write',
+        openWorldHint: tool.handler.startsWith('search.') || tool.handler.startsWith('platform.')
+      }
+    }));
+  }
+
+  // 上游工具定义：命名已在 #35 的 ExternalToolset 里按 mcp__<agentSlug>__<tool> 生成；只读分级用上游注解。
+  async #upstreamToolDefs(userId, clientId, clientName) {
+    if (!this.forward || !userId) return [];
+    let surface = null;
+    try { surface = await this.forward.listTools(userId, {clientId, clientName}); }
+    catch { return []; }
+    return (surface?.tools || []).filter(tool => tool && typeof tool.name === 'string').map(tool => ({
+      name: tool.name,
+      title: tool.title || '外部 Agent 工具',
+      description: tool.description || '',
+      inputSchema: tool.parameters || {type: 'object', properties: {}},
+      annotations: {
+        readOnlyHint: tool.readOnly === true,
+        destructiveHint: tool.readOnly !== true,
+        openWorldHint: true
+      }
+    }));
+  }
+
+  #result(result) {
+    return {content: [{type: 'text', text: JSON.stringify(result)}], isError: result?.status === 'error'};
+  }
+
   #createServer({authInfo} = {}) {
     const userId = authInfo?.extra?.userId;
+    const clientId = authInfo?.clientId || '';
+    const clientName = authInfo?.extra?.clientName || '';
     const server = new Server({name: 'career-agent', version: '3.0.0'}, {capabilities: {tools: {}}});
     server.setRequestHandler('tools/list', async () => ({
-      // #38 在这里合并该用户启用 Agent 的上游工具（含写，命名 mcp__<agent>__<tool>）；
-      // 上游 token 永不回传给第三方，转发调用要带 forwarded_client + client id。
-      tools: inboundTools().map(tool => ({
-        name: tool.name,
-        title: tool.title,
-        description: tool.description,
-        inputSchema: tool.parameters,
-        annotations: {
-          readOnlyHint: tool.permission !== 'write',
-          destructiveHint: tool.permission === 'write',
-          openWorldHint: tool.handler.startsWith('search.') || tool.handler.startsWith('platform.')
-        }
-      }))
+      // #38：本地注册表在前，该用户启用 Agent 的上游工具（含写）按 Agent 名追加，命名与出站一致。
+      // 上游 token 永不回传给第三方；任务内快照不约束入站列表，每次按连接缓存/刷新后的工具面给。
+      tools: mergeToolSurface(this.#localToolDefs(), await this.#upstreamToolDefs(userId, clientId, clientName))
     }));
     server.setRequestHandler('tools/call', async request => {
       const {name, arguments: args = {}} = request.params || {};
+      if (!userId) return this.#result({status: 'error', code: 'UNAUTHORIZED', message: '入站凭据没有绑定账号'});
       const tool = getTool(name);
       // 平台工具是任务内的登录型浏览器操作，没有入站任务就没有身份，按未知工具处理。
-      if (!tool || tool.handler.startsWith('platform.')) throw new Error('未知工具：' + name);
-      if (!userId) return {content: [{type: 'text', text: JSON.stringify({status: 'error', code: 'UNAUTHORIZED', message: '入站凭据没有绑定账号'})}], isError: true};
-      let result;
-      try { result = await this.callTool({userId, tool, name, args}); }
-      catch (error) {
-        result = {status: 'error', code: 'TOOL_FAILED', message: error.message || String(error)};
+      if (tool) {
+        if (tool.handler.startsWith('platform.')) throw new Error('未知工具：' + name);
+        // 本地工具（含写）落到该账号的数据目录：写工具带 forwarded_client + client id，
+        // 敏感写照常返回 confirm_required，确认只能由本应用 UI 完成。
+        let result;
+        try { result = await this.callTool({userId, clientId, clientName, tool, name, args}); }
+        catch (error) {
+          result = {status: 'error', code: 'TOOL_FAILED', message: error.message || String(error)};
+        }
+        return this.#result(result);
       }
-      return {content: [{type: 'text', text: JSON.stringify(result)}], isError: result?.status === 'error'};
+      // 上游工具：命名空间前缀必须对得上，否则仍按未知工具处理（不回显任何上游细节）。
+      if (!String(name || '').startsWith(EXTERNAL_PREFIX) || !this.forward) throw new Error('未知工具：' + name);
+      // 这次转发在连接层的 callTool 里占 #36 统一上游闸的 1 个额度（排队超时以 QUEUE_TIMEOUT 信封返回）。
+      const envelope = await this.forward.callTool({userId, clientId, clientName, name, args, signal: AbortSignal.timeout(300000)});
+      return this.#result(envelope);
     });
     return server;
   }

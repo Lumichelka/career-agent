@@ -188,12 +188,15 @@ export class WriteGateway {
     const payload = String(payloadJson || '');
     // 确认接受时要按原参数重放；payload 超过审计单条上限时拒绝发起，避免确认无法执行。
     if (Buffer.byteLength(payload) > MAX_AUDIT_EVENT_BYTES) throw new WriteError('AUDIT_EVENT_TOO_LARGE', '这次写入的参数超过 256KB，已拒绝；请拆分或缩小内容。', 413);
+    // 只记转发来源：普通确认接受时仍按「用户点了接受」记，不改变既有审计语义。
+    const originType = this.actorType === 'forwarded_client' ? this.actorType : '';
+    const originRef = originType ? this.actorRef : '';
     this.db.prepare(`INSERT INTO confirmations(
       confirm_id, user_id, tool, fingerprint, idempotency_key, entity, entity_id, action,
-      preview_summary, source_ref, payload_json, task_id, created_at, expires_at, consumed_at, decision, executed_at
-    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'pending',NULL)`).run(
+      preview_summary, source_ref, payload_json, task_id, actor_type, actor_ref, created_at, expires_at, consumed_at, decision, executed_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,'pending',NULL)`).run(
       confirmId, this.userId, tool, fingerprint, key, entity || '', entityId || '', action || '', summary, sourceRef || '',
-      payload, this.taskId, createdAt, expiresAt
+      payload, this.taskId, originType, originRef, createdAt, expiresAt
     );
     return {confirmId, createdAt, expiresAt, summary};
   }
