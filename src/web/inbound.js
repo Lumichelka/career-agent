@@ -12,6 +12,7 @@
   };
 
   let status = null;        // GET /api/mcp 的公开状态（不含凭据）
+  let pending = [];         // 入站转发发起、等你决定的敏感写确认（#38），没有任务卡也要能处理
   let reveal = null;        // 本次对话框内新签发的完整凭据；关闭对话框即消失
   let pendingEnable = false;
   let error = '';
@@ -47,6 +48,12 @@
     .inbound-client .name{font-size:12.5px;font-weight:600;color:#274333}
     .inbound-client .meta{font-size:11px;color:#7b8b80}
     .inbound-client .actions{display:flex;gap:6px;flex-wrap:wrap}
+    .inbound-pending{border:1px solid #e3cfc9;background:#fdf6f3;border-radius:10px;padding:9px 11px;display:grid;gap:7px}
+    .inbound-pending ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+    .inbound-pending li{display:grid;gap:4px;font-size:11.5px;color:#6f564d;min-width:0;overflow-wrap:anywhere}
+    .inbound-pending .actions{display:flex;gap:6px;flex-wrap:wrap}
+    .inbound-pending .acts button{font-size:11.5px;padding:4px 9px}
+    .inbound-hint{font-size:11.5px;color:#8a5b16;margin:2px 0 0}
     .inbound-err{color:#a64232!important}
     .inbound-empty{font-size:11.5px;color:#8a998f}
     @media(max-width:480px){
@@ -78,6 +85,23 @@
       '<div class="inbound-snippets">' + parts + '</div></div>';
   }
 
+  function previewText(item) {
+    const text = typeof item.preview === 'string' ? item.preview : JSON.stringify(item.preview || {});
+    return text.length > 160 ? text.slice(0, 160) + '…' : text;
+  }
+
+  // 入站转发发起的敏感写没有任务卡；这里给一份紧凑清单，接受/拒绝仍在网页端点。
+  function pendingHtml() {
+    if (!pending.length) return '';
+    return '<div class="inbound-pending" role="status"><p><strong>外部客户端发起的写入等你确认（' + esc(pending.length) + '）</strong>：接受后才落库；拒绝不会写入。</p><ul>' +
+      pending.map(item =>
+        '<li><span>' + esc(item.tool) + ' · ' + esc(item.entity || '') + ' · 有效至 ' + esc(fmt(item.expiresAt)) + '</span>' +
+        '<code>' + esc(previewText(item)) + '</code>' +
+        '<span class="acts actions"><button type="button" class="primary" data-act="accept-inbound" data-id="' + esc(item.confirmId) + '">接受</button>' +
+        '<button type="button" class="danger" data-act="reject-inbound" data-id="' + esc(item.confirmId) + '">拒绝</button></span></li>'
+      ).join('') + '</ul></div>';
+  }
+
   function clientsHtml() {
     const list = status?.clients || [];
     if (!list.length) return '<p class="inbound-empty">还没有签发凭据。签发后把这枚凭据只交给你信任的外部 AI。</p>';
@@ -88,6 +112,7 @@
         (c.revoked ? '<span class="meta">已撤销</span>' : '<span class="meta">' + esc(fmt(c.lastUsedAt)) + (c.lastUsedAt ? ' 用过' : '') + '</span>') +
         '</div>' +
         '<div class="meta">创建于 ' + esc(fmt(c.createdAt)) + ' · 签发时工具 ' + esc(c.toolCount) + ' 个' + (c.regeneratedAt ? ' · 最近重生成 ' + esc(fmt(c.regeneratedAt)) : '') + '</div>' +
+        (c.newToolCount ? '<p class="inbound-hint">签发后新发现 ' + esc(c.newToolCount) + ' 个工具：' + esc((c.newTools || []).join('、')) + '。旧凭据继续有效，无需重新生成。</p>' : '') +
         (c.revoked ? '' : '<div class="actions"><button type="button" data-act="regenerate" data-id="' + esc(c.id) + '">重新生成</button><button type="button" class="danger" data-act="revoke" data-id="' + esc(c.id) + '">撤销</button></div>') +
       '</li>'
     ).join('') + '</ul>';
@@ -117,6 +142,7 @@
       snippetsHtml() +
       '<div class="inbound-issue"><input id="inbound-client-name" maxlength="40" placeholder="client 名称，例如 claude-code" aria-label="client 名称"><button type="button" class="primary" data-act="issue">签发凭据</button></div>' +
       (error ? '<p class="inbound-err" role="alert">' + esc(error) + '</p>' : '') +
+      pendingHtml() +
       clientsHtml();
   }
 
@@ -126,6 +152,13 @@
       error = '';
     } catch (e) {
       error = e.message;
+    }
+    try {
+      const out = await ZX.api('confirmations?state=pending');
+      // 只列入站转发发起的；任务内的待确认仍由工作流抽屉负责。
+      pending = (out.confirmations || []).filter(item => item.actorType === 'forwarded_client');
+    } catch {
+      pending = [];
     }
     render();
   }
@@ -204,6 +237,15 @@
       try {
         await post('mcp/clients/revoke', {id: button.dataset.id});
         if (reveal?.client?.id === button.dataset.id) reveal = null;
+        await load();
+      } finally { button.disabled = false; }
+      return;
+    }
+    if (act === 'accept-inbound' || act === 'reject-inbound') {
+      const path = act === 'accept-inbound' ? 'confirmations/accept' : 'confirmations/reject';
+      button.disabled = true;
+      try {
+        await post(path, {confirmId: button.dataset.id, ...(act === 'reject-inbound' ? {reason: '在入站 MCP 设置里拒绝'} : {})});
         await load();
       } finally { button.disabled = false; }
       return;

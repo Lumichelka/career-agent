@@ -33,6 +33,9 @@ export function projectConfirmation(row, domain, nowIso) {
     previewSummary: row.preview_summary || '',
     expiresAt: row.expires_at,
     createdAt: row.created_at,
+    // 发起来源：手动/任务写入是 user，入站转发是 forwarded_client + client id（#38）。
+    actorType: row.actor_type || '',
+    actorRef: row.actor_ref || '',
     decision: row.decision || 'pending',
     consumedAt: row.consumed_at || '',
     executedAt: row.executed_at || '',
@@ -168,7 +171,9 @@ export async function acceptConfirmation({dir, userId, confirmId, now = new Date
 
     const gateway = createWriteGateway({
       db, domain: entry.domain, userId,
-      actorType: 'user', actorRef: 'confirmation',
+      // 入站转发发起的确认保留原发起来源；普通确认仍是「用户点了接受」。
+      actorType: row.actor_type || 'user',
+      actorRef: row.actor_ref || 'confirmation',
       taskId: row.task_id || ''
     });
     const outcome = await gateway.write({

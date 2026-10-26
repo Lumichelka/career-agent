@@ -22,6 +22,7 @@ import {listTools} from '../tools/registry.mjs';
 import {TaskManager, TaskGate} from './tasks.mjs';
 import {createToolExecutor} from '../tools/execute.mjs';
 import {InboundMcp} from '../mcp/inbound.mjs';
+import {InboundForwarder} from '../mcp/forward.mjs';
 import {createInboundHttp} from './inbound-http.mjs';
 import {AgentConfig} from '../agents/config.mjs';
 import {AgentConnectionManager, createSdkConnection} from '../mcp/client.mjs';
@@ -107,19 +108,39 @@ async function tenant(user) {
   })());
   return tenants.get(user.id);
 }
+// 入站转发（#38）：把 /mcp 的上游工具接到该用户已启用的外部 Agent；连接与发现复用 #34/#35。
+const inboundForwarder = new InboundForwarder({
+  dataDir,
+  getTenant: async userId => {
+    const user = accounts.users.find(u => u.id === userId);
+    if (!user) return null;
+    const t = await tenant(user);
+    return {agents: t.agents, connections: t.connections};
+  }
+});
 // 入站 /mcp：身份只来自自签 bearer，调用落到凭据所属账号的租户目录。
 const inboundMcp = await new InboundMcp({
   dataDir,
   accounts,
   getOrigin: () => localOrigin,
-  callTool: async ({userId, name, args}) => {
+  forward: inboundForwarder,
+  // 入站转发调用计入该用户的在途额度（#36 的统一上游闸合并前，先接到任务闸上）。
+  inFlight: {acquire: (userId, options = {}) => taskManager.gate.acquire(userId, options)},
+  callTool: async ({userId, clientId, clientName, name, args}) => {
     const user = accounts.users.find(u => u.id === userId);
     if (!user) return {status: 'error', code: 'ACCOUNT_MISSING', message: '该凭据所属账号已不存在', recovery: '请重新登录网页端并重新签发凭据。'};
     const t = await tenant(user);
     const model = t.models.snapshot();
     return createToolExecutor()(name, args, {
       taskId: '',
-      config: {searchUrl: model.searchUrl, recruitDir: t.dir, dataDir: t.dir},
+      config: {
+        searchUrl: model.searchUrl, recruitDir: t.dir, dataDir: t.dir, profileDir: t.dir,
+        userId,
+        // 审计/确认记录里要能认出是哪个入站 client 发起的（#38）。
+        actorType: 'forwarded_client',
+        actorRef: String(clientId || ''),
+        clientName: String(clientName || '')
+      },
       fetchImpl: fetch,
       signal: AbortSignal.timeout(180000)
     });

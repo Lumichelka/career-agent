@@ -163,15 +163,21 @@ export function externalError(error) {
   return {code, message: message.slice(0, 2000), recovery: EXTERNAL_RECOVERY[code] || EXTERNAL_RECOVERY.UPSTREAM_ERROR};
 }
 
-export function externalEvidence({agentId = '', tool = '', requestId = '', at = new Date().toISOString(), era = '', durationMs = 0} = {}) {
-  return {actorType: 'external_agent', agentId, tool, requestId, at, era, durationMs};
+export function externalEvidence({agentId = '', tool = '', requestId = '', at = new Date().toISOString(), era = '', durationMs = 0, actorType = 'external_agent', actorRef = '', actorName = ''} = {}) {
+  const out = {actorType, agentId, tool, requestId, at, era, durationMs};
+  // 默认（本应用任务里调用外部 Agent）保持原有信封形状；入站转发（#38）才追加来源字段。
+  if (actorType !== 'external_agent') {
+    if (actorRef) out.actorRef = actorRef;
+    if (actorName) out.actorName = actorName;
+  }
+  return out;
 }
 
 // 统一信封：status / data / error / evidence / truncated / assets；上游写另带 readOnly 与 retryable。
 export function buildEnvelope({status = 'ok', data = null, error = null, evidence = {}, truncated = false, assets = [], readOnly = false, retryable = true} = {}) {
   const out = {
     status,
-    evidence: {...evidence, actorType: 'external_agent'},
+    evidence: {...evidence, actorType: evidence?.actorType || 'external_agent'},
     readOnly: readOnly === true,
     retryable: retryable !== false
   };
@@ -195,7 +201,7 @@ export function envelopeForModel(envelope, maxBytes = MAX_MODEL_TEXT) {
   if (byteLength(full) <= maxBytes) return full;
   const base = {
     status: envelope?.status === 'ok' ? 'ok' : 'error',
-    evidence: {...(envelope?.evidence || {}), actorType: 'external_agent'},
+    evidence: {...(envelope?.evidence || {}), actorType: envelope?.evidence?.actorType || 'external_agent'},
     readOnly: envelope?.readOnly === true,
     retryable: envelope?.retryable !== false,
     truncated: true
@@ -332,7 +338,11 @@ export class ExternalToolset {
     sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
     callTimeoutMs = DEFAULT_CALL_TIMEOUT_MS, graceMs = CANCEL_GRACE_MS,
     maxRawBytes = MAX_RAW_BYTES, maxModelBytes = MAX_MODEL_TEXT, maxEvidenceBytes = MAX_EVIDENCE_BYTES,
-    progressMinMs = PROGRESS_MIN_MS
+    progressMinMs = PROGRESS_MIN_MS,
+    // 入站转发（#38）每次 ListTools 都要看到上游最新的工具，不能吃 10 分钟发现缓存；任务内仍用 pin 快照。
+    refreshTools = false,
+    // 来源标记：本应用任务里是 external_agent；入站转发是 forwarded_client + client id（审计/证据要能认出）。
+    actorType = 'external_agent', actorRef = '', actorName = ''
   } = {}) {
     if (!config || !connections) throw new Error('ExternalToolset 需要 config 与 connections');
     this.userId = userId;
@@ -351,6 +361,10 @@ export class ExternalToolset {
     this.maxModelBytes = Math.max(1, Number(maxModelBytes) || MAX_MODEL_TEXT);
     this.maxEvidenceBytes = Math.max(1, Number(maxEvidenceBytes) || MAX_EVIDENCE_BYTES);
     this.progressMinMs = Math.max(0, Number(progressMinMs) || 0);
+    this.refreshTools = refreshTools === true;
+    this.actorType = String(actorType || 'external_agent');
+    this.actorRef = String(actorRef || '');
+    this.actorName = String(actorName || '');
     this.tools = [];
     this.snapshot = null;
     this.agents = new Map();
@@ -394,7 +408,9 @@ export class ExternalToolset {
       const agent = enabled.find(item => item.id === entry.id);
       let era = '';
       try {
-        const upstream = await this.connections.pin(agent.id);
+        const upstream = this.refreshTools && typeof this.connections.refresh === 'function'
+          ? (await this.connections.refresh(agent.id)).tools
+          : await this.connections.pin(agent.id);
         if (typeof this.connections.status === 'function') {
           const status = await this.connections.status(agent.id).catch(() => null);
           era = String(status?.era || '');
@@ -405,7 +421,8 @@ export class ExternalToolset {
         this.agents.set(agent.id, {id: entry.id, name: entry.name, slug: entry.slug, entity: agent, era});
       } catch (error) {
         const mapped = externalError(error);
-        unavailable.push({agentId: agent.id, name: agent.name, ...mapped});
+        // slug 一起带回：入站转发要能按 mcp__<slug>__ 前缀判断是哪个 Agent 连不上（#38）。
+        unavailable.push({agentId: agent.id, name: agent.name, slug: entry.slug, ...mapped});
         this.emit({type: 'status', text: '外部 Agent「' + agent.name + '」本轮不可用（' + mapped.code + '），其余工具照常使用。'});
       }
     }
@@ -502,6 +519,7 @@ export class ExternalToolset {
     if (!this.evidenceDir) return '';
     const payload = {
       requestId,
+      ...(this.actorType !== 'external_agent' ? {actorType: this.actorType, actorRef: this.actorRef, ...(this.actorName ? {actorName: this.actorName} : {})} : {}),
       agentId: descriptor.agentId,
       agentName: agent.name,
       tool: descriptor.name,
@@ -537,7 +555,7 @@ export class ExternalToolset {
     const requestId = randomUUID();
     const tool = descriptor?.name || String(descriptorOrName || '');
     const agent = descriptor ? this.agents.get(descriptor.agentId) || null : null;
-    const base = externalEvidence({agentId: descriptor?.agentId || '', tool, requestId, at, era: agent?.era || '', durationMs: 0});
+    const base = externalEvidence({agentId: descriptor?.agentId || '', tool, requestId, at, era: agent?.era || '', durationMs: 0, actorType: this.actorType, actorRef: this.actorRef, actorName: this.actorName});
 
     if (!descriptor || !agent) {
       const out = this.#fail({code: 'UNSUPPORTED', message: '本轮工具面没有这个外部工具：' + tool}, base);
