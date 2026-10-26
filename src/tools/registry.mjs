@@ -125,6 +125,69 @@ export const TOOLS = [
     }
   },
   {
+    name: 'career_recruit_bulk_write',
+    title: '批量写入招聘活动与项目',
+    description: '把从页面或截图核对出的活动与参会单位一次写入本机招聘库（自动写入，带审计与幂等）。只写 events / event_projects，不写公司档案、不投递。events 每条需 title 与 startAt；projects 用 eventIndex（从 0 开始）或 eventId 指向同批活动；source.sourceId=manual 表示手动/浏览器读取。同一次调用共用一个 idempotencyKey，重试不会重复写入。',
+    permission: 'write',
+    sensitivity: 'auto',
+    writeDomain: 'recruit',
+    handler: 'recruit.bulkWrite',
+    timeoutMs: 15000,
+    parameters: {
+      type: 'object',
+      properties: {
+        events: {type: 'array', description: '活动数组（最多 50 条），每项含 title、startAt，可选 school/city/kind/venue/company/positions/requirements/applyMode/applyUrl/sourceUrl/sourceKey/notes'},
+        projects: {type: 'array', description: '招聘项目数组（最多 200 条），用 eventIndex（从 0 开始）或 eventId 关联本批活动'},
+        source: {
+          type: 'object',
+          description: '来源元数据：sourceId（manual=手动/浏览器读取）、sourceUrl、notes',
+          properties: {
+            sourceId: {type: 'string', maxLength: 80},
+            sourceUrl: {type: 'string', maxLength: 500},
+            notes: {type: 'string', maxLength: 2000}
+          },
+          additionalProperties: false
+        },
+        idempotencyKey: {type: 'string', maxLength: 200, description: '幂等键：同一次写入重试必须复用'},
+        confirmId: {type: 'string', maxLength: 64, description: '敏感写入的确认 id，可选'}
+      },
+      required: ['events'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'career_profile_write',
+    title: '写入长期画像',
+    description: '把用户确认过的长期画像条目（届别/专业/城市偏好/技能/经历要点）写入本机画像库。这是敏感写入：调用后只生成待确认记录、不落库，需用户在任务卡点「接受」后才保存；不接受时不要自己填 confirmId。一次调用 = 一个批次，重试要复用同一个 idempotencyKey。',
+    permission: 'write',
+    sensitivity: 'sensitive',
+    writeDomain: 'profile',
+    handler: 'profile.write',
+    timeoutMs: 15000,
+    parameters: {
+      type: 'object',
+      properties: {
+        facts: {
+          type: 'array',
+          description: '画像条目数组（1-50 条）；每项含 key（要点名，≤40 字）与 value（内容，≤500 字），可选 source',
+          items: {
+            type: 'object',
+            properties: {
+              key: {type: 'string', maxLength: 40},
+              value: {type: 'string', maxLength: 500},
+              source: {type: 'string', maxLength: 80}
+            },
+            required: ['key', 'value']
+          }
+        },
+        idempotencyKey: {type: 'string', maxLength: 200, description: '幂等键：同一次写入重试必须复用'},
+        confirmId: {type: 'string', maxLength: 64, description: '确认接口内部使用；模型不要填写'}
+      },
+      required: ['facts', 'idempotencyKey'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'career_source_health',
     title: '招聘来源健康',
     description: '列出高校就业网/公众号来源的列表、详情、项目能力与最近状态；ok 只在列表解析成功时使用。',
@@ -211,7 +274,8 @@ export function getTool(name) {
 }
 
 export function listTools() {
-  return TOOLS.map(({handler, ...rest}) => rest);
+  // 自动/敏感分级与写入域随注册表一起给能力面板；旧工具没有显式声明时按自动只读处理。
+  return TOOLS.map(({handler, ...rest}) => ({...rest, sensitivity: rest.sensitivity || 'auto', writeDomain: rest.writeDomain || ''}));
 }
 
 export function toolsForModel() {
@@ -220,6 +284,13 @@ export function toolsForModel() {
 
 export function platformTools() {
   return TOOLS.filter(t => t.handler.startsWith('platform.'));
+}
+
+// 入站 /mcp 暴露的本地工具：注册表里除平台工具以外的全部工具（含写，#38）。
+// 平台工具是任务内的登录型浏览器操作，靠内部任务桥与 taskId 鉴权；入站连接没有任务，因此不暴露。
+// 写工具照常暴露：敏感写走本应用确认（返回 confirm_required），自动写在写网关里记审计，入站身份不会绕过任一道。
+export function inboundTools() {
+  return TOOLS.filter(t => !t.handler.startsWith('platform.'));
 }
 
 export function toolNames() {

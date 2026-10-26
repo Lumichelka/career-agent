@@ -1,0 +1,26 @@
+[
+  {
+    "id": "list",
+    "kind": "screenshot",
+    "file": "01-list.png",
+    "url": "https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm",
+    "title": "现场双选会-西财智慧就业系统",
+    "at": "2026-10-26T10:43:21.141Z",
+    "viewport": {
+      "width": 1366,
+      "height": 900
+    }
+  },
+  {
+    "id": "detail",
+    "kind": "screenshot",
+    "file": "02-detail.png",
+    "url": "https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm",
+    "title": "西南财经大学2026年秋季大型双选会-现场双选会-西财智慧就业系统",
+    "at": "2026-10-26T10:43:24.289Z",
+    "viewport": {
+      "width": 1366,
+      "height": 900
+    }
+  }
+]

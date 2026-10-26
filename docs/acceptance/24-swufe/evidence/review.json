@@ -1,0 +1,54 @@
+{
+  "status": "issues",
+  "issues": [
+    {
+      "row": "events[1]",
+      "field": "title",
+      "issue": "标题以“（第一...”结尾，疑似被截断，内容不完整",
+      "severity": "medium"
+    },
+    {
+      "row": "events[1]",
+      "field": "venue",
+      "issue": "场地字段以“学生活动中心...”结尾，疑似被截断",
+      "severity": "medium"
+    },
+    {
+      "row": "events[2]",
+      "field": "venue",
+      "issue": "场地字段以“学生活动中心...”结尾，疑似被截断",
+      "severity": "medium"
+    },
+    {
+      "row": "projects[4]",
+      "field": "company",
+      "issue": "公司名疑似被截断，末尾缺少“司”等字符",
+      "severity": "high"
+    },
+    {
+      "row": "projects[8]",
+      "field": "company",
+      "issue": "公司名疑似被截断，缺少“州市分公司”等后续字符",
+      "severity": "high"
+    },
+    {
+      "row": "events[1]",
+      "field": "sourceUrl",
+      "issue": "来源链接为空，缺少可追溯详情地址",
+      "severity": "low"
+    },
+    {
+      "row": "events[2]",
+      "field": "sourceUrl",
+      "issue": "来源链接为空，缺少可追溯详情地址",
+      "severity": "low"
+    }
+  ],
+  "raw": "",
+  "agent": {
+    "id": "01a177ce-b51f-7bd9-951c-b00d6353839d",
+    "name": "claude-review"
+  },
+  "tool": "review",
+  "at": "2026-10-26T10:44:10.242Z"
+}

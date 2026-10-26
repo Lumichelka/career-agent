@@ -1,0 +1,106 @@
+{
+  "spec": "25",
+  "ticket": "42",
+  "acceptance": "24-swufe",
+  "status": "pending",
+  "runAt": "<待填写：YYYY-MM-DDTHH:mm:ss+08:00>",
+  "owner": "<待填写：验收人>",
+  "environment": {
+    "dataDir": "<待填写：CAREER_DATA_DIR 绝对路径>",
+    "userId": "<待填写：users/<userId>>",
+    "taskId": "<待填写：干净用例任务 id>",
+    "conflictTaskId": "<待填写：冲突用例任务 id>",
+    "commit": "<待填写：git rev-parse HEAD>",
+    "nodeVersion": "<待填写：node -v>",
+    "edgeVersion": "<待填写：Microsoft Edge 版本>"
+  },
+  "evidence": {
+    "extraction": {
+      "path": "evidence/extraction.json",
+      "sha256": "<待填写：64 位小写 hex>"
+    },
+    "review": {
+      "path": "evidence/review.json",
+      "sha256": "<待填写：64 位小写 hex>"
+    },
+    "auditExport": {
+      "path": "evidence/audit-export.json",
+      "sha256": "<待填写：64 位小写 hex>"
+    },
+    "taskLog": {
+      "path": "evidence/task.json",
+      "sha256": "<待填写：64 位小写 hex>"
+    },
+    "screenshots": {
+      "list": {
+        "path": "<待填写：本机 tasks/<taskId>/evidence/01-list.png 绝对路径>",
+        "sha256": "<待填写：64 位小写 hex>"
+      },
+      "detail": {
+        "path": "<待填写：本机 tasks/<taskId>/evidence/02-detail.png 绝对路径>",
+        "sha256": "<待填写：64 位小写 hex>"
+      },
+      "uiTaskCard": {
+        "path": "evidence/ui-task-card.png",
+        "sha256": "<待填写：64 位小写 hex>"
+      },
+      "uiAuditReview": {
+        "path": "evidence/ui-audit-review.png",
+        "sha256": "<待填写：64 位小写 hex>"
+      },
+      "uiForceConfirm": {
+        "path": "evidence/ui-force-confirm.png",
+        "sha256": "<待填写：64 位小写 hex>"
+      }
+    },
+    "db": {
+      "before": {
+        "path": "evidence/recruit.db.before",
+        "sha256": "<待填写：64 位小写 hex>",
+        "contentHash": "<待填写：events + event_projects 内容 sha256>",
+        "events": null,
+        "projects": null
+      },
+      "after": {
+        "path": "evidence/recruit.db.after",
+        "sha256": "<待填写：64 位小写 hex>",
+        "contentHash": "<待填写：events + event_projects 内容 sha256>",
+        "events": null,
+        "projects": null
+      },
+      "afterUndo": {
+        "path": "evidence/recruit.db.after-undo",
+        "sha256": "<待填写：64 位小写 hex>",
+        "contentHash": "<待填写：events + event_projects 内容 sha256>",
+        "events": null,
+        "projects": null
+      }
+    }
+  },
+  "checks": {
+    "browserReads": null,
+    "collectorRuns": null,
+    "fetchTextCalls": null,
+    "events": null,
+    "projects": null,
+    "contactFields": null,
+    "auditRows": null,
+    "auditDataRatio": "<待填写：1:1>",
+    "undoCleanMatchesBefore": null,
+    "conflictSkipped": null,
+    "forced": null,
+    "companyDbCreated": null,
+    "duplicateRows": null,
+    "durationMs": null
+  },
+  "agentLeg": {
+    "passed": null,
+    "tool": "<待填写：复核工具名>",
+    "issueCount": null
+  },
+  "signature": {
+    "statement": "<待填写：验收通过>",
+    "date": "<待填写：YYYY-MM-DD>",
+    "name": "<待填写：验收人>"
+  }
+}

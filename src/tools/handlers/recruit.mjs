@@ -1,5 +1,8 @@
 import {join} from 'node:path';
 import {SOURCES, sourceHealth} from '../../recruit/sources/index.mjs';
+import {createWriteGateway} from '../../writes/gateway.mjs';
+import {writeFailure} from '../../writes/errors.mjs';
+import {bulkWriteRows, normalizeSource, validateBulkPayload} from '../../recruit/bulk.mjs';
 
 function ctxDir(ctx) { return ctx.config?.recruitDir; }
 
@@ -114,4 +117,81 @@ export async function events(args, ctx) {
       }))
     };
   } finally { store.close(); }
+}
+
+// 自动写入：一次调用 = 一个批次；业务行、write_audit、idempotency 同库同事务。
+// 只写 events / event_projects；source_id=manual 表示手动/浏览器读取；不写公司档案。
+export async function bulkWrite(args, ctx) {
+  const dir = ctxDir(ctx);
+  if (!dir) return {status: 'unavailable', message: '当前任务没有关联招聘数据库，无法自动写入。', recovery: '请先在本机招聘库准备好数据目录。'};
+  const userId = String(ctx.config?.userId || ctx.userId || '').trim();
+  if (!userId) {
+    return {status: 'error', code: 'UNAUTHORIZED', message: '自动写入需要登录用户身份。', recovery: '请先在网页端登录后再让智能体写入。'};
+  }
+  const source = normalizeSource(args.source);
+  const invalid = validateBulkPayload(args.events, args.projects, args.source);
+  if (invalid) {
+    return {status: 'error', code: 'INVALID_ARGUMENTS', message: invalid, recovery: '按工具参数说明修正后重试。'};
+  }
+  const {RecruitStore} = await import('../../recruit/store.mjs');
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  try {
+    // 业务写入必须复用这条连接；网关在同一事务里写业务行、审计与幂等。
+    const gateway = createWriteGateway({
+      db: store.db,
+      domain: 'recruit',
+      userId,
+      actorType: ctx.config?.actorType || 'model',
+      actorRef: ctx.config?.actorRef || '',
+      taskId: ctx.config?.taskId || ctx.taskId || ''
+    });
+    const projects = args.projects || [];
+    const outcome = await gateway.write({
+      tool: 'career_recruit_bulk_write',
+      sensitivity: 'auto',
+      payload: {events: args.events, projects, source},
+      idempotencyKey: args.idempotencyKey,
+      confirmId: args.confirmId || '',
+      // 确认接口（#30）用新幂等键执行时，用 confirmationKey 指向发起确认时的原键。
+      confirmationKey: args.confirmationKey || '',
+      approveConfirmation: ctx.confirmed === true,
+      entity: 'events',
+      action: 'create',
+      sourceRef: source,
+      execute: () => bulkWriteRows({store, events: args.events, projects, source})
+    });
+    if (outcome.status === 'confirm_required') {
+      return {
+        status: 'confirm_required',
+        code: 'NEEDS_CONFIRMATION',
+        message: '这次写入需要你确认后才会落库。',
+        confirmId: outcome.confirmId,
+        preview: outcome.preview,
+        expiresAt: outcome.expiresAt,
+        recovery: '在任务卡确认后重试。'
+      };
+    }
+    const counts = {
+      rows: Number(outcome.counts?.rows) || 0,
+      created: Number(outcome.counts?.created) || 0,
+      updated: Number(outcome.counts?.updated) || 0,
+      deleted: Number(outcome.counts?.deleted) || 0,
+      skipped: Number(outcome.counts?.skipped) || 0
+    };
+    const result = {
+      status: 'ok',
+      batchId: outcome.batchId,
+      duplicate: !!outcome.duplicate,
+      confirmed: !!outcome.confirmed,
+      counts,
+      result: outcome.result || null
+    };
+    // 只有真正写入（不是幂等重放）才发 writes 事件，任务卡不会把重放算成新写入。
+    if (!outcome.duplicate) result.writeEvent = {batchId: outcome.batchId, counts};
+    return result;
+  } catch (error) {
+    return writeFailure(error);
+  } finally {
+    store.close();
+  }
 }

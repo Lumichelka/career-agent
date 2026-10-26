@@ -1,0 +1,150 @@
+{
+  "id": "c874b8e7-dbd7-4812-86f7-65642b304705",
+  "userId": "e85e589d-831f-43f2-86ec-f207955e5af2",
+  "sessionId": "461bc05a-068d-40a7-a590-beb42c0eb606",
+  "title": "来源校对 · 西南财经大学 · 双选会",
+  "sourceName": "西南财经大学",
+  "state": "succeeded",
+  "phase": "任务完成",
+  "counts": {
+    "tools": 0,
+    "steps": 0,
+    "evidence": 6,
+    "writes": 13,
+    "batches": 1,
+    "drafts": 0
+  },
+  "plan": null,
+  "evidence": [
+    {
+      "id": "1128d2f9-a4b3-4a15-91ee-aada255c4c95",
+      "kind": "note",
+      "label": "采集器已禁用（robots 限制），改用应用内浏览器读取",
+      "detail": "明确不调用采集器，也不向目标站发 fetchText / HTTP 抓取；只由应用内浏览器打开两次页面。",
+      "url": "",
+      "at": "2026-10-26T10:43:18.751Z"
+    },
+    {
+      "id": "c739a5e9-3b8b-451f-882e-9499136bc952",
+      "kind": "screenshot",
+      "label": "截图 1 · 列表页：现场双选会-西财智慧就业系统",
+      "detail": "URL https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm · 2026-10-26T10:43:21.141Z · 视口 1366×900",
+      "url": "/api/source-check/evidence?taskId=c874b8e7-dbd7-4812-86f7-65642b304705&file=01-list.png",
+      "at": "2026-10-26T10:43:24.657Z"
+    },
+    {
+      "id": "5ddba7fd-2384-4667-9346-c663bf1401db",
+      "kind": "screenshot",
+      "label": "截图 2 · 活动详情：西南财经大学2026年秋季大型双选会-现场双选会-西财智慧就业系统",
+      "detail": "URL https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm · 2026-10-26T10:43:24.289Z · 视口 1366×900",
+      "url": "/api/source-check/evidence?taskId=c874b8e7-dbd7-4812-86f7-65642b304705&file=02-detail.png",
+      "at": "2026-10-26T10:43:24.658Z"
+    },
+    {
+      "id": "b858f0a4-3de7-4e07-84cd-779cb86c9a04",
+      "kind": "extraction",
+      "label": "抽取 JSON（联系方式已剔除）",
+      "detail": "活动 3 · 单位 10",
+      "url": "/api/source-check/evidence?taskId=c874b8e7-dbd7-4812-86f7-65642b304705&file=extraction.json",
+      "at": "2026-10-26T10:43:31.354Z"
+    },
+    {
+      "id": "1d18d820-42c7-47bf-8446-23213fb1809f",
+      "kind": "external_call",
+      "label": "外部调用：claude-review · review（只读）",
+      "detail": "{\"requestId\":\"9702e25c-87df-49d2-8917-2cffaa22c47e\",\"status\":\"ok\",\"code\":\"\",\"era\":\"modern\",\"durationMs\":38882,\"retryable\":true,\"idempotency\":\"read_only\"}",
+      "url": "",
+      "at": "2026-10-26T10:44:10.242Z"
+    },
+    {
+      "id": "030d8e47-0941-46aa-8f97-3ac1d3c38881",
+      "kind": "review",
+      "label": "外部 Agent 复核：7 个问题",
+      "detail": "events[1] · title：标题以“（第一...”结尾，疑似被截断，内容不完整\nevents[1] · venue：场地字段以“学生活动中心...”结尾，疑似被截断\nevents[2] · venue：场地字段以“学生活动中心...”结尾，疑似被截断\nprojects[4] · company：公司名疑似被截断，末尾缺少“司”等字符\nprojects[8] · company：公司名疑似被截断，缺少“州市分公司”等后续字符",
+      "url": "/api/source-check/evidence?taskId=c874b8e7-dbd7-4812-86f7-65642b304705&file=review.json",
+      "at": "2026-10-26T10:44:10.243Z"
+    }
+  ],
+  "drafts": [],
+  "error": null,
+  "undo": {
+    "available": true,
+    "summary": "可撤销 13 条自动写入（1 个批次）。",
+    "rows": 13,
+    "batches": 1,
+    "undone": 0,
+    "conflicts": 0,
+    "forced": 0,
+    "failed": 0,
+    "already": 0,
+    "remaining": 13,
+    "allUndone": false,
+    "undoneBatches": 0,
+    "pendingBatches": 1,
+    "updatedAt": "2026-10-26T10:44:10.334Z"
+  },
+  "fallback": null,
+  "review": {
+    "status": "issues",
+    "count": 7,
+    "issues": [
+      {
+        "row": "events[1]",
+        "field": "title",
+        "issue": "标题以“（第一...”结尾，疑似被截断，内容不完整",
+        "severity": "medium"
+      },
+      {
+        "row": "events[1]",
+        "field": "venue",
+        "issue": "场地字段以“学生活动中心...”结尾，疑似被截断",
+        "severity": "medium"
+      },
+      {
+        "row": "events[2]",
+        "field": "venue",
+        "issue": "场地字段以“学生活动中心...”结尾，疑似被截断",
+        "severity": "medium"
+      },
+      {
+        "row": "projects[4]",
+        "field": "company",
+        "issue": "公司名疑似被截断，末尾缺少“司”等字符",
+        "severity": "high"
+      },
+      {
+        "row": "projects[8]",
+        "field": "company",
+        "issue": "公司名疑似被截断，缺少“州市分公司”等后续字符",
+        "severity": "high"
+      },
+      {
+        "row": "events[1]",
+        "field": "sourceUrl",
+        "issue": "来源链接为空，缺少可追溯详情地址",
+        "severity": "low"
+      },
+      {
+        "row": "events[2]",
+        "field": "sourceUrl",
+        "issue": "来源链接为空，缺少可追溯详情地址",
+        "severity": "low"
+      }
+    ],
+    "raw": "",
+    "agentLeg": "passed",
+    "attempted": true,
+    "agent": {
+      "id": "01a177ce-b51f-7bd9-951c-b00d6353839d",
+      "name": "claude-review"
+    },
+    "tool": "review",
+    "error": null,
+    "at": "2026-10-26T10:44:10.242Z"
+  },
+  "createdAt": "2026-10-26T10:43:18.736Z",
+  "startedAt": "2026-10-26T10:43:18.745Z",
+  "updatedAt": "2026-10-26T10:44:10.329Z",
+  "finishedAt": "2026-10-26T10:44:10.329Z",
+  "durationMs": 51589
+}

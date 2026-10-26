@@ -1,6 +1,7 @@
 import {Accounts} from './accounts.mjs';
-import {ModelSettings, validateModelSettings, backendLabel} from '../model/model-settings.mjs';
+import {ModelSettings, validateModelSettings} from '../model/model-settings.mjs';
 import {presetOptions, decorateChatError} from '../model/providers.mjs';
+import {BACKEND_CHOICES, MAX_IMAGE_BYTES, BackendChoice, isImageAttachment, normalizeImageAttachment, publicBackends, resolveTurn, selectBackend, suggestFallback} from '../model/backends.mjs';
 import {runApiModel, probeApi} from '../model/api-model.mjs';
 import {runDiagnostics} from '../model/diag.mjs';
 import {KeyVault} from '../model/keyvault.mjs';
@@ -17,27 +18,99 @@ import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {randomUUID, randomBytes} from 'node:crypto';
 import {runAgent, runModel} from '../agent/agent.mjs';
-import {prepareDataDir} from '../config/paths.mjs';
 import {listTools} from '../tools/registry.mjs';
+import {TaskManager, TaskGate} from './tasks.mjs';
+import {createToolExecutor} from '../tools/execute.mjs';
+import {InboundMcp} from '../mcp/inbound.mjs';
+import {InboundForwarder} from '../mcp/forward.mjs';
+import {createInboundHttp} from './inbound-http.mjs';
+import {AgentConfig} from '../agents/config.mjs';
+import {AgentConnectionManager, createSdkConnection} from '../mcp/client.mjs';
+import {UpstreamGate} from '../mcp/gate.mjs';
+import {createElicitationChannel, createMrtrHandlers} from '../mcp/mrtr.mjs';
+import {ExternalToolset, externalToolsSupported, OUTBOUND_WARNING} from '../agents/tools.mjs';
+import {runAgentBackend} from '../agents/executor.mjs';
+import {handleAgents} from '../agents/api.mjs';
+import {handleAudit, handleAuditClear, handleAuditExport} from '../writes/audit-api.mjs';
+import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
+import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
+import {createSourceCheckService} from '../source-check/pipeline.mjs';
+import {createExternalReviewer} from '../source-check/review.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
-const root = fileURLToPath(new URL('../..', import.meta.url));
-const dataDir = await prepareDataDir({root, log: message => console.log(message)});
+// Node fetch / Chromium 都会拒绝一批「危险端口」；测试用 port:0 时可能随机撞上。
+// 只在随机端口上最多重听 5 次，避免测试偶发 bad port；显式端口保持原样。
+const UNSAFE_PORTS = new Set([1,7,9,11,13,15,17,19,20,21,22,23,25,37,42,43,53,69,77,79,87,95,101,102,103,104,109,110,111,113,115,117,119,123,135,137,139,143,161,179,389,427,465,512,513,514,515,526,530,531,532,540,548,554,556,563,587,601,636,989,990,993,995,1719,1720,1723,2049,3659,4045,4190,5060,5061,6000,6566,6665,6666,6667,6668,6669,6679,6697,10080]);
+// 应用工厂：装配一个可启动的实例，不做进程级的事（环境变量、日志格式归 index.mjs）。
+// 返回 {server, token, dataDir, host, port, origin, close}；port 传 0 时由系统分配，close 幂等。
+export async function createApp({
+  dataDir,
+  root = fileURLToPath(new URL('../..', import.meta.url)),
+  host = '127.0.0.1',
+  port = 0,
+  taskLimits = {},
+  sourceCheck = {},
+  // 测试注入：外部 Agent 连接用假 transport，绝不启动真实进程或联网；时钟可注入以验证空闲回收。
+  agentClientFactory = null,
+  agentNow = null,
+  // #36：统一上游闸可注入（测试用短排队超时）；模型采样补全也可注入 fetch。
+  upstreamGate = null,
+  upstreamLimits = {},
+  samplingFetch = null
+} = {}) {
+if (!dataDir) throw new Error('createApp 需要 dataDir：准备数据目录是进程级入口（index.mjs）的职责');
+await mkdir(dataDir, {recursive: true});
 const tokenFile = join(dataDir, 'local-session-token');
 let token = await readFile(tokenFile, 'utf8').catch(() => '');
 if (!/^[a-f0-9]{48}$/.test(token)) { token = randomBytes(24).toString('hex'); await writeFile(tokenFile, token, 'utf8'); }
 const running = new Map(), taskEvents = new Map(), loginWaiters = new Map(), loginPrompted = new Set();
-const port = Number(process.env.PORT || 4189);
-const host = process.env.CAREER_HOST || '127.0.0.1';
-const localOrigin = 'http://127.0.0.1:' + port;
-
+// 首次出网确认等待中的选择：confirmId -> {userId, finish(decision)}。身份只来自登录 cookie。
+const outboundWaits = new Map();
+// 服务端兜底的连续失败计数：客户端不老实递增 fallbackDepth 时，换后端建议仍然封顶 3 次。
+const failureStreaks = new Map();
+// 任务闸与任务记录：每用户 2 / 全局 8 / 排队 120s；记录落在 users/<id>/tasks/，供抽屉刷新。
+const taskManager = new TaskManager({dataDir, gate: new TaskGate(taskLimits), maxDurationMs: taskLimits.maxDurationMs});
+// 统一上游闸：模型 API、MCP 出站、入站转发共用；进程内所有用户共享同一实例。
+const gate = upstreamGate || new UpstreamGate(upstreamLimits);
+// MRTR elicitation：表单事件投递到当前任务的 NDJSON，回复走 /api/mrtr/elicit。
+const elicitationChannel = createElicitationChannel();
+// 来源校对：浏览器读取与视觉抽取可注入，确定性测试不启动真实浏览器/视觉 API；live 走真实实现。
+const sourceCheckService = createSourceCheckService({
+  dataDir,
+  taskManager,
+  ...(sourceCheck.browserReader ? {browserReader: sourceCheck.browserReader} : {}),
+  ...(sourceCheck.extractor ? {extractor: sourceCheck.extractor} : {}),
+  ...(sourceCheck.visionCall ? {visionCall: sourceCheck.visionCall} : {}),
+  ...(sourceCheck.reviewer ? {reviewer: sourceCheck.reviewer} : {}),
+  // #40：默认复核走该用户自己的外部 Agent；测试可注入 reviewer，不启动真实 Agent。
+  reviewerFactory: sourceCheck.reviewerFactory || (async ({userId, task, emit}) => {
+    const user = accounts.users.find(item => item.id === userId);
+    if (!user) return null;
+    const t = await tenant(user);
+    return createExternalReviewer({
+      userId,
+      config: t.agents,
+      connections: t.connections,
+      home: join(dataDir, 'users', userId),
+      evidenceDir: join(dataDir, 'users', userId, 'tasks', task.id, 'evidence'),
+      taskId: task.id,
+      emit
+    });
+  })
+});
+let actualPort = Number(port);
+let localOrigin = 'http://127.0.0.1:' + actualPort;
+let allowedHosts = new Set();
 // 多设备访问：默认只监听本机；CAREER_HOST=0.0.0.0 时开放局域网，但保留口令与账号两道门槛。
-const allowedHosts = new Set(['127.0.0.1:' + port, 'localhost:' + port, '[::1]:' + port, '127.0.0.1', 'localhost']);
-if (host !== '127.0.0.1') {
-  for (const list of Object.values(os.networkInterfaces())) for (const net of list || []) if (net.family === 'IPv4' && !net.internal) { allowedHosts.add(net.address + ':' + port); allowedHosts.add(net.address); }
+function buildAllowedHosts(listenPort) {
+  const set = new Set(['127.0.0.1:' + listenPort, 'localhost:' + listenPort, '[::1]:' + listenPort, '127.0.0.1', 'localhost']);
+  if (host !== '127.0.0.1') {
+    for (const list of Object.values(os.networkInterfaces())) for (const net of list || []) if (net.family === 'IPv4' && !net.internal) { set.add(net.address + ':' + listenPort); set.add(net.address); }
+  }
+  for (const extra of String(process.env.CAREER_ALLOWED_HOSTS || '').split(',')) { const h = extra.trim(); if (h) { set.add(h); set.add(h + ':' + listenPort); } }
+  return set;
 }
-for (const extra of String(process.env.CAREER_ALLOWED_HOSTS || '').split(',')) { const h = extra.trim(); if (h) { allowedHosts.add(h); allowedHosts.add(h + ':' + port); } }
 const hostAllowed = h => !!h && (allowedHosts.has(h) || allowedHosts.has(h.split(':')[0]));
 
 const accounts = await new Accounts(dataDir).init(), tenants = new Map(), owners = new Map(), bridgeTokens = new Map();
@@ -56,13 +129,94 @@ async function tenant(user) {
     const vault = await new KeyVault(tenantData).init();
     const model = await new ModelSettings(home, vault).load();
     model.allowEnvironmentKey = false; // 不继承服务器环境变量里的 Key，避免账号之间串用
-    return {dir: tenantData, models: model, platforms: new PlatformBrowser(home), vault};
+    const backends = await new BackendChoice(tenantData).load();
+    const agentConfig = await new AgentConfig(home, vault).load();
+    const managerOptions = {home, config: agentConfig, gate, userId: user.id};
+    if (agentClientFactory) managerOptions.createConnection = agentClientFactory;
+    else managerOptions.createConnection = createSdkConnection;
+    if (agentNow) managerOptions.now = agentNow;
+    let connections = null;
+    // MRTR：每个连接按 Agent 的 mrtr 开关绑定；sampling 用该用户当前模型，elicitation 弹到该任务。
+    const mrtr = createMrtrHandlers({
+      userId: user.id,
+      user,
+      home,
+      root,
+      models: model,
+      backends,
+      gate,
+      fetchImpl: samplingFetch,
+      activeCallFor: id => connections?.activeCallFor(id),
+      askElicitation: async payload => {
+        const {context, ...rest} = payload;
+        if (!context?.emit) return {action: 'decline'};
+        const {promise} = elicitationChannel.request({
+          userId: user.id,
+          taskId: context.taskId || '',
+          emit: context.emit,
+          signal: context.signal || null,
+          ...rest
+        });
+        return promise;
+      },
+      // owner 才能用 Codex；这里只把固定约束拼进 prompt，不进入工具循环。
+      codexComplete: async ({prompt, signal, timeoutMs}) => {
+        // Codex 采样同样受 30 秒上限：超时就中止子进程，不让上游无限等。
+        const timeout = AbortSignal.timeout(Math.max(1, Number(timeoutMs) || 30000));
+        const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+        const out = await runModel({root, prompt, schema: 'response.schema.json', search: false, signal: combined, taskId: ''});
+        return {text: String(out?.raw || ''), model: 'codex'};
+      }
+    });
+    managerOptions.handlers = ({agent: connectedAgent}) => mrtr.handlersFor(connectedAgent);
+    connections = new AgentConnectionManager(managerOptions);
+    return {dir: tenantData, models: model, backends, platforms: new PlatformBrowser(home), vault, agents: agentConfig, connections, mrtr};
   })());
   return tenants.get(user.id);
 }
-process.env.CAREER_BRIDGE_URL = localOrigin; process.env.CAREER_BRIDGE_TOKEN = token;
+// 入站转发（#38）：把 /mcp 的上游工具接到该用户已启用的外部 Agent；连接与发现复用 #34/#35。
+const inboundForwarder = new InboundForwarder({
+  dataDir,
+  getTenant: async userId => {
+    const user = accounts.users.find(u => u.id === userId);
+    if (!user) return null;
+    const t = await tenant(user);
+    return {agents: t.agents, connections: t.connections};
+  }
+});
+// 入站 /mcp：身份只来自自签 bearer，调用落到凭据所属账号的租户目录。
+const inboundMcp = await new InboundMcp({
+  dataDir,
+  accounts,
+  getOrigin: () => localOrigin,
+  forward: inboundForwarder,
+  // 入站转发的上游调用在连接层计入 #36 统一上游闸（与模型 API、MCP 出站共用同一份额度），这里不重复占额。
+  callTool: async ({userId, clientId, clientName, name, args}) => {
+    const user = accounts.users.find(u => u.id === userId);
+    if (!user) return {status: 'error', code: 'ACCOUNT_MISSING', message: '该凭据所属账号已不存在', recovery: '请重新登录网页端并重新签发凭据。'};
+    const t = await tenant(user);
+    const model = t.models.snapshot();
+    // #36 的统一上游闸接缝：转发到上游（mcp__*）的一次调用要计该用户的在途额度；
+    // 本地只读工具不占闸。真正的转发在 #38 接入，这里先把口径固定住。
+    const run = () => createToolExecutor()(name, args, {
+      taskId: '',
+      config: {
+        searchUrl: model.searchUrl, recruitDir: t.dir, dataDir: t.dir, profileDir: t.dir,
+        userId,
+        // 审计/确认记录里要能认出是哪个入站 client 发起的（#38）。
+        actorType: 'forwarded_client',
+        actorRef: String(clientId || ''),
+        clientName: String(clientName || '')
+      },
+      fetchImpl: fetch,
+      signal: AbortSignal.timeout(180000)
+    });
+    return name.startsWith('mcp__') ? gate.run(userId, run) : run();
+  }
+}).init();
 const send = (res, obj, status = 200) => { res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}); res.end(JSON.stringify(obj)); };
 const sendFile = (res, body, type, name) => { res.writeHead(200, {'Content-Type': type, 'Cache-Control': 'no-store', ...(name ? {'Content-Disposition': 'attachment; filename="' + name + '"'} : {})}); res.end(body); };
+const inboundHttp = createInboundHttp({inbound: inboundMcp, send});
 const validId = id => typeof id === 'string' && /^[a-f0-9-]{36}$/.test(id);
 const file = (dir, id) => join(dir, id + '.json');
 async function load(dir, id) { if (!validId(id)) throw new Error('无效会话'); return JSON.parse(await readFile(file(dir, id), 'utf8')); }
@@ -87,14 +241,60 @@ async function platformReadForTask(platforms, action, body) {
   return {...result, message: choice === 'skip' ? '用户选择暂不登录。请说明缺少平台来源，使用公开资料完成可行部分。' : choice === 'timeout' ? '等待本人登录超时，本次未取得平台资料。' : '用户已停止任务。'};
 }
 
-http.createServer(async (req, res) => {
+// 首次出网确认（按 (user, agent)）：任务在等待期间是 waiting_confirmation，接受后本轮继续；拒绝则不发内容。
+const OUTBOUND_TIMEOUT_MS = 300000;
+function askOutboundConsent({userId, taskId, agent, emit, signal}) {
+  const confirmId = randomUUID();
+  const timeoutMs = OUTBOUND_TIMEOUT_MS;
+  emit({
+    type: 'external_confirm_required',
+    taskId,
+    confirmId,
+    agentId: agent.id,
+    agentName: agent.name,
+    title: '首次向外部 Agent 发送内容',
+    message: agent.name + '：' + OUTBOUND_WARNING,
+    warning: OUTBOUND_WARNING,
+    options: [{value: 'once', label: '仅本次'}, {value: 'always', label: '以后不再问'}, {value: 'reject', label: '拒绝'}],
+    timeoutMs,
+    at: new Date().toISOString()
+  });
+  return new Promise(resolve => {
+    let settled = false;
+    const done = decision => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      outboundWaits.delete(confirmId);
+      emit({type: 'external_confirm_resolved', taskId, confirmId, agentId: agent.id, decision});
+      resolve({decision});
+    };
+    const onAbort = () => done('reject');
+    const timer = setTimeout(() => done('reject'), timeoutMs);
+    outboundWaits.set(confirmId, {userId, finish: done});
+    if (signal?.aborted) done('reject');
+    else signal?.addEventListener('abort', onAbort, {once: true});
+  });
+}
+
+function resolveOutbound({userId, confirmId, decision}) {
+  const waiter = outboundWaits.get(String(confirmId || ''));
+  if (!waiter || waiter.userId !== userId) return null;
+  const value = ['once', 'always', 'reject'].includes(decision) ? decision : '';
+  if (!value) return {invalid: true};
+  waiter.finish(value);
+  return {ok: true, decision: value};
+}
+
+const server = http.createServer(async (req, res) => {
   try {
     const hostHeader = req.headers.host || '';
     if (!hostAllowed(hostHeader)) return send(res, {error: 'Host rejected'}, 403);
     const requestOrigin = 'http://' + hostHeader;
     const url = new URL(req.url, requestOrigin);
 
-    if (req.method === 'GET' && url.pathname === '/health') return send(res, {app: 'career-agent', status: 'ready', host, port});
+    if (req.method === 'GET' && url.pathname === '/health') return send(res, {app: 'career-agent', status: 'ready', host, port: actualPort});
 
     if (req.method === 'GET' && url.pathname === '/') {
       res.writeHead(302, {Location: '/chat'});
@@ -134,8 +334,8 @@ http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/capabilities.js', '/memory.js', '/artifact.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/liveness.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/agents.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/liveness.js': 'src/web/liveness.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/audit.js': 'src/web/audit.js', '/backends.js': 'src/web/backends.js', '/agents.js': 'src/web/agents.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -143,6 +343,11 @@ http.createServer(async (req, res) => {
 
     // 跨站请求防护：Origin 必须与当前访问地址一致
     if (req.headers.origin && req.headers.origin !== requestOrigin && req.headers.origin !== localOrigin) return send(res, {error: 'Origin rejected'}, 403);
+
+    // 对外 MCP 入站：现有端口上的 /mcp，自带 bearer 鉴权，不走网页会话口令。
+    // 开关关闭时端点就是不存在（404）；实例口令与登录 cookie 在这里都不是身份。
+    if (url.pathname === '/mcp') return inboundHttp(req, res, url, localOrigin);
+
     if (req.headers['x-career-token'] !== token && !bridgeTokens.has(req.headers['x-career-token'])) return send(res, {error: '会话校验失败，请刷新页面'}, 403);
 
     if (req.method === 'POST' && ['/api/auth/login', '/api/auth/register'].includes(url.pathname)) {
@@ -168,7 +373,7 @@ http.createServer(async (req, res) => {
     }
     if (!user) return send(res, {error: '请先登录自己的测试账号'}, 401);
 
-    const {dir, models, platforms} = await tenant(user);
+    const {dir, models, backends, platforms, agents, connections} = await tenant(user);
 
     if (url.pathname === '/api/auth/me') return send(res, {user: {name: user.name, id: user.id}});
     if (req.method === 'GET' && url.pathname.startsWith('/api/platform/screenshot/')) {
@@ -187,6 +392,9 @@ http.createServer(async (req, res) => {
       return send(res, {ok: true});
     }
     if (req.method === 'GET' && url.pathname === '/api/model') return send(res, models.public());
+    if (req.method === 'GET' && url.pathname === '/api/backends') {
+      return send(res, publicBackends({settings: models.public(), choice: backends, user, agents: agents.list()}));
+    }
     if (req.method === 'GET' && url.pathname === '/api/model/presets') return send(res, {presets: presetOptions()});
     if (req.method === 'GET' && url.pathname === '/api/memory') {
       const sessionId = url.searchParams.get('session') || '';
@@ -195,6 +403,53 @@ http.createServer(async (req, res) => {
       return send(res, await buildMemoryPayload(dir, session));
     }
     if (req.method === 'GET' && url.pathname === '/api/capabilities') return send(res, {tools: listTools(), skills: await listSkills(root), memory: await memorySummary(dir)});
+    if (req.method === 'GET' && url.pathname === '/api/tasks') {
+      return send(res, await taskManager.summary(user.id, {sessionId: url.searchParams.get('session') || undefined}));
+    }
+    // 自动写入审计：只读当前用户自己的库；按任务/批次分组，响应形状供审阅层（#31/#41）复用。
+    if (req.method === 'GET' && url.pathname === '/api/audit') {
+      const out = await handleAudit({dir, userId: user.id, url});
+      return send(res, out.json, out.status || 200);
+    }
+    // 全局审计导出：服务端按当前筛选生成 JSON/CSV，带文件名与计数；身份只来自当前登录用户。
+    if (req.method === 'GET' && url.pathname === '/api/audit/export') {
+      const out = handleAuditExport({dir, userId: user.id, url});
+      if (out.body !== undefined) {
+        res.writeHead(out.status || 200, out.headers);
+        return res.end(out.body);
+      }
+      return send(res, out.json, out.status || 500);
+    }
+    // 来源校对的截图/抽取证据：只从本人任务目录取，文件名白名单。
+    if (req.method === 'GET' && url.pathname === '/api/source-check/evidence') {
+      const out = await sourceCheckService.readEvidence({userId: user.id, taskId: url.searchParams.get('taskId'), file: url.searchParams.get('file')});
+      if (!out) return send(res, {error: '没有这份证据'}, 404);
+      res.writeHead(200, {'Content-Type': out.type, 'Cache-Control': 'no-store'});
+      return res.end(out.body);
+    }
+    // 撤销预检：只读当前值并标出冲突行，供审阅层与强制确认弹窗使用。
+    if (req.method === 'GET' && url.pathname === '/api/audit/preview') {
+      const out = handleUndoPreview({dir, userId: user.id, url});
+      return send(res, out.json, out.status);
+    }
+    // 敏感写入的挂起确认：默认只列本人未处理、未过期的；state=all 供任务卡审计区看已接受/已拒绝记录。
+    if (req.method === 'GET' && url.pathname === '/api/confirmations') {
+      const out = listConfirmations({
+        dir,
+        userId: user.id,
+        taskId: String(url.searchParams.get('taskId') || '').trim(),
+        state: url.searchParams.get('state') === 'all' ? 'all' : 'pending',
+        limit: Number(url.searchParams.get('limit')) || 50
+      });
+      return send(res, out);
+    }
+    if (req.method === 'GET' && url.pathname === '/api/mcp') return send(res, (await inboundMcp.status(user.id)).json);
+    // 外部 Agent：配置、连接状态与工具列表；全部作用在当前登录用户自己的 users/<id>/.data 上。
+    if (req.method === 'GET' && ['/api/agents', '/api/agents/'].includes(url.pathname)) {
+      const t = await tenant(user);
+      const out = await handleAgents({method: 'GET', pathname: '/api/agents', url, user, agents: t.agents, connections: t.connections});
+      return send(res, out.json, out.status);
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/sessions') {
       const items = [];
@@ -234,10 +489,131 @@ http.createServer(async (req, res) => {
       return send(res, out.json, out.status || 200);
     }
 
-    if (req.method === 'POST') {
+    // Agent 配置的局部更新与删除：PATCH / DELETE 与 POST 共用同一个请求体上限。
+    if (req.method === 'PATCH' || req.method === 'DELETE') {
       let raw = '';
       for await (const b of req) { raw += b.toString(); if (raw.length > 400000) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch { return send(res, {error: '请求体不是合法 JSON', code: 'INVALID_JSON'}, 400); }
+      const t = await tenant(user);
+      const out = await handleAgents({method: req.method, pathname: url.pathname, url, body, user, agents: t.agents, connections: t.connections});
+      if (!out) return send(res, {error: 'Not found'}, 404);
+      return send(res, out.json, out.status);
+    }
+
+    if (req.method === 'POST') {
+      let raw = '';
+      // 聊天允许带图片：base64 后约 10.7MB；其他接口维持原有 400KB 上限。
+      const bodyLimit = url.pathname === '/api/chat' ? 12 * 1024 * 1024 : 400000;
+      for await (const b of req) { raw += b.toString(); if (raw.length > bodyLimit) return send(res, {error: '本次资料过多，请分批发送'}, 413); }
       const body = JSON.parse(raw || '{}');
+
+      // 首次出网确认的选择：仅本次 / 以后不再问（落该用户 Agent 配置）/ 拒绝；确认不属于本人按不存在处理。
+      // MRTR elicitation 的表单回复：用户提交 / 拒绝 / 取消；等待中的表单只属于当前登录账号。
+      if (url.pathname === '/api/mrtr/elicit') {
+        const out = elicitationChannel.respond({userId: user.id, elicitId: body.elicitId, action: String(body.action || ''), content: body.content});
+        if (!out) return send(res, {error: '没有等待中的外部 Agent 表单（可能已超时或已处理）', code: 'ELICITATION_NOT_PENDING'}, 404);
+        if (out.invalid) return send(res, {error: '表单动作或内容无效', code: 'INVALID_ELICITATION'}, 400);
+        return send(res, out);
+      }
+
+      if (url.pathname === '/api/agents/outbound') {
+        const out = resolveOutbound({userId: user.id, confirmId: body.confirmId, decision: String(body.decision || '')});
+        if (!out) return send(res, {error: '没有等待中的出网确认（可能已超时或已处理）', code: 'CONFIRM_NOT_PENDING'}, 404);
+        if (out.invalid) return send(res, {error: '确认选项无效', code: 'INVALID_DECISION'}, 400);
+        return send(res, {ok: true, decision: out.decision});
+      }
+
+      if (url.pathname.startsWith('/api/agents')) {
+        const out = await handleAgents({method: 'POST', pathname: url.pathname, url, body, user, agents, connections});
+        if (!out) return send(res, {error: 'Not found'}, 404);
+        return send(res, out.json, out.status);
+      }
+
+      // 入站 /mcp 的开关与 client 凭据：任何登录用户都能开，但开启要二次确认。
+      if (url.pathname === '/api/mcp/switch') {
+        const out = await inboundMcp.setEnabled({enabled: body.enabled, confirm: body.confirm === true, user});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients') {
+        const out = await inboundMcp.issueClient({userId: user.id, name: body.name});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients/revoke') {
+        const out = await inboundMcp.revokeClient({userId: user.id, id: String(body.id || '')});
+        return send(res, out.json, out.status);
+      }
+      if (url.pathname === '/api/mcp/clients/regenerate') {
+        const out = await inboundMcp.regenerateClient({userId: user.id, id: String(body.id || '')});
+        return send(res, out.json, out.status);
+      }
+
+      // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
+      if (url.pathname === '/api/source-check/start') {
+        const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId});
+        return send(res, out.json, out.status || 200);
+      }
+      // 清空审计：必须原样输入指定短语；只删本人的审计与确认记录，幂等行保留到 TTL。
+      if (url.pathname === '/api/audit/clear') {
+        const out = handleAuditClear({dir, userId: user.id, body});
+        return send(res, out.json, out.status || 200);
+      }
+      // 撤销：单批或整任务。撤销本身是新的写入（新 batch_id + undo_of），响应带计数与逐行结果。
+      if (url.pathname === '/api/audit/undo/batch' || url.pathname === '/api/audit/undo/task') {
+        const isTask = url.pathname.endsWith('/task');
+        const out = isTask
+          ? await handleUndoTask({dir, userId: user.id, body})
+          : await handleUndoBatch({dir, userId: user.id, body});
+        const taskId = String(out.json?.taskId || '');
+        if (taskId && out.json?.undo) {
+          const task = await taskManager.applyUndo(user.id, taskId, {undo: out.json.undo, markUndone: out.json.undo.allUndone === true});
+          if (task) out.json.task = task;
+        }
+        return send(res, out.json, out.status);
+      }
+
+      // 接受/拒绝敏感写入确认：身份只来自当前登录用户；确认不属于本人时按不存在处理。
+      if (url.pathname === '/api/confirmations/accept' || url.pathname === '/api/confirmations/reject') {
+        const confirmId = String(body.confirmId || '').trim();
+        if (!confirmId) return send(res, {error: '缺少 confirmId', code: 'INVALID_ARGUMENTS'}, 400);
+        try {
+          const accepted = url.pathname.endsWith('/accept');
+          const out = accepted
+            ? await acceptConfirmation({dir, userId: user.id, confirmId})
+            : await rejectConfirmation({dir, userId: user.id, confirmId, reason: body.reason});
+          // 接受时把真实写入条数并进任务卡；没有剩余待确认时才把任务从 waiting_confirmation 收尾。
+          if (out.ok && out.taskId) {
+            const left = listConfirmations({dir, userId: user.id, taskId: out.taskId, state: 'pending'});
+            out.task = await taskManager.applyConfirmation(user.id, out.taskId, {
+              state: 'succeeded',
+              phase: accepted ? '确认已接受，写入完成' : '确认已拒绝，未写入',
+              counts: accepted && !out.duplicate ? out.counts : null,
+              finalize: !left.confirmations.length
+            });
+            // 确认写入发生在任务收尾之后：补算撤销摘要，任务卡上仍能撤销这批写入。
+            if (out.task) {
+              const undo = summarizeTaskUndo({dir, userId: user.id, taskId: out.task.id});
+              out.task = await taskManager.applyUndo(user.id, out.task.id, {undo}) || out.task;
+            }
+          }
+          return send(res, out);
+        } catch (error) {
+          if (error && typeof error.status === 'number' && error.code) {
+            // 过期确认无法再处理：把还停在待确认的任务收尾为失败，恢复建议是重新发起。
+            if (error.status === 410 && error.taskId) {
+              const left = listConfirmations({dir, userId: user.id, taskId: error.taskId, state: 'pending'});
+              if (!left.confirmations.length) {
+                await taskManager.applyConfirmation(user.id, error.taskId, {
+                  state: 'failed', phase: '确认已过期',
+                  error: {code: 'CONFIRMATION_EXPIRED', message: '这次确认已过期（10 分钟），写入没有执行。', recovery: '重新发起写入并确认。'}
+                });
+              }
+            }
+            return send(res, {error: error.message, code: error.code}, error.status);
+          }
+          throw error;
+        }
+      }
 
       if (url.pathname.startsWith('/api/recruit/')) {
         const out = await handleRecruit({method: 'POST', pathname: url.pathname.slice('/api/recruit/'.length), url, body, dir});
@@ -270,9 +646,41 @@ http.createServer(async (req, res) => {
         if (!out) return send(res, {error: '未知的公司档案接口'}, 404);
         return send(res, out.json, out.status || 200);
       }
+      if (url.pathname === '/api/backends/select') {
+        const out = await selectBackend({settings: models.public(), choice: backends, user, agents: agents.list(), kind: String(body.kind || ''), agentId: String(body.agentId || '')});
+        if (!out.ok) return send(res, {error: out.message, code: out.code, configTarget: out.configTarget || ''}, out.status);
+        return send(res, {ok: true, current: out.current, choices: out.choices, nextTurn: true});
+      }
+      // 「换 X 重试」的一次点击：建议必须绑定在刚刚失败的那张任务卡上，且只能消费一次。
+      // 这里只切换后端并返回；重跑整轮由客户端拿着同一条消息/附件重新提交 /api/chat（带 fallbackDepth）。
+      if (url.pathname === '/api/backends/fallback') {
+        const taskId = String(body.taskId || '');
+        const kind = String(body.kind || '');
+        const check = await taskManager.checkFallback(user.id, {taskId, kind});
+        if (!check.ok) {
+          const messages = {
+            missing: '没有这个任务', 'no-suggestion': '这条任务没有可用的回退建议',
+            'not-failed': '任务没有失败，不需要回退', consumed: '这条建议已经用过了',
+            'depth-limit': '换后端建议已用满 3 次', 'kind-mismatch': '建议的后端与这次点击不一致'
+          };
+          return send(res, {error: messages[check.reason] || '这条回退建议不可用', code: 'FALLBACK_' + String(check.reason || 'INVALID').toUpperCase()}, check.status);
+        }
+        const out = await selectBackend({settings: models.public(), choice: backends, user, agents: agents.list(), kind});
+        if (!out.ok) return send(res, {error: out.message, code: out.code, configTarget: out.configTarget || ''}, out.status);
+        const consumed = await taskManager.consumeFallback(user.id, {taskId, kind});
+        if (!consumed.ok) return send(res, {error: '这条回退建议已经用过了', code: 'FALLBACK_CONSUMED'}, 409);
+        return send(res, {
+          ok: true, current: out.current, choices: out.choices, nextTurn: true,
+          fallback: {kind, label: consumed.task.fallback.label || '', depth: Number(consumed.task.fallback.depth) || 0}
+        });
+      }
       if (url.pathname === '/api/model/save') {
         if (body.mode === 'codex' && user.name !== 'owner') throw Error('共同测试请配置自己的 API 或本地模型');
         return send(res, await models.save(body));
+      }
+      // 型号过期提示的「一键切换」：只改型号（必要时带预设），保留地址、协议与 Key；绝不静默执行。
+      if (url.pathname === '/api/model/switch-model') {
+        return send(res, await models.switchModel({model: body.model, preset: body.preset}));
       }
       if (url.pathname === '/api/model/test') {
         const c = validateModelSettings(body);
@@ -329,13 +737,59 @@ http.createServer(async (req, res) => {
         await unlink(file(dir, id));
         return send(res, {ok: true});
       }
+      if (url.pathname === '/api/tasks/stop') {
+        const out = await taskManager.stop(user.id, String(body.taskId || ''));
+        if (!out.ok) return send(res, {error: out.reason === 'finished' ? '任务已结束' : '没有这个任务'}, out.reason === 'finished' ? 409 : 404);
+        return send(res, {ok: true, task: out.task});
+      }
+      if (url.pathname === '/api/tasks/draft') {
+        const out = await taskManager.setDraft(user.id, {taskId: body.taskId, draftId: body.draftId, action: body.action});
+        if (!out.ok) return send(res, {error: out.reason === 'invalid-action' ? '未知的草稿动作' : '没有这个草稿'}, out.reason === 'invalid-action' ? 400 : 404);
+        return send(res, {ok: true, task: out.task});
+      }
       if (url.pathname === '/api/chat') {
         const s = await load(dir, body.id);
         if (running.has(s.id)) return send(res, {error: '当前对话正在执行任务'}, 409);
         const text = String(body.message || '').trim();
         if (text.length > 8000) return send(res, {error: '问题过长，请拆分到8000字以内'}, 400);
-        const attachments = (Array.isArray(body.attachments) ? body.attachments : []).slice(0, 5).filter(a => typeof a.name === 'string' && typeof a.text === 'string' && a.text.length <= 40000);
+        const requestedBackend = String(body.backend || '').trim();
+        if (requestedBackend && !BACKEND_CHOICES.includes(requestedBackend)) return send(res, {error: '未知的后端'}, 400);
+        // 附件：文本沿用旧形状；图片统一成 {type:'image', mime, dataUrl, bytes}，只在本轮内存里用，不写进会话。
+        const attachments = [];
+        for (const item of (Array.isArray(body.attachments) ? body.attachments : []).slice(0, 5)) {
+          if (!item || typeof item.name !== 'string') continue;
+          if (isImageAttachment(item)) {
+            const image = normalizeImageAttachment(item);
+            if (!image) return send(res, {error: '图片无法读取或单张超过 8MB'}, 413);
+            attachments.push(image);
+          } else if (typeof item.text === 'string' && item.text.length <= 40000) {
+            attachments.push({name: item.name, text: item.text});
+          }
+        }
+        const images = attachments.filter(item => item.type === 'image');
+        const totalImageBytes = images.reduce((sum, item) => sum + item.bytes, 0);
+        if (totalImageBytes > MAX_IMAGE_BYTES) return send(res, {error: '图片总量超过 8MB，请压缩或减少图片后重试'}, 413);
         if (!text && !attachments.length) return send(res, {error: '请输入问题或上传资料'}, 400);
+        const lock = body.lock === true;
+        // fallbackDepth 由客户端在「换 X 重试」后递增；服务端用它和连续失败计数一起封顶 3 次建议。
+        const fallbackDepth = Math.max(0, Math.min(9, Math.trunc(Number(body.fallbackDepth) || 0)));
+        const isFallbackTurn = fallbackDepth > 0;
+        // 能力解析：当前后端不满足本轮能力就停下来给候选卡，不静默降级。
+        const turn = resolveTurn({settings: models.public(), choice: backends, user, agents: agents.list(), requested: requestedBackend, requestedAgent: String(body.agentId || ''), attachments});
+        if (!turn.ok) {
+          res.writeHead(200, {'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'});
+          const guide = turn.candidates.some(card => card.configured) ? '' : '还没有可用的候选后端，请先到「模型与接口设置」完成配置。';
+          const emitBlocked = event => { if (!res.destroyed) res.write(JSON.stringify(event) + '\n'); };
+          emitBlocked({type: 'status', text: '正在检查本轮所需的后端能力'});
+          emitBlocked({type: 'candidate_required', code: 'CANDIDATE_REQUIRED', capabilities: turn.capabilities, current: turn.current, candidates: turn.candidates, message: turn.message, guide});
+          emitBlocked({type: 'error', code: 'CANDIDATE_REQUIRED', text: turn.message + (guide ? ' ' + guide : ''), candidates: turn.candidates});
+          res.end();
+          return;
+        }
+        // 会话历史只存图片的元数据，不存 dataUrl。
+        const historyAttachments = attachments.map(item => item.type === 'image'
+          ? {name: item.name, type: 'image', mime: item.mime, bytes: item.bytes}
+          : {name: item.name, text: item.text});
         const controller = new AbortController();
         running.set(s.id, controller);
         owners.set(s.id, user);
@@ -355,38 +809,140 @@ http.createServer(async (req, res) => {
         res.on('close', () => { if (!res.writableEnded) controller.abort(); });
         try {
           const modelConfig = models.snapshot();
-          if (modelConfig.mode === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
-          const profile = (await loadProfile(dir)).facts;
-          const skill = await selectSkill(root, text).catch(() => null);
-          const result = await runAgent({
-            root,
-            modelCall: options => modelConfig.mode === 'codex'
-              ? runModel({...options, taskBridgeToken})
-              : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir}}),
-            session: s,
-            message: text || '请阅读附件并询问我希望完成什么任务。',
-            attachments,
-            profile,
-            skill,
-            onEvent: emit,
-            signal: controller.signal
+          // 换后端只由一次点击发生：settings.fallback 里的旧备用接口保持惰性，不在这里静默切换。
+          const backend = turn.backend;
+          // 任务生命周期（排队/运行/终态、15 分钟上限、证据与草稿）交给 TaskManager；执行体仍是原来的 runAgent。
+          const outcome = await taskManager.run({
+            userId: user.id,
+            sessionId: s.id,
+            title: s.title === '新的求职对话' ? (text || attachments[0]?.name || '求职对话') : s.title,
+            sourceName: attachments[0]?.name || '对话',
+            signal: controller.signal,
+            emit,
+            describeError: e => decorateChatError(e.message, !!modelConfig.apiKey),
+            describeUndo: ({task}) => summarizeTaskUndo({dir, userId: user.id, taskId: task.id}),
+            // 失败后最多给一条建议：锁定、本轮已有工具成功、建议满 3 次、连续失败超过 3 次都不给。
+            onFailure: async ({error}) => {
+              if (['QUEUE_TIMEOUT', 'TASK_TIMEOUT', 'CANCELLED'].includes(error?.code)) return null;
+              const streak = (failureStreaks.get(s.id) || 0) + 1;
+              failureStreaks.set(s.id, streak);
+              const out = suggestFallback({
+                settings: models.public(),
+                user,
+                agents: agents.list(),
+                capabilities: turn.capabilities,
+                currentKind: backend.kind,
+                depth: fallbackDepth,
+                streak,
+                locked: lock,
+                hadToolSuccess: error?.hadToolSuccess === true
+              });
+              if (!out.ok) return null;
+              return {...out.suggestion, message: text.slice(0, 8000)};
+            },
+            execute: async ({task, signal, emit: runEmit, addDraft}) => {
+              if (backend.kind === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
+              const profile = (await loadProfile(dir)).facts;
+              const skill = await selectSkill(root, text).catch(() => null);
+              // 当前选择是外部 Agent：这一轮真正交给它执行，而不是伪装成模型 API 的一轮。
+              // 只调用它的只读 prompt 工具；结果包成与 runAgent 相同的形状，任务生命周期/NDJSON/done 不变。
+              if (backend.kind === 'agent') {
+                const selected = agents.list().find(agent => agent.id === backend.agentId);
+                if (!selected || selected.enabled === false) throw Error('选中的外部 Agent 不存在或已停用，请到设置里重新选择。');
+                if (images.length) throw Error('外部 Agent 不读图，请换成视觉模型 API 或去掉图片。');
+                return runAgentBackend({
+                  userId: user.id,
+                  taskId: task.id,
+                  home: join(dataDir, 'users', user.id),
+                  evidenceDir: join(dataDir, 'users', user.id, 'tasks', task.id, 'evidence'),
+                  agent: {id: selected.id, name: selected.name},
+                  config: agents,
+                  connections,
+                  message: text || '请阅读附件并询问我希望完成什么任务。',
+                  attachments: historyAttachments,
+                  profile,
+                  memory: s.memory,
+                  emit: runEmit,
+                  signal,
+                  askConsent: ({agentId, agentName}) => askOutboundConsent({userId: user.id, taskId: task.id, agent: {id: agentId, name: agentName}, emit: runEmit, signal}),
+                  now: agentNow || Date.now,
+                  fallback: isFallbackTurn
+                });
+              }
+              // 外部 Agent 工具：任务开始时 pin 一份快照（任务内不随上游增删漂移），模型把它们当本地工具用。
+              let externalTools = [];
+              let externalCaller = null;
+              const support = externalToolsSupported(backend.kind);
+              const hasExternalAgent = agents.list().some(agent => agent.enabled !== false);
+              if (hasExternalAgent && support.supported) {
+                const toolset = new ExternalToolset({
+                  userId: user.id,
+                  taskId: task.id,
+                  home: join(dataDir, 'users', user.id),
+                  evidenceDir: join(dataDir, 'users', user.id, 'tasks', task.id, 'evidence'),
+                  config: agents,
+                  connections,
+                  emit: runEmit,
+                  askConsent: ({agentId, agentName}) => askOutboundConsent({userId: user.id, taskId: task.id, agent: {id: agentId, name: agentName}, emit: runEmit, signal}),
+                  signal,
+                  now: agentNow || Date.now
+                });
+                const surface = await toolset.pin();
+                externalTools = surface.tools;
+                externalCaller = (tool, args, ctx) => toolset.callTool(tool, args, ctx);
+              } else if (hasExternalAgent && !support.supported) {
+                // Codex 执行体不能动态注入外部工具：明确说明限制，不静默假装这些工具可用。
+                runEmit({type: 'status', text: support.message});
+              }
+              const result = await runAgent({
+                root,
+                // 一次模型 API / Codex 调用占统一上游闸 1 个额度（与 MCP 出站共用同一把闸）。
+                modelCall: options => gate.run(user.id, () => backend.kind === 'codex'
+                  ? runModel({...options, taskBridgeToken})
+                  : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir, userId: user.id, taskId: task.id, actorRef: backend.label}}), {signal: options.signal || signal}),
+                backend,
+                images,
+                session: s,
+                message: text || '请阅读附件并询问我希望完成什么任务。',
+                attachments: historyAttachments,
+                profile,
+                skill,
+                externalTools,
+                externalCaller,
+                onEvent: runEmit,
+                signal,
+                fallback: isFallbackTurn
+              });
+              if (result.artifact.content.trim()) addDraft({title: result.artifact.title || '求职文稿', content: result.artifact.content});
+              return result;
+            }
           });
-          s.messages.push({role: 'user', content: text, attachments}, {role: 'assistant', backend: backendLabel(modelConfig), content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
-          s.memory = result.memory.slice(0, 5000);
-          s.lastTask = {...s.lastTask, status: 'complete', quality: result.quality, durationMs: result.durationMs, finishedAt: new Date().toISOString()};
-          if (result.artifact.content.trim()) s.artifacts.push({id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()});
-          if (s.title === '新的求职对话') s.title = (text || attachments[0]?.name || '求职对话').slice(0, 25);
-          s.updatedAt = new Date().toISOString();
-          await save(dir, s);
-          await recordTask(dir, {
-            sessionId: s.id, title: s.title, status: 'complete',
-            steps: result.plan?.steps || [],
-            tools: (result.trace || []).map(t => t.label || t.type).filter(Boolean),
-            artifact: result.artifact?.title || '',
-            skill: result.skill?.name || '',
-            durationMs: result.durationMs
-          }).catch(() => {});
-          emit({type: 'done', session: s});
+          if (outcome.error) {
+            // 回退建议已由 TaskManager 的 onFailure 算好并写进任务记录，fallback_suggested 先于 error 发出。
+            // 排队超时/执行失败/取消：TaskManager 已经写过 error 事件，这里只收尾会话与任务记录。
+            s.lastTask = {...s.lastTask, status: outcome.task.state === 'cancelled' ? 'stopped' : 'failed', error: outcome.task.error?.message || outcome.error.message, taskId: outcome.task.id, fallback: outcome.task.fallback || null};
+            await save(dir, s);
+            await recordTask(dir, {sessionId: s.id, title: s.title, status: 'failed', error: s.lastTask.error}).catch(() => {});
+          } else {
+            failureStreaks.delete(s.id);
+            const result = outcome.result;
+            s.messages.push({role: 'user', content: text, attachments: historyAttachments}, {role: 'assistant', backend: backend.label, backendKind: backend.kind, locked: lock, fallback: isFallbackTurn, calls: result.calls, content: result.reply, skill: result.skill?.id || '', sources: result.sources, trace: result.trace, visualization: result.visualization, plan: result.plan, quality: result.quality, durationMs: result.durationMs});
+            s.memory = result.memory.slice(0, 5000);
+            s.lastTask = {...s.lastTask, status: 'complete', taskId: outcome.task.id, quality: result.quality, durationMs: result.durationMs, finishedAt: new Date().toISOString()};
+            if (result.artifact.content.trim()) s.artifacts.push({id: randomUUID(), title: result.artifact.title || '求职文稿', content: result.artifact.content, createdAt: new Date().toISOString()});
+            if (s.title === '新的求职对话') s.title = (text || attachments[0]?.name || '求职对话').slice(0, 25);
+            s.updatedAt = new Date().toISOString();
+            await save(dir, s);
+            await recordTask(dir, {
+              sessionId: s.id, title: s.title, status: 'complete',
+              steps: result.plan?.steps || [],
+              tools: (result.trace || []).map(t => t.label || t.type).filter(Boolean),
+              artifact: result.artifact?.title || '',
+              skill: result.skill?.name || '',
+              durationMs: result.durationMs
+            }).catch(() => {});
+            emit({type: 'done', session: s});
+          }
         } catch (e) {
           const friendly = decorateChatError(e.message, !!models.snapshot().apiKey);
           s.lastTask = {...s.lastTask, status: controller.signal.aborted ? 'stopped' : 'failed', error: friendly};
@@ -410,9 +966,29 @@ http.createServer(async (req, res) => {
   } catch (e) {
     if (!res.headersSent) send(res, {error: e.message || '请求失败'}, 400); else res.end();
   }
-}).listen(port, host, () => {
-  const lan = host === '0.0.0.0' ? Object.values(os.networkInterfaces()).flat().filter(n => n && n.family === 'IPv4' && !n.internal).map(n => 'http://' + n.address + ':' + port) : [];
-  console.log('职向智能体：http://127.0.0.1:' + port);
-  if (lan.length) console.log('局域网访问（同一 Wi-Fi 的其它设备）：' + lan.join(' '));
-  console.log('只保存本机数据；不会收集招聘平台密码。首次进入请用 ' + join(dataDir, '首次登录.txt') + ' 里的账号登录。');
 });
+for (let attempt = 0; ; attempt += 1) {
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(actualPort, host, resolve); });
+  actualPort = server.address().port;
+  if (Number(port) !== 0 || !UNSAFE_PORTS.has(actualPort) || attempt >= 5) break;
+  await new Promise(resolve => server.close(resolve));
+  server.removeAllListeners('error');
+  actualPort = 0;
+}
+localOrigin = 'http://127.0.0.1:' + actualPort;
+allowedHosts = buildAllowedHosts(actualPort);
+let closing = null;
+const close = () => closing || (closing = (async () => {
+  for (const controller of running.values()) controller.abort();
+  // 关服务时把还在等出网确认的任务一律按拒绝收尾，绝不偷偷把内容发出去。
+  for (const waiter of [...outboundWaits.values()]) { try { waiter.finish('reject'); } catch { /* 已收尾 */ } }
+  outboundWaits.clear();
+  // 外部 Agent 的常驻连接与子进程走同一回收路径；租户还没建起来时跳过。
+  await Promise.allSettled([...tenants.values()].map(promise => promise.then(t => t.connections.closeAll()).catch(() => {})));
+  elicitationChannel.close();
+  inboundMcp.close().catch(() => {});
+  if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+  await new Promise(resolve => server.close(() => resolve()));
+})());
+return {server, token, dataDir, root, host, port: actualPort, origin: localOrigin, close, tasks: taskManager};
+}

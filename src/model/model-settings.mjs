@@ -1,6 +1,6 @@
 import {readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {PRESETS, normalizeBaseUrl, validateProxy, isPrivateHostname} from './providers.mjs';
+import {PRESETS, normalizeBaseUrl, validateProxy, isPrivateHostname, modelMigrationHint} from './providers.mjs';
 
 export const DEFAULT_MODEL = {
   preset: 'custom',
@@ -103,7 +103,9 @@ export class ModelSettings {
       keySource: this.key ? '已加密保存在本机' : env || '',
       hasFallbackKey: !!this.fallbackKey,
       label: backendLabel(this.config),
-      providerNote: PRESETS[this.config.preset]?.note || ''
+      providerNote: PRESETS[this.config.preset]?.note || '',
+      // 只提示、不自动改：界面拿 modelHint 显示「可能已下线」与一次「切换到 <新默认>」按钮。
+      modelHint: modelMigrationHint(this.config)
     };
   }
 
@@ -142,6 +144,16 @@ export class ModelSettings {
     const p = PRESETS[id];
     if (!p) throw new Error('未知的供应商预设');
     this.config = {...this.config, preset: id, baseUrl: p.baseUrl || this.config.baseUrl, protocol: p.protocol, model: p.model || this.config.model};
+    return this.public();
+  }
+
+  // 「切换到 <新默认>」的一次点击：只改型号（必要时同时改预设），保留地址、协议与已保存的 Key。
+  async switchModel({model, preset} = {}) {
+    const name = String(model || '').trim();
+    if (!name || name.length > 150) throw new Error('请填写要切换到的模型名');
+    const nextPreset = preset && PRESETS[preset] ? preset : this.config.preset;
+    this.config = validateModelSettings({...this.config, preset: nextPreset, model: name});
+    await writeFile(this.file, JSON.stringify(this.config, null, 2), 'utf8');
     return this.public();
   }
 }

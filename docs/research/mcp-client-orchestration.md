@@ -6,8 +6,8 @@
 
 ## 0. 结论速览
 
-- **先选协议时代，再选传输。** 现行规范是 **2026-07-28**（无会话、无握手、无服务端主动请求、无断流续传）；**2025-11-25 及更早是 legacy**（`initialize` 握手 + `Mcp-Session-Id`）。仓库钉的 SDK 1.32.1 属 v1 维护线，**只实现到 2025-11-25**；要讲 2026-07-28 必须换 v2 包（`@modelcontextprotocol/client` / `@modelcontextprotocol/server`，当前 2.4.0）。
-- **本地/局域网优先 stdio，远程才用 Streamable HTTP。** stdio 没有授权层，凭证来自环境变量，进程即信任边界；HTTP 才需要令牌、Origin/Host 校验和 OAuth。
+- **先选协议时代，再选传输。** 现行规范是 **2026-07-28**（无会话、无握手、无服务端主动请求、无断流续传）；**2025-11-25 及更早是 legacy**（`initialize` 握手 + `Mcp-Session-Id`）。仓库钉的 SDK 1.32.1 属 v1 维护线，**只实现到 2025-11-25**；要讲 2026-07-28 必须换 v2 包（`@modelcontextprotocol/client` / `@modelcontextprotocol/server`，当前 2.4.0）。**时代已定为 v2 双时代**，见 §7 D1 与票 [#20](https://github.com/Lumichelka/career-agent/issues/20)。
+- **对外入站走 HTTP（回环/局域网），stdio 只是内部任务桥。** stdio 没有授权层，凭证来自环境变量，进程即信任边界；HTTP 才有令牌、Origin/Host 校验；OAuth 只在公网/不特定客户端时才需要，本项目不做（见票 [#21](https://github.com/Lumichelka/career-agent/issues/21)）。
 - **多用户隔离靠“每请求认证”，不靠 session。** 规范明确服务端**不得**把会话当认证；身份只来自校验过的 token（`authInfo`），客户端传来的 userId/taskId 一律不可信。
 - **stdio 下“每用户一进程”是唯一可靠的凭证隔离方式**，但 2026-07-28 明确不建议把进程生命周期绑到单个任务/会话上。
 - **取消有两条真实路径**：stdio 发 `notifications/cancelled`；2026 的 Streamable HTTP 直接关闭该请求的响应流即取消。**2026 起不能续传**，断流即失败，重试由客户端发起。
@@ -154,18 +154,18 @@ SDK v2 服务端把取消/断连落到 `ctx.mcpReq.signal`（AbortSignal），ha
 
 - **协议时代必须先定**：现状（SDK 1.32.1）等于锁在 2025-11-25；2026-07-28 的能力（无会话、MRTR、按请求工厂）要 v2 2.4.0 才有。这不是实现细节，是 13 号票“适配契约”的前提。
 - **出站建议“每用户常驻 stdio 进程池 + 显式任务句柄 + 单任务/总超时”**；不要按任务 spawn（规范不建议把进程绑到任务），也不要用一个进程服务多个用户（stdio 没有按请求身份）。
-- **入站先走 stdio（现有桥）或回环 HTTP + 每请求 bearer token + Origin/Host 校验**；OAuth 2.1 只在“要接不特定/云端 AI”时引入，否则是纯负担。
+- **对外入站 = 回环/局域网 HTTP + 每 (user, client) bearer + Origin/Host 校验**；stdio 仅内部任务桥，不承担对外入站；OAuth 2.1 只在“要接不特定/云端 AI”时引入，本项目不做（见票 [#21](https://github.com/Lumichelka/career-agent/issues/21)）。
 - **多用户隔离写成不变量**：identity 只来自校验后的 token；状态句柄 `<user_id>:<handle>`；会话（若用 2025）不得当认证；token 不得代传。
 - **长任务语义单独定**：进度用请求内 progress 流，取消用 abort/断流，断流后“重发”而非“续传”，所以写操作必须幂等或去重；敏感确认留在本应用 UI，不依赖外部 AI 的 elicitation。
 - **双向共存但边界清晰**：同一注册表生成两边的工具定义；若将来做聚合/代理，先接受 confused-deputy 与“不转发 token”的额外约束。
 
 ### 地图需要拍板的决策
 
-1. **D1 协议时代 / SDK 版本**：继续 2025-11-25（v1，短期省事）还是升级 v2 双时代（要 2026 能力、接受迁移）？
-2. **D2 入站受众与位置**：外部 AI 只在本机（stdio）、局域网（回环/内网 + token）、还是要公网（必须 OAuth）？这决定是否引入 OAuth 2.1。
-3. **D3 出站进程生命周期**：每用户常驻池（推荐）还是每任务短进程？并发上限与孤儿进程回收策略？
-4. **D4 是否做聚合/代理**：只做 client 调外部 Agent，还是也把外部 Agent 的工具转给外部 AI（后者触发 proxy 安全义务）？
-5. **D5 长任务恢复语义**：断流后重发的前提是幂等键/去重表；是否把它列为 15 号票（审计与批量撤销）的前置？
+1. **D1 协议时代 / SDK 版本** — **已定，见票 [#20](https://github.com/Lumichelka/career-agent/issues/20)**：走 **v2 双时代**，出站 `@modelcontextprotocol/client` + 入站 `@modelcontextprotocol/server` 同批换；出站协商 `auto`（modern 优先、对方不认则回退 legacy）；迁移动作并入契约票 [#13](https://github.com/Lumichelka/career-agent/issues/13) 的实现第一步。**不要再按 v1 / 2025-11-25 写新代码。**
+2. **D2 入站受众与位置** — **已定，见票 [#21](https://github.com/Lumichelka/career-agent/issues/21)**：对外入站只有现有 4189 的 `/mcp`（默认关、每 user×client 自签 bearer、双时代、只承诺 127.0.0.1 + Tailscale HTTPS）；stdio 降为内部任务桥；不引入 OAuth。
+3. **D3 出站进程生命周期** — **已定，见票 [#13](https://github.com/Lumichelka/career-agent/issues/13)**：每 `(user, agent)` 懒连接 + 常驻 + 空闲 30 分钟回收；并发每用户 2 / 全局 8；Windows Job Object / POSIX 进程组由宿主自实现（v2 SDK 不处理进程树）。
+4. **D4 聚合/代理** — **已定，见票 [#22](https://github.com/Lumichelka/career-agent/issues/22)**：L1 聚合进入工具面；L2 转发带条件进入（用户开关 + 每 client 凭据）；上游写含在转发集合内。
+5. **D5 长任务恢复** — **已定，见票 [#15](https://github.com/Lumichelka/career-agent/issues/15)**：断流不续传，写操作靠幂等键/去重表（7 天、重放结果）；重发是新 request id。
 
 ## 主要来源
 
