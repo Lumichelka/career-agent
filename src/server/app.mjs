@@ -27,7 +27,7 @@ import {AgentConfig} from '../agents/config.mjs';
 import {AgentConnectionManager, createSdkConnection} from '../mcp/client.mjs';
 import {ExternalToolset, externalToolsSupported, OUTBOUND_WARNING} from '../agents/tools.mjs';
 import {handleAgents} from '../agents/api.mjs';
-import {handleAudit} from '../writes/audit-api.mjs';
+import {handleAudit, handleAuditClear, handleAuditExport} from '../writes/audit-api.mjs';
 import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
 import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
 import {createSourceCheckService} from '../source-check/pipeline.mjs';
@@ -320,7 +320,16 @@ const server = http.createServer(async (req, res) => {
     // 自动写入审计：只读当前用户自己的库；按任务/批次分组，响应形状供审阅层（#31/#41）复用。
     if (req.method === 'GET' && url.pathname === '/api/audit') {
       const out = await handleAudit({dir, userId: user.id, url});
-      return send(res, out.json);
+      return send(res, out.json, out.status || 200);
+    }
+    // 全局审计导出：服务端按当前筛选生成 JSON/CSV，带文件名与计数；身份只来自当前登录用户。
+    if (req.method === 'GET' && url.pathname === '/api/audit/export') {
+      const out = handleAuditExport({dir, userId: user.id, url});
+      if (out.body !== undefined) {
+        res.writeHead(out.status || 200, out.headers);
+        return res.end(out.body);
+      }
+      return send(res, out.json, out.status || 500);
     }
     // 来源校对的截图/抽取证据：只从本人任务目录取，文件名白名单。
     if (req.method === 'GET' && url.pathname === '/api/source-check/evidence') {
@@ -445,6 +454,11 @@ const server = http.createServer(async (req, res) => {
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
       if (url.pathname === '/api/source-check/start') {
         const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId});
+        return send(res, out.json, out.status || 200);
+      }
+      // 清空审计：必须原样输入指定短语；只删本人的审计与确认记录，幂等行保留到 TTL。
+      if (url.pathname === '/api/audit/clear') {
+        const out = handleAuditClear({dir, userId: user.id, body});
         return send(res, out.json, out.status || 200);
       }
       // 撤销：单批或整任务。撤销本身是新的写入（新 batch_id + undo_of），响应带计数与逐行结果。
