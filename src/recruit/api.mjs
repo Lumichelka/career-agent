@@ -2,7 +2,7 @@
 // 这里只负责"算出结果"，写响应的细节交给 server.mjs。
 import {join} from 'node:path';
 import {RecruitStore} from './store.mjs';
-import {SOURCES, sourceById} from './sources/index.mjs';
+import {SOURCES, REMOVED_SOURCES, sourceById} from './sources/index.mjs';
 import {runCollection, htmlToText, normalize} from './collect.mjs';
 import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
@@ -23,7 +23,7 @@ function range(url) {
 
 function withStore(dir, fn) {
   const store = RecruitStore.open(join(dir, 'recruit.db'));
-  try { store.syncSources(SOURCES); return fn(store); } finally { store.close(); }
+  try { store.syncSources(SOURCES, REMOVED_SOURCES); return fn(store); } finally { store.close(); }
 }
 
 async function concurrent(items, size, fn) {

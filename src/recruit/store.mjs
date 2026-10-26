@@ -13,7 +13,7 @@ import {randomUUID, createHash} from 'node:crypto';
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources(
   id TEXT PRIMARY KEY, name TEXT, school TEXT, city TEXT, category TEXT, channel TEXT,
-  list_url TEXT, mode TEXT, enabled INTEGER, note TEXT,
+  list_url TEXT, mode TEXT, enabled INTEGER, note TEXT, orphaned INTEGER DEFAULT 0,
   last_run TEXT, last_status TEXT, last_error TEXT, last_count INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS events(
@@ -82,6 +82,8 @@ export class RecruitStore {
   close() { try { this.db.close(); } catch { /* 已关闭 */ } }
 
   migrate() {
+    const scolumns = new Set(this.db.prepare('PRAGMA table_info(sources)').all().map(r => r.name));
+    if (!scolumns.has('orphaned')) this.db.exec('ALTER TABLE sources ADD COLUMN orphaned INTEGER DEFAULT 0');
     const columns = new Set(this.db.prepare('PRAGMA table_info(events)').all().map(r => r.name));
     for (const [name, ddl] of MIGRATIONS) {
       if (!columns.has(name)) this.db.exec(`ALTER TABLE events ADD COLUMN ${name} ${ddl}`);
@@ -115,20 +117,31 @@ export class RecruitStore {
     }
   }
 
-  syncSources(sources) {
-    const stmt = this.db.prepare(`INSERT INTO sources(id,name,school,city,category,channel,list_url,mode,enabled,note)
-      VALUES(?,?,?,?,?,?,?,?,?,?)
+  // 对账注册表与 sources 表：注册表源保持 active；墓碑源与表里多出的源标 orphaned（保留历史行，不删除）。
+  // 随后把孤儿源的历史活动标 orphaned，保证每条活动能追到当前或历史来源。幂等，可在每次打开/请求时执行。
+  syncSources(sources, removed = []) {
+    const upsert = this.db.prepare(`INSERT INTO sources(id,name,school,city,category,channel,list_url,mode,enabled,note,orphaned)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET name=excluded.name,school=excluded.school,city=excluded.city,
         category=excluded.category,channel=excluded.channel,list_url=excluded.list_url,mode=excluded.mode,
-        enabled=excluded.enabled,note=excluded.note`);
-    for (const s of sources) stmt.run(s.id, s.name, s.school, s.city, s.category, s.channel || '', s.listUrl, s.mode, s.enabled ? 1 : 0, s.note || '');
-    const ids = sources.map(s => s.id);
-    const removed = ['nankai-recruitment', 'sysu-home'];
-    if (removed.length) {
-      const marks = removed.map(() => '?').join(',');
-      this.db.prepare('DELETE FROM sources WHERE id IN (' + marks + ')').run(...removed);
-      this.db.prepare("UPDATE events SET status='archived' WHERE status NOT IN ('archived','cancelled') AND source_id IN (" + marks + ')').run(...removed);
+        enabled=excluded.enabled,note=excluded.note,orphaned=excluded.orphaned`);
+    for (const s of sources) upsert.run(s.id, s.name, s.school, s.city, s.category, s.channel || '', s.listUrl, s.mode, s.enabled ? 1 : 0, s.note || '', 0);
+    for (const s of removed) upsert.run(s.id, s.name, s.school, s.city, s.category, s.channel || '', s.listUrl, s.mode, 0, s.note || '', 1);
+    // 表里还有但既不在注册表也不在墓碑里的源 → 标 orphaned（源码已移除但未登记墓碑），保留历史行。
+    const known = new Set([...sources.map(s => s.id), ...removed.map(s => s.id)]);
+    for (const row of this.db.prepare('SELECT id FROM sources').all()) {
+      if (!known.has(row.id)) this.db.prepare('UPDATE sources SET orphaned=1, enabled=0 WHERE id=?').run(row.id);
     }
+    this.markOrphanedEvents();
+  }
+
+  // 谱系迁移：主来源是孤儿源的活动标 orphaned（保留 cancelled；主源仍在的活动不标）。幂等。
+  markOrphanedEvents() {
+    const orphanIds = this.db.prepare('SELECT id FROM sources WHERE orphaned=1').all().map(r => r.id);
+    if (!orphanIds.length) return 0;
+    const marks = orphanIds.map(() => '?').join(',');
+    const res = this.db.prepare("UPDATE events SET status='orphaned' WHERE source_id IN (" + marks + ") AND status NOT IN ('cancelled','orphaned')").run(...orphanIds);
+    return Number(res.changes) || 0;
   }
 
   // 来源状态 + 派生新鲜度：最近尝试/成功时间、抓取/新增/更新数、数据年龄、是否超 24h 需刷新。

@@ -9,7 +9,7 @@
 //   node recruit/cli.mjs verify
 import {join, resolve} from 'node:path';
 import {writeFileSync, readFileSync, existsSync} from 'node:fs';
-import {SOURCES, sourceById} from './sources/index.mjs';
+import {SOURCES, REMOVED_SOURCES, sourceById} from './sources/index.mjs';
 import {runCollection, collectSource} from './collect.mjs';
 import {RecruitStore} from './store.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
@@ -36,7 +36,7 @@ function defaultDataDir() {
 
 const days = Number(flag('days') || 30);
 const dataDir = resolve(flag('data') || defaultDataDir());
-const openStore = () => { const s = RecruitStore.open(join(dataDir, 'recruit.db')); s.syncSources(SOURCES); return s; };
+const openStore = () => { const s = RecruitStore.open(join(dataDir, 'recruit.db')); s.syncSources(SOURCES, REMOVED_SOURCES); return s; };
 const line = '─'.repeat(66);
 
 function fmt(iso) {
@@ -53,7 +53,7 @@ if (command === 'sources') {
   let category = '';
   for (const s of states) {
     if (s.category !== category) { category = s.category; console.log('\n【' + category + '】'); }
-    const flagText = s.enabled ? (s.last_status ? '最近：' + s.last_status : '已接入') : '未接入';
+    const flagText = s.orphaned ? '来源已下线' : (s.enabled ? (s.last_status ? '最近：' + s.last_status : '已接入') : '未接入');
     console.log(` ${s.id.padEnd(18)} ${s.name.padEnd(28)} ${String(flagText).padEnd(12)} ${s.mode}`);
     if (!s.enabled && s.note) console.log(`   └ ${s.note}`);
   }
