@@ -169,8 +169,7 @@ const inboundMcp = await new InboundMcp({
   accounts,
   getOrigin: () => localOrigin,
   forward: inboundForwarder,
-  // 入站转发调用计入该用户的在途额度（#36 的统一上游闸合并前，先接到任务闸上）。
-  inFlight: {acquire: (userId, options = {}) => taskManager.gate.acquire(userId, options)},
+  // 入站转发的上游调用在连接层计入 #36 统一上游闸（与模型 API、MCP 出站共用同一份额度），这里不重复占额。
   callTool: async ({userId, clientId, clientName, name, args}) => {
     const user = accounts.users.find(u => u.id === userId);
     if (!user) return {status: 'error', code: 'ACCOUNT_MISSING', message: '该凭据所属账号已不存在', recovery: '请重新登录网页端并重新签发凭据。'};

@@ -6,7 +6,7 @@ import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import {join, dirname} from 'node:path';
 import {Server, createMcpHandler} from '@modelcontextprotocol/server';
 import {getTool, inboundTools} from '../tools/registry.mjs';
-import {EXTERNAL_PREFIX, EXTERNAL_RECOVERY, mergeToolSurface} from '../agents/tools.mjs';
+import {EXTERNAL_PREFIX, mergeToolSurface} from '../agents/tools.mjs';
 
 const TOKEN_MARK = 'zxmcp_';
 const TOKEN_HEX = 48;            // 24 字节随机数的十六进制长度
@@ -105,15 +105,14 @@ export class InboundMcp {
   // callTool({userId, tool, name, args}) 由应用注入：入站调用要落到凭据所属账号的数据与配置上。
   // forward（#38）：{listTools(userId, {clientId, clientName}), callTool({userId, clientId, clientName, name, args, signal})}，
   // 转发到该用户启用的外部 Agent；不传时入站只暴露本地工具（#37 的行为）。
-  // inFlight（#38）：{acquire(userId, {signal}) -> release}，入站转发调用计入该用户在途额度；
-  // #36 的统一上游闸合并前，应用把它接到任务闸上（见 app.mjs 的显式接缝）。
-  constructor({dataDir, accounts, callTool, getOrigin = () => 'http://127.0.0.1', forward = null, inFlight = null}) {
+  // 入站转发调用计入该用户在途额度由 #36 的统一上游闸完成：连接层每次出站调用都 acquire 一次，
+  // 转发只是复用那条连接，所以这里不重复占额（否则同一次调用会占两个额度甚至自己排队自己）。
+  constructor({dataDir, accounts, callTool, getOrigin = () => 'http://127.0.0.1', forward = null}) {
     if (!dataDir) throw new Error('InboundMcp 需要 dataDir');
     this.dataDir = dataDir;
     this.accounts = accounts;
     this.callTool = callTool;
     this.forward = forward;
-    this.inFlight = inFlight;
     this.getOrigin = getOrigin;
     this.configFile = join(dataDir, 'mcp-inbound.json');
     this.state = {enabled: false};
@@ -384,17 +383,6 @@ export class InboundMcp {
     return {content: [{type: 'text', text: JSON.stringify(result)}], isError: result?.status === 'error'};
   }
 
-  // 转发失败也回 #35 的信封：固定错误码 + 恢复建议，且来源可认出是哪个 client。
-  #forwardError(code, message, {clientId = '', clientName = ''} = {}) {
-    return {
-      status: 'error',
-      error: {code, message, recovery: EXTERNAL_RECOVERY[code] || EXTERNAL_RECOVERY.UPSTREAM_ERROR},
-      evidence: {actorType: 'forwarded_client', actorRef: clientId, ...(clientId ? {clientId} : {}), ...(clientName ? {clientName} : {})},
-      readOnly: false,
-      retryable: false
-    };
-  }
-
   #createServer({authInfo} = {}) {
     const userId = authInfo?.extra?.userId;
     const clientId = authInfo?.clientId || '';
@@ -423,20 +411,9 @@ export class InboundMcp {
       }
       // 上游工具：命名空间前缀必须对得上，否则仍按未知工具处理（不回显任何上游细节）。
       if (!String(name || '').startsWith(EXTERNAL_PREFIX) || !this.forward) throw new Error('未知工具：' + name);
-      let release = null;
-      try {
-        // 入站转发调用计入该用户在途额度；#36 的统一上游闸合并前，这里接应用注入的闸（见 app.mjs）。
-        if (this.inFlight) {
-          try { release = await this.inFlight.acquire(userId); }
-          catch (error) {
-            return this.#result(this.#forwardError('QUEUE_TIMEOUT', error?.message || '所有上游调用都在忙，已排队超时。', {clientId, clientName}));
-          }
-        }
-        const envelope = await this.forward.callTool({userId, clientId, clientName, name, args, signal: AbortSignal.timeout(300000)});
-        return this.#result(envelope);
-      } finally {
-        if (release) release();
-      }
+      // 这次转发在连接层的 callTool 里占 #36 统一上游闸的 1 个额度（排队超时以 QUEUE_TIMEOUT 信封返回）。
+      const envelope = await this.forward.callTool({userId, clientId, clientName, name, args, signal: AbortSignal.timeout(300000)});
+      return this.#result(envelope);
     });
     return server;
   }

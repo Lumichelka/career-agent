@@ -257,7 +257,7 @@ test('上游连接失败映射为 #35 错误码，而不是笼统的未知工具
 });
 
 test('入站转发调用计入该用户在途额度：超出并发排队超时返回 QUEUE_TIMEOUT', async t => {
-  const {app, factory, client} = await setup(t, {appOptions: {taskLimits: {perUser: 1, global: 8, queueTimeoutMs: 120}}});
+  const {app, factory, client} = await setup(t, {appOptions: {upstreamLimits: {perUser: 1, global: 8, queueTimeoutMs: 120}}});
   let unblock = () => {};
   factory.state.block = new Promise(resolve => { unblock = resolve; });
   const first = client.callTool({name: 'mcp__dify__echo', arguments: {q: 'first'}});
