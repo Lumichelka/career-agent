@@ -153,7 +153,7 @@ function abortRace(signal) {
 // 记录对外只保留任务本身；用户身份从认证里来，不跟随响应泄露。
 export function publicTask(task) {
   const {userId, ...rest} = task;
-  return {...rest, counts: {...task.counts}, evidence: [...(task.evidence || [])], drafts: (task.drafts || []).map(draft => ({...draft})), fallback: task.fallback ? {...task.fallback} : null};
+  return {...rest, counts: {...task.counts}, evidence: [...(task.evidence || [])], drafts: (task.drafts || []).map(draft => ({...draft})), fallback: task.fallback ? {...task.fallback} : null, review: task.review ? {...task.review, issues: (task.review.issues || []).map(item => ({...item})), error: task.review.error ? {...task.review.error} : null, agent: task.review.agent ? {...task.review.agent} : null} : null};
 }
 
 export class TaskManager {
@@ -194,6 +194,7 @@ export class TaskManager {
       error: null,
       undo: null,
       fallback: null,
+      review: null,
       createdAt: at,
       startedAt: null,
       updatedAt: at,
@@ -464,6 +465,37 @@ export class TaskManager {
           case 'tool_progress':
             emitProgress({progress: event.progress, total: event.total, message: event.message});
             break;
+          case 'review': {
+            // 复核只存问题列表与失败码，不存调用记录（调用记录只挂助手消息）。
+            const source = event.review && typeof event.review === 'object' ? event.review : null;
+            if (source) {
+              task.review = {
+                status: ['issues', 'clean', 'unparsed', 'unavailable'].includes(source.status) ? source.status : 'unavailable',
+                count: Math.max(0, Number(source.count) || 0),
+                issues: (Array.isArray(source.issues) ? source.issues : []).slice(0, 100).map(item => ({
+                  row: String(item?.row || '').slice(0, 120),
+                  field: String(item?.field || '').slice(0, 120),
+                  issue: String(item?.issue || '').slice(0, 500),
+                  severity: String(item?.severity || '').slice(0, 20)
+                })),
+                raw: String(source.raw || '').slice(0, 4000),
+                agentLeg: source.agentLeg === 'passed' ? 'passed' : 'failed',
+                attempted: source.attempted === true,
+                agent: source.agent ? {id: String(source.agent.id || ''), name: String(source.agent.name || '').slice(0, 80)} : null,
+                tool: String(source.tool || '').slice(0, 120),
+                error: source.error ? {
+                  code: String(source.error.code || 'REVIEW_FAILED').slice(0, 60),
+                  message: String(source.error.message || '').slice(0, 500),
+                  recovery: String(source.error.recovery || '').slice(0, 300)
+                } : null,
+                at: String(source.at || nowIso())
+              };
+              touch();
+              void this.persist(task);
+              emitProgress();
+            }
+            break;
+          }
           case 'writes': {
             // 一次批量写 = 一个批次；重放的幂等结果不发 writes 事件，因此不会被算成新写入。
             const rows = Number(event.counts?.rows ?? event.counts?.total ?? 0);
