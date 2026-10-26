@@ -5,6 +5,7 @@ import {BACKEND_CHOICES, MAX_IMAGE_BYTES, BackendChoice, isImageAttachment, norm
 import {runApiModel, probeApi} from '../model/api-model.mjs';
 import {runDiagnostics} from '../model/diag.mjs';
 import {KeyVault} from '../model/keyvault.mjs';
+import {makeFetch} from '../model/proxy-fetch.mjs';
 import {PlatformBrowser} from '../platform/platforms.mjs';
 import {PLATFORM_SITES} from '../platform/sites.mjs';
 import {handleRecruit} from '../recruit/api.mjs';
@@ -642,7 +643,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, out.json, out.status || 200);
       }
       if (url.pathname.startsWith('/api/companies')) {
-        const out = await handleCompany({method: 'POST', pathname: url.pathname.slice('/api/'.length), body, dir});
+        const out = await handleCompany({method: 'POST', pathname: url.pathname.slice('/api/'.length), body, dir, searchUrl: models.snapshot().searchUrl, fetchImpl: samplingFetch || makeFetch(models.snapshot().proxy)});
         if (!out) return send(res, {error: '未知的公司档案接口'}, 404);
         return send(res, out.json, out.status || 200);
       }
