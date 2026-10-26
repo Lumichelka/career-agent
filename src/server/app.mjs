@@ -29,6 +29,7 @@ import {AgentConnectionManager, createSdkConnection} from '../mcp/client.mjs';
 import {UpstreamGate} from '../mcp/gate.mjs';
 import {createElicitationChannel, createMrtrHandlers} from '../mcp/mrtr.mjs';
 import {ExternalToolset, externalToolsSupported, OUTBOUND_WARNING} from '../agents/tools.mjs';
+import {runAgentBackend} from '../agents/executor.mjs';
 import {handleAgents} from '../agents/api.mjs';
 import {handleAudit, handleAuditClear, handleAuditExport} from '../writes/audit-api.mjs';
 import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
@@ -85,6 +86,7 @@ const sourceCheckService = createSourceCheckService({
     if (!user) return null;
     const t = await tenant(user);
     return createExternalReviewer({
+      userId,
       config: t.agents,
       connections: t.connections,
       home: join(dataDir, 'users', userId),
@@ -329,8 +331,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/agents.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/audit.js': 'src/web/audit.js', '/backends.js': 'src/web/backends.js', '/agents.js': 'src/web/agents.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/liveness.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/agents.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/liveness.js': 'src/web/liveness.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/audit.js': 'src/web/audit.js', '/backends.js': 'src/web/backends.js', '/agents.js': 'src/web/agents.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -388,7 +390,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/model') return send(res, models.public());
     if (req.method === 'GET' && url.pathname === '/api/backends') {
-      return send(res, publicBackends({settings: models.public(), choice: backends, user}));
+      return send(res, publicBackends({settings: models.public(), choice: backends, user, agents: agents.list()}));
     }
     if (req.method === 'GET' && url.pathname === '/api/model/presets') return send(res, {presets: presetOptions()});
     if (req.method === 'GET' && url.pathname === '/api/memory') {
@@ -642,7 +644,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, out.json, out.status || 200);
       }
       if (url.pathname === '/api/backends/select') {
-        const out = await selectBackend({settings: models.public(), choice: backends, user, kind: String(body.kind || '')});
+        const out = await selectBackend({settings: models.public(), choice: backends, user, agents: agents.list(), kind: String(body.kind || ''), agentId: String(body.agentId || '')});
         if (!out.ok) return send(res, {error: out.message, code: out.code, configTarget: out.configTarget || ''}, out.status);
         return send(res, {ok: true, current: out.current, choices: out.choices, nextTurn: true});
       }
@@ -660,7 +662,7 @@ const server = http.createServer(async (req, res) => {
           };
           return send(res, {error: messages[check.reason] || '这条回退建议不可用', code: 'FALLBACK_' + String(check.reason || 'INVALID').toUpperCase()}, check.status);
         }
-        const out = await selectBackend({settings: models.public(), choice: backends, user, kind});
+        const out = await selectBackend({settings: models.public(), choice: backends, user, agents: agents.list(), kind});
         if (!out.ok) return send(res, {error: out.message, code: out.code, configTarget: out.configTarget || ''}, out.status);
         const consumed = await taskManager.consumeFallback(user.id, {taskId, kind});
         if (!consumed.ok) return send(res, {error: '这条回退建议已经用过了', code: 'FALLBACK_CONSUMED'}, 409);
@@ -672,6 +674,10 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/model/save') {
         if (body.mode === 'codex' && user.name !== 'owner') throw Error('共同测试请配置自己的 API 或本地模型');
         return send(res, await models.save(body));
+      }
+      // 型号过期提示的「一键切换」：只改型号（必要时带预设），保留地址、协议与 Key；绝不静默执行。
+      if (url.pathname === '/api/model/switch-model') {
+        return send(res, await models.switchModel({model: body.model, preset: body.preset}));
       }
       if (url.pathname === '/api/model/test') {
         const c = validateModelSettings(body);
@@ -766,7 +772,7 @@ const server = http.createServer(async (req, res) => {
         const fallbackDepth = Math.max(0, Math.min(9, Math.trunc(Number(body.fallbackDepth) || 0)));
         const isFallbackTurn = fallbackDepth > 0;
         // 能力解析：当前后端不满足本轮能力就停下来给候选卡，不静默降级。
-        const turn = resolveTurn({settings: models.public(), choice: backends, user, requested: requestedBackend, attachments});
+        const turn = resolveTurn({settings: models.public(), choice: backends, user, agents: agents.list(), requested: requestedBackend, requestedAgent: String(body.agentId || ''), attachments});
         if (!turn.ok) {
           res.writeHead(200, {'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'});
           const guide = turn.candidates.some(card => card.configured) ? '' : '还没有可用的候选后端，请先到「模型与接口设置」完成配置。';
@@ -820,6 +826,7 @@ const server = http.createServer(async (req, res) => {
               const out = suggestFallback({
                 settings: models.public(),
                 user,
+                agents: agents.list(),
                 capabilities: turn.capabilities,
                 currentKind: backend.kind,
                 depth: fallbackDepth,
@@ -834,6 +841,31 @@ const server = http.createServer(async (req, res) => {
               if (backend.kind === 'codex' && user.name !== 'owner') throw Error('请先在模型与接口设置中配置自己的 API 或本地模型');
               const profile = (await loadProfile(dir)).facts;
               const skill = await selectSkill(root, text).catch(() => null);
+              // 当前选择是外部 Agent：这一轮真正交给它执行，而不是伪装成模型 API 的一轮。
+              // 只调用它的只读 prompt 工具；结果包成与 runAgent 相同的形状，任务生命周期/NDJSON/done 不变。
+              if (backend.kind === 'agent') {
+                const selected = agents.list().find(agent => agent.id === backend.agentId);
+                if (!selected || selected.enabled === false) throw Error('选中的外部 Agent 不存在或已停用，请到设置里重新选择。');
+                if (images.length) throw Error('外部 Agent 不读图，请换成视觉模型 API 或去掉图片。');
+                return runAgentBackend({
+                  userId: user.id,
+                  taskId: task.id,
+                  home: join(dataDir, 'users', user.id),
+                  evidenceDir: join(dataDir, 'users', user.id, 'tasks', task.id, 'evidence'),
+                  agent: {id: selected.id, name: selected.name},
+                  config: agents,
+                  connections,
+                  message: text || '请阅读附件并询问我希望完成什么任务。',
+                  attachments: historyAttachments,
+                  profile,
+                  memory: s.memory,
+                  emit: runEmit,
+                  signal,
+                  askConsent: ({agentId, agentName}) => askOutboundConsent({userId: user.id, taskId: task.id, agent: {id: agentId, name: agentName}, emit: runEmit, signal}),
+                  now: agentNow || Date.now,
+                  fallback: isFallbackTurn
+                });
+              }
               // 外部 Agent 工具：任务开始时 pin 一份快照（任务内不随上游增删漂移），模型把它们当本地工具用。
               let externalTools = [];
               let externalCaller = null;

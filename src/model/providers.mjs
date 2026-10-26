@@ -7,33 +7,33 @@ export const PRESETS = {
     label: 'DeepSeek 官方',
     baseUrl: 'https://api.deepseek.com',
     protocol: 'chat',
-    model: 'deepseek-chat',
+    model: 'deepseek-flash',
     keyUrl: 'https://platform.deepseek.com/api_keys',
-    note: '国内直连可用，支持工具调用。deepseek-chat 快，deepseek-reasoner 推理强但更慢。'
+    note: '国内直连可用，支持工具调用与读图（每图 ≤1024 token）。deepseek-flash 是当前默认；deepseek-v4-pro 推理强但更慢。'
   },
   zhipu: {
     label: '智谱 GLM（有免费档）',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     protocol: 'chat',
-    model: 'glm-4-flash',
+    model: 'glm-5.3-flash',
     keyUrl: 'https://bigmodel.cn/console',
-    note: 'glm-4-flash 免费额度适合课程演示；结构化输出较稳。'
+    note: 'glm-5.3-flash 是当前默认；免费视觉用 glm-4.6v-flash，免费文本用 glm-4-flash-250414。'
   },
   moonshot: {
     label: '月之暗面 Kimi',
     baseUrl: 'https://api.moonshot.cn/v1',
     protocol: 'chat',
-    model: 'moonshot-v1-8k',
+    model: 'kimi-k3.1-pro',
     keyUrl: 'https://platform.moonshot.cn/console',
-    note: '长文本友好，适合读公告原文。'
+    note: '长文本友好，支持读图（仅 base64 / ms://，不支持公网图片 URL）。'
   },
   qwen: {
     label: '阿里云百炼 · 通义千问',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     protocol: 'chat',
-    model: 'qwen-plus',
+    model: 'qwen3.7-plus',
     keyUrl: 'https://bailian.console.aliyun.com/',
-    note: 'OpenAI 兼容模式；新用户有免费额度。'
+    note: 'OpenAI 兼容模式；文本用 qwen3.7-plus，视觉用 qwen3.8-max。'
   },
   siliconflow: {
     label: '硅基流动 SiliconFlow',
@@ -87,9 +87,9 @@ export const PRESETS = {
     label: '本机 Ollama（离线）',
     baseUrl: 'http://127.0.0.1:11434/v1',
     protocol: 'chat',
-    model: 'qwen2.5:7b',
+    model: 'qwen3-vl:8b',
     keyUrl: 'https://ollama.com/download',
-    note: '不需要 Key、不联网；7B 级模型工具调用与 JSON 稳定性一般，适合兜底演示。'
+    note: '不需要 Key、不联网；默认 qwen3-vl:8b 支持读图，其他已装型号可自行填写。'
   },
   lmstudio: {
     label: '本机 LM Studio（离线）',
@@ -176,6 +176,50 @@ export function detectPreset(baseUrl, protocol) {
 
 export function presetOptions() {
   return Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, baseUrl: p.baseUrl, protocol: p.protocol, model: p.model, keyUrl: p.keyUrl, note: p.note }));
+}
+
+// 已确认可能下线的旧型号 → 现行默认型号。只做提示与「一键切换」，绝不静默改用户已保存的模型名。
+// 只收录有通行迁移目标的预设；未取得的供应商（openai/anthropic/gemini 等）不猜。
+export const RETIRED_MODELS = {
+  deepseek: {
+    'deepseek-chat': 'deepseek-flash'
+  },
+  zhipu: {
+    'glm-4-flash': 'glm-5.3-flash',
+    'glm-4v': 'glm-4.6v-flash',
+    'glm-4v-plus': 'glm-4.6v-flash'
+  },
+  moonshot: {
+    'moonshot-v1-8k': 'kimi-k3.1-pro',
+    'moonshot-v1-32k': 'kimi-k3.1-pro',
+    'moonshot-v1-128k': 'kimi-k3.1-pro'
+  },
+  qwen: {
+    'qwen-plus': 'qwen3.7-plus',
+    'qwen-max': 'qwen3.8-max'
+  },
+  ollama: {
+    'qwen2.5:7b': 'qwen3-vl:8b',
+    'qwen2.5:14b': 'qwen3-vl:8b'
+  }
+};
+
+// 返回 null 表示没有「可能下线」的证据，不要凭「不在清单里」打扰用户。
+export function modelMigrationHint({preset = 'custom', model = ''} = {}) {
+  const name = String(model || '').trim();
+  const target = RETIRED_MODELS[String(preset || '')]?.[name];
+  if (!target) return null;
+  return {
+    code: 'MODEL_POSSIBLY_RETIRED',
+    message: '该型号可能已下线：' + name + '。可以一键切换到 ' + target + '；你的配置不会自动改变。',
+    current: name,
+    suggestion: {
+      preset: String(preset),
+      model: target,
+      label: PRESETS[String(preset)]?.label || ''
+    },
+    switchLabel: '切换到 ' + target
+  };
 }
 
 export function validateProxy(raw) {

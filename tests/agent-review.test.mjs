@@ -168,6 +168,8 @@ test('复核：假 Agent 返回问题列表，任务卡有数量与证据，写�
   const app = await startApp(t, {agentClientFactory: factory, sourceCheck: {browserReader: fakeReader(), extractor: fakeExtractor()}});
   const member = await register(app, 'review-user');
   const created = await postJson(app, '/api/agents', member.cookie, {name: '复核助手', transport: 'http', url: 'https://review.example.com/mcp', token: 'sk-review-secret'});
+  // 复核在后台任务里跑，只有用户明确点过「允许出网」才会发送内容。
+  await postJson(app, '/api/agents/consent', member.cookie, {id: created.agent.id});
 
   const started = await postJson(app, '/api/source-check/start', member.cookie, {sourceId: 'swufe'});
   const task = await finishedTask(app, member.cookie);
@@ -229,7 +231,8 @@ test('复核：Agent 超时 -> 任务成功但标复核不可用，带错误码�
   const factory = fakeAgentFactory({callFail: timeout});
   const app = await startApp(t, {agentClientFactory: factory, sourceCheck: {browserReader: fakeReader(), extractor: fakeExtractor()}});
   const member = await register(app, 'review-timeout-user');
-  await postJson(app, '/api/agents', member.cookie, {name: '会超时的复核助手', transport: 'http', url: 'https://review.example.com/mcp', token: 'sk-review-secret'});
+  const created = await postJson(app, '/api/agents', member.cookie, {name: '会超时的复核助手', transport: 'http', url: 'https://review.example.com/mcp', token: 'sk-review-secret'});
+  await postJson(app, '/api/agents/consent', member.cookie, {id: created.agent.id});
 
   const started = await postJson(app, '/api/source-check/start', member.cookie, {sourceId: 'swufe'});
   const task = await finishedTask(app, member.cookie);
@@ -251,4 +254,36 @@ test('复核：Agent 超时 -> 任务成功但标复核不可用，带错误码�
   assert.equal(call.step, 'review');
   assert.equal(call.outcome, 'failed');
   assert.equal(call.errorCode, 'REQUEST_TIMEOUT');
+});
+
+
+test('复核：没有持久化出网同意时绝不发送内容，标 AGENT_CONSENT_REQUIRED，写库照常', {timeout: 60000}, async t => {
+  const factory = fakeAgentFactory({text: JSON.stringify({issues: ISSUES})});
+  const app = await startApp(t, {agentClientFactory: factory, sourceCheck: {browserReader: fakeReader(), extractor: fakeExtractor()}});
+  const member = await register(app, 'review-no-consent');
+  await postJson(app, '/api/agents', member.cookie, {name: '未同意复核助手', transport: 'http', url: 'https://review.example.com/mcp', token: 'sk-review-secret'});
+
+  const started = await postJson(app, '/api/source-check/start', member.cookie, {sourceId: 'swufe'});
+  const task = await finishedTask(app, member.cookie);
+  assert.equal(task.state, 'succeeded', '复核不可用不能阻塞写库：' + JSON.stringify(task.error));
+  assert.equal(task.counts.writes, 4);
+  assert.equal(task.review.status, 'unavailable');
+  assert.equal(task.review.error.code, 'AGENT_CONSENT_REQUIRED');
+  assert.match(task.review.error.recovery, /允许出网|外部 Agent/);
+  assert.equal(task.review.agentLeg, 'failed', '未走通 Agent 路径');
+  assert.equal(task.review.attempted, false, '没有发出任何出网调用');
+  assert.equal(task.review.call ?? null, null);
+
+  // 没有连接、没有发现、没有调用工具：复查之前绝不能把抽取 JSON 发出去。
+  assert.equal(factory.log.length, 0, '未同意时不能建立连接或发送内容');
+
+  // 写库与审计照常。
+  const rows = snapshot(app, member.user);
+  assert.equal(rows.events.length, 1);
+  assert.equal(rows.projects.length, 3);
+  assert.equal(rows.audits.length, 4);
+
+  // 没有出网调用就不补助手消息的调用表。
+  const session = await getJson(app, '/api/session/' + started.sessionId, member.cookie);
+  assert.equal(session.messages.filter(message => message.role === 'assistant').length, 0);
 });

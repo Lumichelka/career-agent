@@ -113,6 +113,17 @@ export function externalToolsSupported(kind) {
   return {supported: true, message: ''};
 }
 
+// 只读且收 prompt-like 参数的工具，才能直接承接用户消息或复核文本；写工具一律不选。
+export const PROMPT_KEYS = ['prompt', 'query', 'text', 'message', 'input', 'content'];
+export function selectPromptTool(tools = []) {
+  const readOnly = (Array.isArray(tools) ? tools : []).filter(tool => tool && tool.readOnly === true);
+  for (const key of PROMPT_KEYS) {
+    const found = readOnly.find(tool => tool.parameters?.properties && Object.hasOwn(tool.parameters.properties, key));
+    if (found) return {tool: found, key};
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- 进度
 
 // 进度：只发严格递增的值；两次事件之间至少间隔 minMs（默认 200ms），节流窗口内的值直接丢弃。

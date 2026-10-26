@@ -77,12 +77,48 @@
     bar.id = 'backend-bar';
     bar.setAttribute('role', 'status');
     bar.setAttribute('aria-label', '当前后端、本轮预计花费与锁定');
-    bar.innerHTML = '<span class="bb-current" id="bb-current">当前：读取中…</span><span class="bb-cost" id="bb-cost">本轮 ≈¥—</span><button type="button" id="turn-lock" aria-pressed="false" title="锁定本轮：失败也不换后端">🔓 本次锁定</button>';
+    bar.innerHTML = '<span class="bb-current" id="bb-current">当前：读取中…</span>' +
+      '<button type="button" class="bb-mode" id="bb-mode-api" aria-pressed="false" title="选择模型 API / 本地模型 / 本机 Codex">模型 API</button>' +
+      '<button type="button" class="bb-mode" id="bb-mode-agent" aria-pressed="false" title="选择外部 Agent（只做文本与工具，不读图）">外部 Agent</button>' +
+      '<span class="bb-cost" id="bb-cost">本轮 ≈¥—</span><button type="button" id="turn-lock" aria-pressed="false" title="锁定本轮：失败也不换后端">🔓 本次锁定</button>' +
+      '<div id="bb-menu" hidden></div>';
     const toggle = $('#workflow-toggle');
     if (toggle && toggle.parentNode === header) header.insertBefore(bar, toggle);
     else header.appendChild(bar);
     $('#turn-lock').addEventListener('click', () => { state.lock = !state.lock; renderBar(); });
+    $('#bb-mode-api').addEventListener('click', () => toggleMenu('api'));
+    $('#bb-mode-agent').addEventListener('click', () => toggleMenu('agent'));
     return bar;
+  }
+
+  // 两个入口各自列出自己的候选：模型 API（api/local/codex）与外部 Agent（永不 vision）。
+  function menuCards(slot) {
+    const candidates = Array.isArray(state.info?.candidates) ? state.info.candidates : [];
+    return candidates.filter(card => slot === 'agent' ? card.kind === 'agent' : card.kind !== 'agent');
+  }
+
+  function hideMenu() {
+    const menu = $('#bb-menu');
+    if (menu) { menu.hidden = true; menu.innerHTML = ''; }
+  }
+
+  function toggleMenu(slot) {
+    const menu = $('#bb-menu');
+    if (!menu) return;
+    if (!menu.hidden && menu.dataset.slot === slot) { hideMenu(); return; }
+    const current = state.info?.current || {};
+    const cards = menuCards(slot);
+    const rows = cards.map(card => {
+      const selected = slot === 'agent' ? current.kind === 'agent' && current.agentId === card.agentId : current.kind === card.kind;
+      const cost = card.approxCostPerCall === null || card.approxCostPerCall === undefined ? '' : ' · 约 ' + formatCny(card.approxCostPerCall) + '/次';
+      return '<button type="button" class="bb-menu-item' + (card.configured ? '' : ' unconfigured') + '" data-menu-kind="' + esc(card.kind) + '" data-menu-agent="' + esc(card.agentId || '') + '" data-menu-configured="' + (card.configured ? 'true' : 'false') + '" aria-pressed="' + selected + '">' +
+        '<b>' + esc(card.label) + '</b><small>' + esc(capabilityText(card.capabilities) + cost) + '</small></button>';
+    }).join('');
+    menu.dataset.slot = slot;
+    menu.innerHTML = '<div class="bb-menu-head">' + (slot === 'agent' ? '选择外部 Agent' : '选择模型 API') + '</div>' +
+      (rows || '<p class="bb-menu-empty">还没有可用候选，请先到「模型与接口设置」完成配置。</p>') +
+      (slot === 'agent' ? '<button type="button" class="bb-menu-config" data-menu-config="agent-settings">管理外部 Agent…</button>' : '<button type="button" class="bb-menu-config" data-menu-config="model-settings">打开模型与接口设置…</button>');
+    menu.hidden = false;
   }
 
   function renderBar() {
@@ -101,6 +137,11 @@
       lock.setAttribute('aria-pressed', String(state.lock));
       lock.textContent = state.lock ? '🔒 本次锁定' : '🔓 本次锁定';
     }
+    const isAgent = current?.kind === 'agent';
+    const apiEntry = $('#bb-mode-api');
+    const agentEntry = $('#bb-mode-agent');
+    if (apiEntry) apiEntry.setAttribute('aria-pressed', String(!isAgent));
+    if (agentEntry) agentEntry.setAttribute('aria-pressed', String(isAgent));
   }
 
   async function refresh() {
@@ -262,6 +303,37 @@
     }
   });
 
+  // 顶栏两个入口的选择菜单：一次点击 = 一次明确的换后端；未配置的项只打开设置，不开始本轮。
+  document.addEventListener('click', async event => {
+    const item = event.target.closest('#bb-menu [data-menu-kind]');
+    if (item) {
+      event.preventDefault();
+      if (item.dataset.menuConfigured !== 'true') {
+        hideMenu();
+        if (item.dataset.menuKind === 'agent' && typeof window.showModelSettings === 'function') window.showModelSettings();
+        else if (typeof window.showModelSettings === 'function') window.showModelSettings();
+        else zx.showError?.('请到「模型与接口设置」完成配置。');
+        return;
+      }
+      const kind = item.dataset.menuKind;
+      try {
+        await zx.api('backends/select', {kind, agentId: item.dataset.menuAgent || ''});
+        hideMenu();
+        await refresh();
+      } catch (error) {
+        zx.showError?.(error.message);
+      }
+      return;
+    }
+    const config = event.target.closest('#bb-menu [data-menu-config]');
+    if (config) {
+      hideMenu();
+      if (typeof window.showModelSettings === 'function') window.showModelSettings();
+      return;
+    }
+    if (!event.target.closest('#bb-menu') && !event.target.closest('.bb-mode')) hideMenu();
+  });
+
   document.addEventListener('click', async event => {
     const card = event.target.closest('.candidate-card');
     if (!card || card.disabled) return;
@@ -348,8 +420,20 @@
 
   const style = document.createElement('style');
   style.textContent = `
-#backend-bar{display:inline-flex;align-items:center;gap:8px;font-size:11px;color:#4b6b5b;min-width:0;flex:0 1 auto}
+#backend-bar{display:inline-flex;align-items:center;gap:8px;font-size:11px;color:#4b6b5b;min-width:0;flex:0 1 auto;position:relative}
 #backend-bar .bb-current{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#backend-bar .bb-mode{border:1px solid #d6e5da;background:#fff;border-radius:20px;padding:3px 9px;font-size:10px;color:#4b6b5b;white-space:nowrap;line-height:1.6}
+#backend-bar .bb-mode[aria-pressed="true"]{background:#e7f3e9;border-color:#9fc4ac;color:#1f5a41;font-weight:600}
+#bb-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:50;width:min(300px,86vw);background:#fff;border:1px solid #d9e6dd;border-radius:12px;box-shadow:0 16px 40px #1f3a2e2e;padding:8px;display:flex;flex-direction:column;gap:4px;min-width:0}
+#bb-menu[hidden]{display:none}
+#bb-menu .bb-menu-head{font-size:10px;color:#8b9b91;letter-spacing:1px;padding:2px 4px 4px}
+#bb-menu .bb-menu-item{display:flex;flex-direction:column;gap:1px;text-align:left;border:1px solid #e6ece7;background:#fff;border-radius:9px;padding:6px 8px;min-width:0;font:inherit;color:inherit}
+#bb-menu .bb-menu-item[aria-pressed="true"]{border-color:#9fc4ac;background:#f2f9f4}
+#bb-menu .bb-menu-item.unconfigured{background:#f7faf7;color:#7b8c82}
+#bb-menu .bb-menu-item b{font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bb-menu .bb-menu-item small{font-size:9.5px;color:#8b9b91;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bb-menu .bb-menu-empty{margin:4px;font-size:10.5px;color:#8b9b91;line-height:1.7}
+#bb-menu .bb-menu-config{border:1px dashed #c6d8cb;background:#fbfdfb;border-radius:8px;padding:5px 8px;font-size:10.5px;color:#2d6b4f;margin-top:2px}
 #backend-bar .bb-cost{white-space:nowrap;font-variant-numeric:tabular-nums}
 #turn-lock{border:1px solid #d6e5da;background:#fff;border-radius:20px;padding:3px 9px;font-size:10px;color:#4b6b5b;white-space:nowrap;line-height:1.6}
 #turn-lock[aria-pressed="true"]{background:#e7f3e9;border-color:#9fc4ac;color:#1f5a41;font-weight:600}
@@ -375,12 +459,14 @@
 .calls th{color:#7a8d81;font-weight:600}
 @media(max-width:750px){
  header{height:auto;min-height:76px;flex-wrap:wrap;row-gap:6px}
- #backend-bar{order:3;width:100%;justify-content:flex-end;gap:6px;font-size:10px}
- #backend-bar .bb-current{max-width:150px}
+ #backend-bar{order:3;width:100%;justify-content:flex-end;gap:6px;font-size:10px;flex-wrap:wrap}
+ #backend-bar .bb-current{max-width:130px}
+ #backend-bar .bb-mode{font-size:9px;padding:2px 7px}
  .calls{padding:7px 9px}
 }
 @media(max-width:420px){
- #backend-bar .bb-current{max-width:118px}
+ #backend-bar .bb-current{max-width:100px}
+ #backend-bar .bb-mode{font-size:9px;padding:2px 6px}
 }
 `;
   document.head.appendChild(style);

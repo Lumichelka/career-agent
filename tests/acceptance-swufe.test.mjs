@@ -218,6 +218,10 @@ function configureFakeReviewer(app, cookie) {
     transport: 'http',
     url: 'https://review.invalid/mcp',
     token: 'sk-local-fake-review'
+  }).then(async created => {
+    // 复核在后台任务里跑，需要用户先明确同意出网；验收流程模拟这一步。
+    await postJson(app, '/api/agents/consent', cookie, {id: created.agent.id});
+    return created;
   });
 }
 

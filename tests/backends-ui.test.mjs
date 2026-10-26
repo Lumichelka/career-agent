@@ -66,6 +66,10 @@ test('模型选路 UI：顶栏常驻、候选卡、调用表与 390 无横向溢
   await page.waitForSelector('#backend-bar', {state: 'visible'});
   const bar = await page.locator('#backend-bar').innerText();
   assert.match(bar, /当前/, '顶栏显示当前后端');
+  assert.match(bar, /模型 API/, '顶栏有模型 API 入口');
+  assert.match(bar, /外部 Agent/, '顶栏有外部 Agent 第二入口');
+  assert.equal(await page.locator('#bb-mode-api').count(), 1);
+  assert.equal(await page.locator('#bb-mode-agent').count(), 1);
   assert.match(bar, /本轮/, '顶栏显示本轮预估费用');
   assert.match(bar, /本次锁定/, '顶栏有本次锁定');
 

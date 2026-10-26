@@ -44,6 +44,7 @@
 - [v3 重构方案](plan/01-v3重构方案.md) 第 3 节：需求逐条对应
 - [答辩要点](archive/v2/05-答辩要点.md)（v2 版，以 15 篇为准）
 - 示例导出：[ICS](examples/示例-招聘行程.ics) · [CSV](examples/示例-招聘行程.csv) · [Markdown](examples/示例-招聘行程.md)
+- 验收证据：[验收证据包](acceptance/24-swufe/README.md) —— 路径、哈希、抽取/复核输出、审计导出、撤销前后库哈希
 - 旧版说明：[共同测试说明](archive/v2/共同测试说明.md)
 
 ---
@@ -55,6 +56,7 @@ docs/
 ├─ README.md        本索引
 ├─ plan/            v3 方案（当前活跃）
 ├─ adr/             关键决策记录（每个决策一篇，短）
+├─ acceptance/      验收证据包（路径、哈希、抽取/复核输出、审计导出、签字）
 ├─ archive/v2/      v2 旧文档（保留历史）
 ├─ assets/          截图
 └─ examples/        示例导出（ics/csv/md）

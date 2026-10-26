@@ -63,10 +63,17 @@ export async function handleAgents({method, pathname, url, body = {}, user, agen
     }
 
     if (method !== 'POST') return {status: 405, json: {error: '不支持的请求方法', code: 'METHOD_NOT_ALLOWED'}};
-    if (!['/test', '/refresh', '/reconnect'].includes(route)) return null;
+    if (!['/test', '/refresh', '/reconnect', '/consent'].includes(route)) return null;
     const id = requireId(body, url);
     const before = publicById(agents, id);
     if (!before) throw new AgentConfigError('AGENT_NOT_FOUND', '没有这个外部 Agent', 404);
+
+    // 设置页里明确点「允许出网」：把该 (user, agent) 的首次出网同意持久化。
+    // 这是用户在界面上的一次明确操作，后台复核任务只读取这份同意，绝不替用户点头。
+    if (route === '/consent') {
+      const outbound = await agents.approveOutbound(id, {neverAsk: body.neverAsk !== false});
+      return {status: 200, json: {ok: true, outbound, agent: withStatus(publicById(agents, id), await connections.status(id))}};
+    }
 
     // 连接失败不是 HTTP 错误：200 + 失败状态，界面照常渲染错误码与恢复建议。
     try {

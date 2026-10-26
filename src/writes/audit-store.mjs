@@ -113,6 +113,16 @@ export function hasAuditSchema(db) {
   }
 }
 
+// 审计体量提示：只数本人行数，不受当前筛选影响；用于「导出后清空」提示。
+export function countAuditRows(db, userId) {
+  if (!userId) return 0;
+  try {
+    return Number(db.prepare('SELECT COUNT(*) c FROM write_audit WHERE user_id=?').get(String(userId)).c) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function readConfirmation(db, userId, confirmId) {
   if (!confirmId) return null;
   const row = db.prepare('SELECT * FROM confirmations WHERE confirm_id=? AND user_id=?').get(String(confirmId), String(userId));

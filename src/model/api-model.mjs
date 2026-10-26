@@ -5,6 +5,7 @@ import {createToolExecutor, callTool} from '../tools/execute.mjs';
 import {envelopeForModel, mergeToolSurface, MAX_MODEL_TEXT} from '../agents/tools.mjs';
 import {endpointFor, explainError} from './providers.mjs';
 import {makeFetch} from './proxy-fetch.mjs';
+import {imageContentFor} from './image-parts.mjs';
 
 export const API_TOOLS = toolsForModel();
 
@@ -62,18 +63,8 @@ function mergeUsage(total, next) {
   return merged;
 }
 
-// 附件只用于请求体：chat 用 image_url，messages 用 base64 source，responses 用 input_image。
-// 日志、证据与调用记录只记 name/mime/bytes，绝不写 dataUrl。
-export function imageContentFor(protocol, images = []) {
-  const list = (Array.isArray(images) ? images : []).filter(img => img && typeof img.dataUrl === 'string');
-  if (!list.length) return null;
-  if (protocol === 'messages') return list.map(img => ({
-    type: 'image',
-    source: {type: 'base64', media_type: img.mime || 'image/png', data: img.dataUrl.replace(/^data:[^;]+;base64,/, '')}
-  }));
-  if (protocol === 'responses') return list.map(img => ({type: 'input_image', image_url: img.dataUrl}));
-  return list.map(img => ({type: 'image_url', image_url: {url: img.dataUrl}}));
-}
+// 图片请求形状统一放在 image-parts.mjs；这里保留同名导出，老调用点不用改。
+export {imageContentFor} from './image-parts.mjs';
 
 // 兼容旧调用：工具实现已迁到 src/tools/，这里保留同名导出。
 export async function callCareerTool(name, args, ctx = {}) {
