@@ -156,8 +156,13 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
         <label>文章链接<input id="wx-url" placeholder="https://mp.weixin.qq.com/s/..." autocomplete="off"></label>
         <label>正文粘贴（微信验证时）<textarea id="wx-text" placeholder="链接抓不到正文时再粘贴" style="min-height:70px"></textarea></label>
       </div>
-      <div class="row" style="margin-top:8px"><button id="wx-import">记录并分析</button><button id="wx-harvest">从来源页找公众号</button><span id="wx-status" class="hint"></span></div>
+      <div class="row" style="margin-top:8px"><button id="wx-import">记录并分析</button><button id="wx-harvest">从来源页找公众号</button><button id="wx-discover">发现公众号</button><span id="wx-status" class="hint"></span></div>
       <div id="wx-result" class="hint" style="margin-top:8px"></div>
+      <div class="grid2" style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
+        <label>订阅账号<select id="wx-sub-account"></select></label>
+        <label>订阅页地址<input id="wx-sub-feed" placeholder="学校就业网 / 公众号矩阵页 URL"></label>
+      </div>
+      <div class="row" style="margin-top:8px"><button id="wx-sub-save">保存订阅</button><button id="wx-sub-sync">同步该账号</button><button id="wx-sub-clear">取消订阅</button><span id="wx-sub-status" class="hint"></span></div>
     </details>
     <div class="panel" id="wx-articles-panel" style="margin-top:14px;padding:12px">
       <h2>最近公众号文章 <span id="wx-articles-count" class="hint"></span></h2>
@@ -283,6 +288,9 @@ async function loadPlatformJobs(){
 function renderSources(sources,wechat){
   sourceState=sources;
   window.__wxAccounts=Object.fromEntries((wechat?.accounts||[]).map(a=>[a.id,a.name]));
+  window.__wxAccountList=wechat?.accounts||[];
+  const wxSel=el('#wx-sub-account');
+  if(wxSel){const keep=wxSel.value;wxSel.innerHTML=(wechat?.accounts||[]).map(a=>'<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>').join('');if(keep&&[...wxSel.options].some(o=>o.value===keep))wxSel.value=keep;else if(wechat?.accounts?.[0])wxSel.value=wechat.accounts[0].id;wxSel.onchange=()=>{const a=(window.__wxAccountList||[]).find(x=>x.id===wxSel.value);if(el('#wx-sub-feed'))el('#wx-sub-feed').value=a?.feedUrl||'';};if(el('#wx-sub-feed')&&!el('#wx-sub-feed').value){const a=(window.__wxAccountList||[]).find(x=>x.id===wxSel.value);el('#wx-sub-feed').value=a?.feedUrl||'';}}
   const wxBySchool=new Map();
   for(const a of wechat?.accounts||[]){const key=a.school||'未归类';if(!wxBySchool.has(key))wxBySchool.set(key,[]);wxBySchool.get(key).push(a);}
   const shown=new Set();
@@ -303,7 +311,7 @@ function renderSources(sources,wechat){
     if(s.stale) html+='<div><span class="flag">数据超 24h</span></div>';
     return html;
   };
-  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b><div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.lastAnalysis?' · 最近分析 '+esc(String(a.lastAnalysis).slice(0,10)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions"><a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
+  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b>'+(a.feedUrl?'<span class="badge ok">已订阅</span>':'<span class="badge off">未订阅</span>')+'<div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.biz?' · biz '+esc(String(a.biz).slice(0,10)):' · biz 待识别')+(a.lastArticleAt?' · 最近文章 '+esc(String(a.lastArticleAt).slice(0,10)):'')+(a.lastSyncAt?' · 同步 '+esc(shortStamp(a.lastSyncAt)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions">'+(a.feedUrl?'<button data-wx-sync="'+esc(a.id)+'">同步</button>':'')+'<a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
   const group={};
   for(const s of sources)(group[s.category] ||= []).push(s);
   for(const [cat,list] of Object.entries(group)){
@@ -427,7 +435,9 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b)return;
   if(b.dataset.sourceCheck){await startSourceCheck(b.dataset.sourceCheck,b);return}
   if(b.dataset.collect){await collect([b.dataset.collect],'采集 '+b.dataset.collect);return}
+  if(b.dataset.wxSync){b.disabled=true;try{const r=await fetch('/api/wechat/accounts/'+b.dataset.wxSync+'/sync',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:'{}'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));toast('同步完成：新增 '+(d.imported||0)+' 篇');await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}
   if(b.dataset.export){const f=b.dataset.export;try{const r=await fetch('/api/recruit/export.'+f+'?days='+days(),{headers:{'x-career-token':TOKEN}});if(!r.ok)throw new Error('导出失败');const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='zhixiang-schedule.'+f;a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);toast('已导出 '+f.toUpperCase())}catch(err){toast(err.message)}return}
+  if(b.dataset.wxPublish){b.disabled=true;try{const r=await fetch('/api/wechat/articles/'+b.dataset.wxPublish+'/publish',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:'{}'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||d.reason||('HTTP '+r.status));toast('已生成活动，项目 '+(d.projects?.length||0)+' 个');await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}
   if(b.dataset.wxDraft){if(!wxDraft)return;el('#m-title').value=wxDraft.title||'';el('#m-start').value=wxDraft.startAt?wxDraft.startAt.slice(0,16):'';el('#m-venue').value=wxDraft.venue||'';el('#m-city').value=wxDraft.city||'';el('#m-company').value=wxDraft.company||'';el('#m-school').value=wxDraft.school||'公众号导入';el('#m-kind2').value=wxDraft.kind||'其他';el('#m-apply').value=wxDraft.applyMode||'';el('#m-notes').value=wxDraft.notes||'';manualPreview=wxArticle?.content||'';el('#m-draft').hidden=false;manualDialog.showModal();return}
   if(b.dataset.verify){b.disabled=true;try{const r=await api('verify',{id:b.dataset.verify});toast(r.message);await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}
   if(b.id==='probe'){b.disabled=true;b.textContent='检查中…';try{const r=await api('probe',{});const bad=r.results.filter(x=>!x.ok);el('#log').hidden=false;el('#log').textContent=r.results.map(x=>`${x.ok?'✔':'✘'} ${x.id} ${x.status||''} ${x.reason||''} ${x.message||''}`).join('\n');toast(bad.length?`${bad.length} 个源当前不可达`:'所有源都可访问')}catch(err){toast(err.message)}finally{b.disabled=false;b.textContent='检查各源连通性'}return}
@@ -440,7 +450,7 @@ el('#wx-import').onclick=async()=>{
     const resp=await fetch('/api/wechat/articles/import',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({url,text:el('#wx-text').value})});const d=await resp.json().catch(()=>({error:'返回格式异常'}));if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));
     wxArticle=d.article;wxDraft=d.analysis?.draft||d.draft;
     const yes={yes:'含招聘信息',no:'未发现招聘信息',uncertain:'不确定'}[d.analysis?.hasRecruitment]||'未判断';
-    el('#wx-result').innerHTML='已记录：<b>'+esc(d.article.title)+'</b><br>'+yes+' · 识别项目 '+(d.analysis?.projects?.length||0)+' 个'+(d.analysis?.summary?'<br>'+esc(d.analysis.summary):'')+(d.analysis?.warnings?.length?'<br>提示：'+esc(d.analysis.warnings.join('；')):'');
+    el('#wx-result').innerHTML='已记录：<b>'+esc(d.article.title)+'</b><br>'+yes+' · 识别项目 '+(d.analysis?.projects?.length||0)+' 个'+(d.publish?.ok?' · 已生成活动（'+d.publish.projects.length+' 个项目）':d.publish?.reason?' · 未生成活动：'+esc(d.publish.reason):'')+(d.analysis?.summary?'<br>'+esc(d.analysis.summary):'')+(d.analysis?.warnings?.length?'<br>提示：'+esc(d.analysis.warnings.join('；')):'');
     el('#wx-status').textContent='';
     if(wxDraft) el('#wx-result').innerHTML+='<br><button data-wx-draft>用草稿填入手动导入</button>';
     await loadAll();
@@ -458,6 +468,15 @@ el('#wx-harvest').onclick=async()=>{
     el('#wx-status').textContent='';await loadAll();
   }catch(e){el('#wx-status').textContent=e.message;toast(e.message)}
 };
+async function saveWxSubscription(feedUrl){
+  const id=el('#wx-sub-account').value;if(!id){toast('请选择公众号');return}
+  const r=await fetch('/api/wechat/accounts/'+id+'/subscribe',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({feedUrl})});
+  const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d;
+}
+el('#wx-sub-save').onclick=async()=>{try{await saveWxSubscription(el('#wx-sub-feed').value.trim());el('#wx-sub-status').textContent='订阅已保存';toast('订阅已保存');await loadAll()}catch(e){el('#wx-sub-status').textContent=e.message;toast(e.message)}};
+el('#wx-sub-clear').onclick=async()=>{try{await saveWxSubscription('');el('#wx-sub-feed').value='';el('#wx-sub-status').textContent='已取消订阅';await loadAll()}catch(e){toast(e.message)}};
+el('#wx-sub-sync').onclick=async()=>{const id=el('#wx-sub-account').value;if(!id){toast('请选择公众号');return}el('#wx-sub-status').textContent='同步中…';try{const r=await fetch('/api/wechat/accounts/'+id+'/sync',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:'{}'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));el('#wx-sub-status').textContent='新增 '+(d.imported||0)+' 篇，跳过 '+(d.skipped||0)+' 篇';toast('同步完成');await loadAll()}catch(e){el('#wx-sub-status').textContent=e.message;toast(e.message)}};
+el('#wx-discover').onclick=async()=>{const url=el('#wx-url').value.trim(),text=el('#wx-text').value.trim();if(!url&&!text){toast('请填写来源页链接或粘贴内容');return}el('#wx-status').textContent='发现公众号…';try{const resp=await fetch('/api/wechat/discover',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({url,text})});const d=await resp.json().catch(()=>({error:'返回格式异常'}));if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));el('#wx-result').innerHTML=d.candidates.length?d.candidates.map(c=>esc(c.accountName||c.name||'未命名')+(c.biz?' · biz '+esc(String(c.biz).slice(0,10)):'')+' · '+c.articleUrls.length+' 篇').join('<br>'):'没有发现可识别的公众号';el('#wx-status').textContent='';await loadAll()}catch(e){el('#wx-status').textContent=e.message;toast(e.message)}};
 function renderManualPreview(list){
   el('#ms-preview-list').innerHTML=list?.length?list.map(e=>'<div>'+esc(e.title)+' · '+esc(String(e.startAt||'').slice(0,16).replace('T',' '))+(e.venue?' · '+esc(e.venue):'')+'</div>').join(''):'';
 }
@@ -481,7 +500,7 @@ async function loadWechatArticles(){
     const r=await fetch('/api/wechat/articles',{headers:{'x-career-token':TOKEN}});
     const d=await r.json();const list=d.articles||[];
     el('#wx-articles-count').textContent=list.length+' 篇';
-    el('#wx-articles').innerHTML=list.length?list.map(a=>{let drafts=[];try{drafts=(JSON.parse(a.extractedJson||'{}').projects)||[];}catch{}const names=drafts.slice(0,5).map(p=>p.company).filter(Boolean);return '<article class="article"><b><a href="'+esc(a.url)+'" target="_blank" rel="noopener noreferrer">'+esc(a.title)+'</a></b><div class="meta">'+esc((window.__wxAccounts&&window.__wxAccounts[a.accountId])||'公众号')+' · '+esc(a.hasRecruitment==='yes'?'含招聘信息':a.hasRecruitment==='no'?'未发现招聘':'待确认')+' · '+(a.projectCount||0)+' 个项目草稿 · '+esc(String(a.analyzedAt||a.createdAt||'').slice(0,10))+'</div>'+(names.length?'<div class="hint">草稿：'+esc(names.join('、'))+(drafts.length>5?' 等':'')+'</div>':'')+'<div class="row">'+(a.eventId?'<span class="hint">已关联活动</span>':'<span class="hint">未入库活动</span>')+'</div></article>';}).join(''):'<div class="empty">还没有文章；先粘贴推文链接或从来源页扫描</div>';
+    el('#wx-articles').innerHTML=list.length?list.map(a=>{let drafts=[];try{drafts=(JSON.parse(a.extractedJson||'{}').projects)||[];}catch{}const names=drafts.slice(0,5).map(p=>p.company).filter(Boolean);return '<article class="article"><b><a href="'+esc(a.url)+'" target="_blank" rel="noopener noreferrer">'+esc(a.title)+'</a></b><div class="meta">'+esc((window.__wxAccounts&&window.__wxAccounts[a.accountId])||'公众号')+' · '+esc(a.hasRecruitment==='yes'?'含招聘信息':a.hasRecruitment==='no'?'未发现招聘':'待确认')+' · '+(a.projectCount||0)+' 个项目草稿 · '+esc(String(a.analyzedAt||a.createdAt||'').slice(0,10))+'</div>'+(names.length?'<div class="hint">草稿：'+esc(names.join('、'))+(drafts.length>5?' 等':'')+'</div>':'')+'<div class="row">'+(a.eventId?'<span class="hint">已关联活动</span>':'<button data-wx-publish="'+esc(a.id)+'">生成活动/项目</button><span class="hint">未入库活动</span>')+'</div></article>';}).join(''):'<div class="empty">还没有文章；先粘贴推文链接或从来源页扫描</div>';
   }catch(e){el('#wx-articles').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
 }
 const manualDialog=el('#manual-dialog');
