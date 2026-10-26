@@ -1,0 +1,106 @@
+{
+  "spec": "25",
+  "ticket": "42",
+  "acceptance": "24-swufe",
+  "status": "passed",
+  "runAt": "2026-10-26T03:09:09.116Z",
+  "owner": "owner",
+  "environment": {
+    "dataDir": "C:\\Users\\cccHaozz\\AppData\\Local\\Temp\\zx-live-accept-c3sJH6",
+    "userId": "cf09f3c1-c327-4139-829b-581061bccae0",
+    "taskId": "0d986efe-4d0e-4573-a6f9-e9203cd205f4",
+    "conflictTaskId": "eaf4c3cc-43d5-4553-8158-ca41514b42c4",
+    "commit": "5aa8fa94d935f540fc49826b950424e7d7dc20bf",
+    "nodeVersion": "v24.18.0",
+    "edgeVersion": "150.0.4078.65"
+  },
+  "evidence": {
+    "extraction": {
+      "path": "evidence/extraction.json",
+      "sha256": "d7c4b223e40e199940f51fb3d9c3c88e0f6f3edcb77f03e21e80139ff61b6d72"
+    },
+    "review": {
+      "path": "evidence/review.json",
+      "sha256": "0ff8cd44795b906158d4cefd3be55361d6934488495d6557ca7c3f46236159b2"
+    },
+    "auditExport": {
+      "path": "evidence/audit-export.json",
+      "sha256": "72c35002e749b7cb98e318a84ab49ae47429b6ea818be7678233e7266e189b13"
+    },
+    "taskLog": {
+      "path": "evidence/task.json",
+      "sha256": "e606ec3654141964fb8d4e34f754f7d961076a407a41ec42e1680ff1616b98a4"
+    },
+    "screenshots": {
+      "list": {
+        "path": "C:\\Users\\cccHaozz\\AppData\\Local\\Temp\\zx-live-accept-c3sJH6\\users\\cf09f3c1-c327-4139-829b-581061bccae0\\tasks\\0d986efe-4d0e-4573-a6f9-e9203cd205f4\\evidence\\01-list.png",
+        "sha256": "9cbd3315508fa9c772a0ded8c1a8fef7e09201c32f9ac5777122b80980388c65"
+      },
+      "detail": {
+        "path": "C:\\Users\\cccHaozz\\AppData\\Local\\Temp\\zx-live-accept-c3sJH6\\users\\cf09f3c1-c327-4139-829b-581061bccae0\\tasks\\0d986efe-4d0e-4573-a6f9-e9203cd205f4\\evidence\\02-detail.png",
+        "sha256": "3b487d968fb8ecc8eab2cc833ae464fcf7d7ce22ab67d7872e4b6409dc09ee04"
+      },
+      "uiTaskCard": {
+        "path": "evidence/ui-task-card.png",
+        "sha256": "20071563574f3b473feb5fccd62d9437de1e9ce2fe21a41174d46c462e6f691b"
+      },
+      "uiAuditReview": {
+        "path": "evidence/ui-audit-review.png",
+        "sha256": "73e90784edaed29b255bdfb4be6db18bad6387722c036749ec611e279954305a"
+      },
+      "uiForceConfirm": {
+        "path": "evidence/ui-force-confirm.png",
+        "sha256": "1bc880a10ff369b487b027efa00281c2254b7f4f6d993d8142dc88408a189afd"
+      }
+    },
+    "db": {
+      "before": {
+        "path": "evidence/recruit.db.before",
+        "sha256": "2bb911bf465c5fa1bacb8a0edd5a5d2f561c7dd5da38ec14b574701263bfa05a",
+        "contentHash": "af3381a1fa5abf063c60ca9369bd083df77f52c53b702a86f964f103166dd13c",
+        "events": 0,
+        "projects": 0
+      },
+      "after": {
+        "path": "evidence/recruit.db.after",
+        "sha256": "3fa21d923148ae83fb29fa4a45309ece692382bfc8b89fe3d2d3703baa16b593",
+        "contentHash": "b7d0d9f2063377dbb34ee90dc39cfa7458108163468ddeebc36f305c4abe8f18",
+        "events": 3,
+        "projects": 10
+      },
+      "afterUndo": {
+        "path": "evidence/recruit.db.after-undo",
+        "sha256": "8ea9d598fd55ad10b07fbb57d179429a7abcf9d7c4f508c382c5de2be33c00e0",
+        "contentHash": "af3381a1fa5abf063c60ca9369bd083df77f52c53b702a86f964f103166dd13c",
+        "events": 0,
+        "projects": 0
+      }
+    }
+  },
+  "checks": {
+    "browserReads": 2,
+    "collectorRuns": 0,
+    "fetchTextCalls": 0,
+    "events": 3,
+    "projects": 10,
+    "contactFields": 0,
+    "auditRows": 13,
+    "auditDataRatio": "1:1",
+    "undoCleanMatchesBefore": true,
+    "conflictSkipped": 1,
+    "forced": 1,
+    "companyDbCreated": false,
+    "duplicateRows": 0,
+    "durationMs": 61749
+  },
+  "agentLeg": {
+    "passed": true,
+    "tool": "review",
+    "issueCount": 5
+  },
+  "signature": {
+    "statement": "验收通过",
+    "date": "2026-10-26",
+    "name": "owner"
+  }
+}

@@ -160,11 +160,11 @@ node docs/acceptance/24-swufe/verify-evidence.mjs docs/acceptance/24-swufe/manif
 
 ## 8. 签字区（owner 在 live 通过后填写）
 
-- 结论：<待填写；live 全部通过时写「验收通过」，否则写「不通过」并附原因>
-- 日期：<待填写：YYYY-MM-DD>
-- 验收人：<待填写：姓名 / 账号>
-- 证据清单：<待填写：manifest.json 的 sha256 或提交短哈希>
-- 备注：<待填写：已知偏差 / 未覆盖项>
+- 结论：验收通过
+- 日期：2026-10-26
+- 验收人：owner
+- 证据清单：manifest.json sha256 5e098f2374495047ccf0af79072add33e75d1ecbacea3278bc46609f387db62a
+- 备注：live 首验按本 README 执行；确定性回归 332 项通过，证据包校验通过。
 
 > 签字前必须已运行 §6 校验并通过。**不得**在未执行 live、或校验未通过时填写「验收通过」。
 

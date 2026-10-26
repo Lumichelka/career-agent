@@ -1,0 +1,138 @@
+{
+  "id": "0d986efe-4d0e-4573-a6f9-e9203cd205f4",
+  "userId": "cf09f3c1-c327-4139-829b-581061bccae0",
+  "sessionId": "78ddf4bc-c7b3-476b-8543-73421eaa5767",
+  "title": "来源校对 · 西南财经大学 · 双选会",
+  "sourceName": "西南财经大学",
+  "state": "succeeded",
+  "phase": "任务完成",
+  "counts": {
+    "tools": 0,
+    "steps": 0,
+    "evidence": 6,
+    "writes": 13,
+    "batches": 1,
+    "drafts": 0
+  },
+  "plan": null,
+  "evidence": [
+    {
+      "id": "61657700-b43b-4eaf-8c2e-113a8946dd59",
+      "kind": "note",
+      "label": "采集器已禁用（robots 限制），改用应用内浏览器读取",
+      "detail": "明确不调用采集器，也不向目标站发 fetchText / HTTP 抓取；只由应用内浏览器打开两次页面。",
+      "url": "",
+      "at": "2026-10-26T03:07:15.986Z"
+    },
+    {
+      "id": "70d23c99-ffb7-4cda-b7f9-dfaac02af381",
+      "kind": "screenshot",
+      "label": "截图 1 · 列表页：现场双选会-西财智慧就业系统",
+      "detail": "URL https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm · 2026-10-26T03:07:18.707Z · 视口 1366×900",
+      "url": "/api/source-check/evidence?taskId=0d986efe-4d0e-4573-a6f9-e9203cd205f4&file=01-list.png",
+      "at": "2026-10-26T03:07:22.254Z"
+    },
+    {
+      "id": "8141960f-1796-4208-be83-34f1e447b6b2",
+      "kind": "screenshot",
+      "label": "截图 2 · 活动详情：西南财经大学2026年秋季大型双选会-现场双选会-西财智慧就业系统",
+      "detail": "URL https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm · 2026-10-26T03:07:21.881Z · 视口 1366×900",
+      "url": "/api/source-check/evidence?taskId=0d986efe-4d0e-4573-a6f9-e9203cd205f4&file=02-detail.png",
+      "at": "2026-10-26T03:07:22.256Z"
+    },
+    {
+      "id": "061c5fbc-a5f5-4eff-b20b-7682978da976",
+      "kind": "extraction",
+      "label": "抽取 JSON（联系方式已剔除）",
+      "detail": "活动 3 · 单位 10",
+      "url": "/api/source-check/evidence?taskId=0d986efe-4d0e-4573-a6f9-e9203cd205f4&file=extraction.json",
+      "at": "2026-10-26T03:07:47.611Z"
+    },
+    {
+      "id": "27745406-d332-4d99-8fcd-4993e79e7324",
+      "kind": "external_call",
+      "label": "外部调用：claude-review · review（只读）",
+      "detail": "{\"requestId\":\"e02d876b-d2c2-4877-9785-1f3a4ae8f2c8\",\"status\":\"ok\",\"code\":\"\",\"era\":\"modern\",\"durationMs\":30023,\"retryable\":true,\"idempotency\":\"read_only\"}",
+      "url": "",
+      "at": "2026-10-26T03:08:17.640Z"
+    },
+    {
+      "id": "b83e8c0d-37ca-4b2d-bf17-b135a8c3c1e4",
+      "kind": "review",
+      "label": "外部 Agent 复核：5 个问题",
+      "detail": "projects[4] · company：公司名疑似截断：'四川百品众合餐饮发展集团有限公' 缺少'司'字\nprojects[8] · company：公司名疑似截断：'中国人民财产保险股份有限公司达' 缺少后续字符\nevents[1] · sourceUrl：与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误\nevents[2] · sourceUrl：与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误\nevents[0] · venue：地点'西南财经大学柳林校区柳林体育馆'中'柳林'重复，疑似笔误",
+      "url": "/api/source-check/evidence?taskId=0d986efe-4d0e-4573-a6f9-e9203cd205f4&file=review.json",
+      "at": "2026-10-26T03:08:17.642Z"
+    }
+  ],
+  "drafts": [],
+  "error": null,
+  "undo": {
+    "available": true,
+    "summary": "可撤销 13 条自动写入（1 个批次）。",
+    "rows": 13,
+    "batches": 1,
+    "undone": 0,
+    "conflicts": 0,
+    "forced": 0,
+    "failed": 0,
+    "already": 0,
+    "remaining": 13,
+    "allUndone": false,
+    "undoneBatches": 0,
+    "pendingBatches": 1,
+    "updatedAt": "2026-10-26T03:08:17.730Z"
+  },
+  "fallback": null,
+  "review": {
+    "status": "issues",
+    "count": 5,
+    "issues": [
+      {
+        "row": "projects[4]",
+        "field": "company",
+        "issue": "公司名疑似截断：'四川百品众合餐饮发展集团有限公' 缺少'司'字",
+        "severity": "high"
+      },
+      {
+        "row": "projects[8]",
+        "field": "company",
+        "issue": "公司名疑似截断：'中国人民财产保险股份有限公司达' 缺少后续字符",
+        "severity": "high"
+      },
+      {
+        "row": "events[1]",
+        "field": "sourceUrl",
+        "issue": "与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误",
+        "severity": "medium"
+      },
+      {
+        "row": "events[2]",
+        "field": "sourceUrl",
+        "issue": "与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误",
+        "severity": "medium"
+      },
+      {
+        "row": "events[0]",
+        "field": "venue",
+        "issue": "地点'西南财经大学柳林校区柳林体育馆'中'柳林'重复，疑似笔误",
+        "severity": "low"
+      }
+    ],
+    "raw": "",
+    "agentLeg": "passed",
+    "attempted": true,
+    "agent": {
+      "id": "01a1762d-2e9f-7b5e-baa8-fe2cb9a738d6",
+      "name": "claude-review"
+    },
+    "tool": "review",
+    "error": null,
+    "at": "2026-10-26T03:08:17.641Z"
+  },
+  "createdAt": "2026-10-26T03:07:15.972Z",
+  "startedAt": "2026-10-26T03:07:15.981Z",
+  "updatedAt": "2026-10-26T03:08:17.723Z",
+  "finishedAt": "2026-10-26T03:08:17.723Z",
+  "durationMs": 61749
+}

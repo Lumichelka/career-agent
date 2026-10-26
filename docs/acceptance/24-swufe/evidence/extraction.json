@@ -1,0 +1,137 @@
+{
+  "source": {
+    "id": "swufe-xjh",
+    "name": "西南财经大学 · 双选会/招聘会",
+    "listUrl": "https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm",
+    "detailUrl": "https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm"
+  },
+  "events": [
+    {
+      "title": "西南财经大学2026年秋季大型双选会",
+      "startAt": "2026-10-27T14:00:00+08:00",
+      "endAt": "",
+      "venue": "西南财经大学柳林校区柳林体育馆",
+      "school": "西南财经大学",
+      "city": "成都",
+      "kind": "双选会",
+      "sourceUrl": "https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm"
+    },
+    {
+      "title": "西南财经大学“校招市集”2026年秋季系列双选会（第一场）",
+      "startAt": "2026-09-29T14:00:00+08:00",
+      "endAt": "",
+      "venue": "四川省成都市温江区柳台大道555号，西南财经大学，学生活动中心",
+      "school": "西南财经大学",
+      "city": "成都",
+      "kind": "双选会",
+      "sourceUrl": "https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm"
+    },
+    {
+      "title": "西南财经大学第八届律所专场校园招聘会",
+      "startAt": "2026-05-12T14:00:00+08:00",
+      "endAt": "",
+      "venue": "成都市温江区柳台大道555号西南财经大学柳林校区 学生活动中心",
+      "school": "西南财经大学",
+      "city": "成都",
+      "kind": "招聘会",
+      "sourceUrl": "https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm"
+    }
+  ],
+  "projects": [
+    {
+      "eventIndex": 0,
+      "company": "斐乐服饰有限公司",
+      "title": "",
+      "positions": "FILA直播运营岗 FILA商品运营岗 FILA零售管理岗",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "中国五冶集团有限公司",
+      "title": "",
+      "positions": "职能管理类 金融财务类",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "远东电缆(宜宾)有限公司",
+      "title": "",
+      "positions": "财务专员",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "成都市船说文化发展有限公司",
+      "title": "",
+      "positions": "初高中物理老师 小初数学老师",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "四川百品众合餐饮发展集团有限公",
+      "title": "",
+      "positions": "管培生",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "中财招商投资集团有限公司",
+      "title": "",
+      "positions": "营销助理 内审专员（制造业方向） 内审专员（金融方向） 直播主播 财务专员",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "国浩律师（成都）事务所",
+      "title": "",
+      "positions": "律师助理 实习生",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "四川五洲招标代理有限公司",
+      "title": "",
+      "positions": "会计/财务实习生 实习生 法务专员 数智化转型专员",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "中国人民财产保险股份有限公司达",
+      "title": "",
+      "positions": "本部职能岗 本部业管岗 理赔岗",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    },
+    {
+      "eventIndex": 0,
+      "company": "成都天锐星通科技股份有限公司",
+      "title": "",
+      "positions": "AI开发工程师",
+      "requirements": "",
+      "applyMode": "",
+      "applyUrl": ""
+    }
+  ],
+  "skipped": {
+    "events": 0,
+    "projects": 0
+  },
+  "extractedAt": "2026-10-26T03:07:47.610Z"
+}

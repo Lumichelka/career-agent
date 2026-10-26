@@ -1,0 +1,42 @@
+{
+  "status": "issues",
+  "issues": [
+    {
+      "row": "projects[4]",
+      "field": "company",
+      "issue": "公司名疑似截断：'四川百品众合餐饮发展集团有限公' 缺少'司'字",
+      "severity": "high"
+    },
+    {
+      "row": "projects[8]",
+      "field": "company",
+      "issue": "公司名疑似截断：'中国人民财产保险股份有限公司达' 缺少后续字符",
+      "severity": "high"
+    },
+    {
+      "row": "events[1]",
+      "field": "sourceUrl",
+      "issue": "与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误",
+      "severity": "medium"
+    },
+    {
+      "row": "events[2]",
+      "field": "sourceUrl",
+      "issue": "与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误",
+      "severity": "medium"
+    },
+    {
+      "row": "events[0]",
+      "field": "venue",
+      "issue": "地点'西南财经大学柳林校区柳林体育馆'中'柳林'重复，疑似笔误",
+      "severity": "low"
+    }
+  ],
+  "raw": "",
+  "agent": {
+    "id": "01a1762d-2e9f-7b5e-baa8-fe2cb9a738d6",
+    "name": "claude-review"
+  },
+  "tool": "review",
+  "at": "2026-10-26T03:08:17.641Z"
+}
