@@ -8,7 +8,7 @@ const SYSTEM = '你是来源校对任务里的独立文本复核员。只做文�
 
 function runClaude(prompt) {
   return new Promise((resolve, reject) => {
-    execFile('claude', ['-p', prompt, '--output-format', 'text', '--tools', '', '--append-system-prompt', SYSTEM], {
+    execFile(process.env.CLAUDE_BIN || 'claude', ['-p', prompt, '--output-format', 'text', '--tools', '', '--append-system-prompt', SYSTEM], {
       timeout: 180000,
       maxBuffer: 2 * 1024 * 1024,
       windowsHide: true

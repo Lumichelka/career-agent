@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {createApp} from '../src/server/app.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {resolveSource, writeSourceCheck, SOURCE_CHECK_NOTES} from '../src/source-check/pipeline.mjs';
-import {SourceCheckBlockedError, BROWSER_LAUNCH_OPTIONS, BROWSER_CONTEXT_OPTIONS, detectBlock} from '../src/source-check/browser.mjs';
+import {SourceCheckBlockedError, BROWSER_LAUNCH_OPTIONS, BROWSER_CONTEXT_OPTIONS, detectBlock, openParticipantTab} from '../src/source-check/browser.mjs';
 import {stripContacts} from '../src/source-check/extract.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -318,6 +318,24 @@ test('来源校对：登录/验证码/阻断时任务标 blocked + 原因 + 恢�
   assert.equal(stopped.task.state, 'cancelled');
   const after = await getJson(app, '/api/tasks', user.cookie);
   assert.equal(after.tasks[0].state, 'cancelled');
+});
+
+
+test('参会企业页签：找到并点击/滚动；swufe 必需时失败会抛错', async () => {
+  const calls = [];
+  const page = (count, fail = false) => ({
+    getByText: () => ({first: () => ({
+      count: async () => count,
+      click: async () => { calls.push('click'); if (fail) throw new Error('click failed'); }
+    })}),
+    waitForTimeout: async () => {},
+    evaluate: async () => { calls.push('scroll'); }
+  });
+  assert.equal(await openParticipantTab(page(1), {required: true}), true);
+  assert.deepEqual(calls, ['click', 'scroll']);
+  assert.equal(await openParticipantTab(page(0), {required: false}), false);
+  await assert.rejects(() => openParticipantTab(page(0), {required: true}), /参会企业/);
+  await assert.rejects(() => openParticipantTab(page(1, true), {required: true}), /参会企业|点击/);
 });
 
 test('阻断识别与联系方式清洗：登录跳转/验证码停下，联系方式递归丢弃', () => {

@@ -40,7 +40,7 @@ import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
 // Node fetch / Chromium 都会拒绝一批「危险端口」；测试用 port:0 时可能随机撞上。
-// 只在随机端口上重听一次，避免测试偶发 bad port；显式端口保持原样。
+// 只在随机端口上最多重听 5 次，避免测试偶发 bad port；显式端口保持原样。
 const UNSAFE_PORTS = new Set([1,7,9,11,13,15,17,19,20,21,22,23,25,37,42,43,53,69,77,79,87,95,101,102,103,104,109,110,111,113,115,117,119,123,135,137,139,143,161,179,389,427,465,512,513,514,515,526,530,531,532,540,548,554,556,563,587,601,636,989,990,993,995,1719,1720,1723,2049,3659,4045,4190,5060,5061,6000,6566,6665,6666,6667,6668,6669,6679,6697,10080]);
 // 应用工厂：装配一个可启动的实例，不做进程级的事（环境变量、日志格式归 index.mjs）。
 // 返回 {server, token, dataDir, host, port, origin, close}；port 传 0 时由系统分配，close 幂等。
@@ -972,6 +972,7 @@ for (let attempt = 0; ; attempt += 1) {
   actualPort = server.address().port;
   if (Number(port) !== 0 || !UNSAFE_PORTS.has(actualPort) || attempt >= 5) break;
   await new Promise(resolve => server.close(resolve));
+  server.removeAllListeners('error');
   actualPort = 0;
 }
 localOrigin = 'http://127.0.0.1:' + actualPort;

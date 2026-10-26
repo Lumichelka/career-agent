@@ -21,8 +21,9 @@ const templateFile = join(root, 'docs', 'acceptance', '24-swufe', 'manifest.temp
 const readmeFile = join(root, 'docs', 'acceptance', '24-swufe', 'README.md');
 const verifyFile = join(root, 'docs', 'acceptance', '24-swufe', 'verify-evidence.mjs');
 const ownerName = process.env.OWNER_NAME || 'owner';
+const vaultSource = process.env.MODEL_VAULT_DIR || '';
+const claudeBin = process.env.CLAUDE_BIN || 'claude';
 const log = (...args) => console.log(new Date().toISOString().slice(11, 19), ...args);
-const sha256File = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -31,22 +32,25 @@ async function run() {
   const dataDir = await mkdtemp(join(tmpdir(), 'zx-live-accept-'));
   const app = await createApp({root, dataDir, host: '127.0.0.1', port: 0});
   let browser = null;
+  let tenantData = '';
+  let vaultCopied = false;
+  let realFetch = null;
+  const targetFetches = [];
   try {
     const accounts = JSON.parse(await readFile(join(dataDir, 'accounts.json'), 'utf8'));
     const owner = accounts.find(u => u.name === 'owner');
     if (!owner) throw new Error('owner account missing');
-    const tenantData = join(dataDir, 'users', owner.id, '.data');
+    tenantData = join(dataDir, 'users', owner.id, '.data');
     await mkdir(tenantData, {recursive: true});
-    const realUsers = join(process.env.LOCALAPPDATA || '', 'ZhiXiang', 'users');
-    let sourceData = '';
-    for (const name of await readdir(realUsers)) {
-      const candidate = join(realUsers, name, '.data');
-      if (existsSync(join(candidate, 'secrets.enc.json')) && existsSync(join(candidate, 'vault.key'))) { sourceData = candidate; break; }
+    // 真实 Key 只在显式 MODEL_VAULT_DIR 下复制；不自动扫描用户目录。结束后删除副本。
+    if (!vaultSource) throw new Error('MODEL_VAULT_DIR 未设置：请显式传入本机已有 KeyVault 的 .data 目录，或在网页里配置一个新的视觉模型 Key。');
+    if (!existsSync(join(vaultSource, 'secrets.enc.json')) || !existsSync(join(vaultSource, 'vault.key'))) {
+      throw new Error('MODEL_VAULT_DIR 里没有 secrets.enc.json + vault.key：' + vaultSource);
     }
-    if (!sourceData) throw new Error('no existing model vault to reuse');
     for (const name of ['model-settings.json', 'secrets.enc.json', 'vault.key']) {
-      if (existsSync(join(sourceData, name))) await cp(join(sourceData, name), join(tenantData, name));
+      if (existsSync(join(vaultSource, name))) await cp(join(vaultSource, name), join(tenantData, name));
     }
+    vaultCopied = true;
     const first = await readFile(join(dataDir, '首次登录.txt'), 'utf8');
     const password = (first.match(/密码：(.*)/) || [])[1]?.trim();
     if (!password) throw new Error('owner password missing');
@@ -101,7 +105,7 @@ async function run() {
     const agentRes = await api('agents', {
       name: 'claude-review', transport: 'stdio', command: process.execPath, args: [wrapper], enabled: true,
       env: {
-        CLAUDE_BIN: process.env.CLAUDE_BIN || 'C:\\Users\\cccHaozz\\.local\\bin\\claude.exe',
+        CLAUDE_BIN: claudeBin,
         PATH: process.env.PATH || '', USERPROFILE: process.env.USERPROFILE || '',
         HOME: process.env.HOME || process.env.USERPROFILE || '', APPDATA: process.env.APPDATA || '',
         LOCALAPPDATA: process.env.LOCALAPPDATA || '', TEMP: process.env.TEMP || '', TMP: process.env.TMP || '',
@@ -119,6 +123,12 @@ async function run() {
     await snapshot(join(evidenceDir, 'recruit.db.before'));
     const before = contentHashOf(join(evidenceDir, 'recruit.db.before'));
 
+    realFetch = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+      const url = String(typeof input === 'string' ? input : input?.url || '');
+      if (/swufe\.edu\.cn/i.test(url)) targetFetches.push(url);
+      return realFetch(input, init);
+    };
     const clean = await api('source-check/start', {sourceId: 'swufe'});
     log('clean task', clean.taskId);
     const cleanTask = await waitTask(clean.taskId);
@@ -205,11 +215,41 @@ async function run() {
     const duplicateRows = dupEvents.length + dupProjects.length;
     dupHandle.close();
     const companyDbCreated = existsSync(join(tenantData, 'company.db'));
-    const review = JSON.parse(await readFile(join(evidenceDir, 'review.json'), 'utf8'));
-    const reviewIssues = Array.isArray(review) ? review.length : Array.isArray(review.issues) ? review.issues.length : 0;
     const screenshots = JSON.parse(await readFile(join(evidenceDir, 'screenshots.json'), 'utf8'));
     const browserReads = Array.isArray(screenshots) ? screenshots.length : 0;
     const agentLeg = cleanTask.review?.agentLeg === 'passed' || cleanTask.review?.status === 'issues' || cleanTask.review?.status === 'ok';
+
+    // measured counters (not literals)
+    const CONTACT_KEY = /(contact|phone|mobile|telephone|tel|email|mail|wechat|weixin|idcard|identity|联系人|联系方式|手机|电话|邮箱|微信|身份证|证件)/i;
+    const CONTACT_VALUE = /(?:^|[^\d])(1[3-9]\d{9})(?:[^\d]|$)|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|(?<!\d)\d{17}[\dXx](?!\d)/;
+    const countContacts = (value, path = '') => {
+      let n = 0;
+      if (typeof value === 'string' && CONTACT_VALUE.test(value)) n += 1;
+      if (value && typeof value === 'object') {
+        for (const [key, item] of Object.entries(value)) {
+          if (CONTACT_KEY.test(key)) n += 1;
+          n += countContacts(item, path + '.' + key);
+        }
+      }
+      return n;
+    };
+    const extraction = JSON.parse(await readFile(join(evidenceDir, 'extraction.json'), 'utf8'));
+    const review = JSON.parse(await readFile(join(evidenceDir, 'review.json'), 'utf8'));
+    const reviewIssues = Array.isArray(review) ? review.length : Array.isArray(review.issues) ? review.issues.length : 0;
+    const auditObj = JSON.parse(await readFile(join(evidenceDir, 'audit-export.json'), 'utf8'));
+    const dbScan = new DatabaseSync(join(tenantData, 'recruit.db'));
+    let dbText = '';
+    for (const table of ['events', 'event_projects']) {
+      try { dbText += JSON.stringify(dbScan.prepare('SELECT * FROM ' + table).all()); } catch { /* 表不存在则跳过 */ }
+    }
+    const collectorRuns = (() => { try { return Number(dbScan.prepare('SELECT COUNT(*) c FROM runs').get().c) || 0; } catch { return 0; } })();
+    dbScan.close();
+    const fetchTextCalls = targetFetches.length;
+    const contactFields = countContacts(extraction) + countContacts(review) + countContacts(auditObj) + countContacts(dbText);
+    log('measured', JSON.stringify({collectorRuns, fetchTextCalls, contactFields}));
+    if (fetchTextCalls !== 0) throw new Error('检测到对目标站的直连 fetch：' + targetFetches.join(', '));
+    if (collectorRuns !== 0) throw new Error('检测到采集器 runs 行：' + collectorRuns);
+    if (contactFields !== 0) throw new Error('检测到联系方式字段/值：' + contactFields);
 
     // fill manifest
     const manifest = JSON.parse(await readFile(templateFile, 'utf8'));
@@ -240,13 +280,20 @@ async function run() {
       }
     };
     manifest.checks = {
-      browserReads, collectorRuns: 0, fetchTextCalls: 0, events: after.events, projects: after.projects,
-      contactFields: 0, auditRows: cleanRows.length, auditDataRatio: auditRatio,
+      browserReads, collectorRuns, fetchTextCalls, events: after.events, projects: after.projects,
+      contactFields, auditRows: cleanRows.length, auditDataRatio: auditRatio,
       undoCleanMatchesBefore: undoCleanMatches, conflictSkipped: skipped, forced,
       companyDbCreated, duplicateRows, durationMs: Number(cleanTask.durationMs) || 0
     };
     manifest.agentLeg = {passed: agentLeg, tool: cleanTask.review?.tool || 'review', issueCount: reviewIssues};
-    manifest.signature = {statement: '验收通过', date: new Date().toISOString().slice(0, 10), name: ownerName};
+    manifest.knownDeviations = [
+      '复用本机已有 DeepSeek Key（MODEL_VAULT_DIR 显式传入，运行后删除副本）',
+      '复核 Agent 是 claude -p --tools "" 的本地 MCP 桥，不是 claude mcp serve',
+      '列表页 3 场活动均写入；只打开 1 场详情，events[1..2] 复用该详情 URL',
+      '2 个单位名被页面截断，review 已标 high；未编造',
+      '原始页面截图含联系方式，仅保留本机临时路径'
+    ];
+    manifest.signature = {statement: '验收通过（含已知偏差）', date: new Date().toISOString().slice(0, 10), name: ownerName};
     await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
     log('manifest written', manifestFile);
 
@@ -261,15 +308,20 @@ async function run() {
     let readme = await readFile(readmeFile, 'utf8');
     const manifestSha = sha(manifestFile);
     readme = readme
-      .replace(/^- 结论：.*$/m, '- 结论：验收通过')
+      .replace(/^- 结论：.*$/m, '- 结论：验收通过（含已知偏差）')
       .replace(/^- 日期：.*$/m, '- 日期：' + manifest.signature.date)
       .replace(/^- 验收人：.*$/m, '- 验收人：' + ownerName)
       .replace(/^- 证据清单：.*$/m, '- 证据清单：manifest.json sha256 ' + manifestSha)
-      .replace(/^- 备注：.*$/m, '- 备注：live 首验按本 README 执行；确定性回归 332 项通过，证据包校验通过。');
+      .replace(/^- 备注：.*$/m, '- 备注：live 首验按本 README 执行；确定性回归 332 项通过，证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（显式 MODEL_VAULT_DIR，运行后删副本）；复核为 claude -p --tools \"\" 的本地 MCP 桥，不是 claude mcp serve；列表 3 场活动均写入、events[1..2] 复用同一详情 URL；2 个单位名被页面截断（review 已标 high）；原始截图仅本机临时路径。');
     await writeFile(readmeFile, readme);
     log('README signed');
     log('DONE dataDir=' + dataDir);
   } finally {
+    if (realFetch) globalThis.fetch = realFetch;
+    if (vaultCopied && tenantData) {
+      await rm(join(tenantData, 'secrets.enc.json'), {force: true}).catch(() => {});
+      await rm(join(tenantData, 'vault.key'), {force: true}).catch(() => {});
+    }
     if (browser) await browser.close().catch(() => {});
     await app.close().catch(() => {});
   }

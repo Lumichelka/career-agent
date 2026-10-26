@@ -73,6 +73,30 @@ async function readPage(page, url, {signal, textLimit = 8000} = {}) {
   return {url: finalUrl, title, text};
 }
 
+// 详情页默认停在「招聘会详情」；「参会企业」是同一页内的页签，点开才能看到单位列表。
+// 这不算翻页/批量：仍是一次详情读取、一张截图，只是把单位列表滚进截图。
+export async function openParticipantTab(page, {required = false} = {}) {
+  let count = 0;
+  try { count = await page.getByText('参会企业', {exact: true}).first().count(); } catch { count = 0; }
+  if (!count) {
+    if (required) throw new SourceCheckError('SOURCE_NO_PARTICIPANTS', '详情页没有找到「参会企业」页签，无法确认单位列表；已停止，不写入空单位。', '在普通浏览器人工打开详情页核对；或确认来源页结构变化。');
+    return false;
+  }
+  try {
+    await page.getByText('参会企业', {exact: true}).first().click({timeout: 10000});
+    await page.waitForTimeout(1200);
+    await page.evaluate(() => {
+      const tab = [...document.querySelectorAll('*')].find(node => node.textContent?.trim() === '参会企业');
+      tab?.scrollIntoView({block: 'start'});
+    });
+    await page.waitForTimeout(400);
+    return true;
+  } catch (error) {
+    if (required) throw new SourceCheckError('SOURCE_PARTICIPANTS_FAILED', '「参会企业」页签点击失败，无法确认单位列表；已停止，不写入空单位。', '在普通浏览器人工打开详情页核对，或稍后重试。');
+    return false;
+  }
+}
+
 // 默认读取器：Playwright + 本机 Edge，列表 1 次 + 详情 1 次，各截图一次。
 export async function readSourcePages({source, evidenceDir, signal} = {}) {
   if (!source?.listUrl) throw new SourceCheckError('INVALID_SOURCE', '这个来源没有可读取的列表地址。', '改用手动导入。');
@@ -97,18 +121,7 @@ export async function readSourcePages({source, evidenceDir, signal} = {}) {
     }
 
     const detail = await readPage(page, detailHref, {signal});
-    // 详情页默认停在「招聘会详情」；「参会企业」是同一页内的页签，点开才能看到单位列表。
-    // 这不算翻页/批量：仍是一次详情读取、一张截图，只是把单位列表滚进截图。
-    const participantTab = page.getByText('参会企业', {exact: true}).first();
-    if (await participantTab.count().catch(() => 0)) {
-      await participantTab.click({timeout: 10000}).catch(() => {});
-      await page.waitForTimeout(1200);
-      await page.evaluate(() => {
-        const tab = [...document.querySelectorAll('*')].find(node => node.textContent?.trim() === '参会企业');
-        tab?.scrollIntoView({block: 'start'});
-      }).catch(() => {});
-      await page.waitForTimeout(400);
-    }
+    await openParticipantTab(page, {required: source.id === 'swufe-xjh'});
     await page.screenshot({path: detailFile});
     const detailAt = new Date().toISOString();
 

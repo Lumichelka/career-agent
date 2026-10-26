@@ -20,6 +20,8 @@ dist/
 *.db-shm
 
 # 环境变量与密钥
+.live-acceptance-swufe.env
+.live-acceptance/
 .env
 .env.*
 secrets.enc.json

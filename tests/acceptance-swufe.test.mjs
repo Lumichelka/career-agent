@@ -550,7 +550,7 @@ test('首验回归：冲突 1 条 skip + 其余撤销；强制撤销写回旧值
   assert.equal(after.projects.length, 1);
 });
 
-test('证据包模板：路径/哈希/清单可校验，占位符模板不会被当成验收证据', async () => {
+test('证据包模板与 live 说明：模板保留占位符，live README 已签字', async () => {
   const docsDir = join(root, 'docs', 'acceptance', '24-swufe');
   const readme = await readFile(join(docsDir, 'README.md'), 'utf8');
   for (const needle of [
@@ -560,7 +560,8 @@ test('证据包模板：路径/哈希/清单可校验，占位符模板不会被
   ]) {
     assert.ok(readme.includes(needle), '证据包模板缺少：' + needle);
   }
-  assert.ok(readme.includes('<待填写'), '模板必须保留待填写占位符，不能预填结果');
+  assert.ok(readme.includes('验收通过（含已知偏差）'), 'live README 应已签字并注明已知偏差');
+  assert.ok(!readme.includes('<待填写'), 'live README 不应保留待填写占位符');
 
   const template = JSON.parse(await readFile(join(docsDir, 'manifest.template.json'), 'utf8'));
   assert.equal(template.status, 'pending', '模板状态必须是待验收');
