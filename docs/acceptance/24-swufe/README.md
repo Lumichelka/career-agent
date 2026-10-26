@@ -152,7 +152,7 @@ node docs/acceptance/24-swufe/verify-evidence.mjs docs/acceptance/24-swufe/manif
 | 入口 | 来源卡可发起；回对话并打开抽屉；源卡仍 disabled + 最近手动读取 | 改「已接入」或写采集器 last_run |
 | 边界 | 浏览器 2 次；采集器 / fetchText 对 swufe 0 次；无 stealth；无登录/验证绕过 | 采集器被调用、直连抓取、翻页/批量 |
 | 抽取 | 清晰活动 100%；单位 ≥90%；单位名逐字正确；零编造；联系方式 0 | 编造、漏活动、重复、联系方式入库/入审计 |
-| 本次已知偏差 | 2 个单位名 / 3 个标题·场地字段疑似截断；非匹配活动 sourceUrl 留空；列表 3 场活动均写入 | 作为「验收通过（含已知偏差）」记录，不静默改数据 |
+| 本次已知偏差 | 2 个单位名 / 3 个标题·场地字段疑似截断；非匹配活动 sourceUrl 留空；调用记录无 tokens/¥；来源卡/撤销 chip/调用表未单独截图 | 作为「验收通过（含已知偏差）」记录，不静默改数据 |
 | 写库 | 只写 events/event_projects；source_id=manual；source_url 记录；company.db 0 写 | 写公司档案、未审计写入 |
 | 审计 | 数据行与审计 1:1；old/new 完整；fail closed；source_ref 指截图 | 不 1:1、old/new 缺失 |
 | 复核 | 真实 Agent 成功 1 次；建议制未改写入集；问题存证据 | Agent 未成功、复核改了写入集 |
@@ -165,8 +165,8 @@ node docs/acceptance/24-swufe/verify-evidence.mjs docs/acceptance/24-swufe/manif
 - 结论：验收通过（含已知偏差）
 - 日期：2026-10-26
 - 验收人：owner
-- 证据清单：manifest.json sha256 8e8f4ec48ad4cd0df02a004602f996c81ace1556329f2ad25a30d36f2fde1317
-- 备注：live 首验按本 README 执行；确定性回归 334 项通过；证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（MODEL_VAULT_DIR 显式传入，运行后删除副本）；复核 Agent 是 claude -p --tools "" 的本地 MCP 桥，不是 claude mcp serve；列表页 3 场活动均写入；只打开 1 场详情；2 个单位名被页面截断；review 已标 high，未编造；冲突用例为 out-of-band 改 1 行（不触发写网关/审计），不是界面修改；review 返回 7 个问题（2 high、3 medium、2 low：截断单位名/标题/场地、非匹配活动 sourceUrl 留空）；建议制，不修改写入集；原始页面截图含联系方式，已备份到本机 SCREENSHOT_BACKUP_DIR（不入库）。
+- 证据清单：manifest.json sha256 76b876145ce8593360e98f12af482c4861167b5af0e31f20187531c5c834f2da
+- 备注：live 首验按本 README 执行；确定性回归 334 项通过；证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（MODEL_VAULT_DIR 显式传入，运行后删除副本）；复核 Agent 是 claude -p --tools "" 的本地 MCP 桥，不是 claude mcp serve；列表页 3 场活动均写入；只打开 1 场详情；2 个单位名被页面截断；review 已标 high，未编造；冲突用例为 out-of-band 改 1 行（不触发写网关/审计），不是界面修改；review 返回 7 个问题（2 high、3 medium、2 low：截断单位名/标题/场地、非匹配活动 sourceUrl 留空）；建议制，不修改写入集；复核调用记录只有 step/duration；桥不返回 usage，未显示 tokens/约 ¥；来源卡「最近手动读取」、撤销结果 chip、调用表未单独 live 截图；原始页面截图含联系方式，已备份到本机 SCREENSHOT_BACKUP_DIR（不入库）。
 
 > 签字前必须已运行 §6 校验并通过。**不得**在未执行 live、或校验未通过时填写「验收通过」。
 

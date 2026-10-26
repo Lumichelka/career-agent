@@ -111,6 +111,8 @@
     "2 个单位名被页面截断；review 已标 high，未编造",
     "冲突用例为 out-of-band 改 1 行（不触发写网关/审计），不是界面修改",
     "review 返回 7 个问题（2 high、3 medium、2 low：截断单位名/标题/场地、非匹配活动 sourceUrl 留空）；建议制，不修改写入集",
+    "复核调用记录只有 step/duration；桥不返回 usage，未显示 tokens/约 ¥",
+    "来源卡「最近手动读取」、撤销结果 chip、调用表未单独 live 截图",
     "原始页面截图含联系方式，已备份到本机 SCREENSHOT_BACKUP_DIR（不入库）"
   ]
 }

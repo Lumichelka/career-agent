@@ -268,7 +268,6 @@ async function run() {
       detailPath = backupDetail;
       log('screenshots backed up', screenshotBackupDir);
     }
-    manifest.status = 'passed';
     manifest.runAt = new Date().toISOString();
     manifest.owner = ownerName;
     manifest.environment = {dataDir, screenshotBackup: screenshotBackupDir || undefined, userId: owner.id, taskId: clean.taskId, conflictTaskId: conflict.taskId, commit: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim(), nodeVersion: process.version, edgeVersion: (() => { try { return execFileSync('powershell.exe', ['-NoProfile', '-Command', "(Get-Item 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe').VersionInfo.ProductVersion"], {encoding: 'utf8'}).trim(); } catch { return 'unknown'; } })()};
@@ -308,18 +307,34 @@ async function run() {
     const truncatedNames = (review.issues || []).filter(issue => issue.field === 'company' && /截断|缺少/.test(issue.issue || '')).length;
     if (truncatedNames) knownDeviations.push(truncatedNames + ' 个单位名被页面截断；review 已标 high，未编造');
     knownDeviations.push('冲突用例为 out-of-band 改 1 行（不触发写网关/审计），不是界面修改');
+    knownDeviations.push('复核调用记录只有 step/duration；桥不返回 usage，未显示 tokens/约 ¥');
+    knownDeviations.push('来源卡「最近手动读取」、撤销结果 chip、调用表未单独 live 截图');
     knownDeviations.push(screenshotBackupDir ? '原始页面截图含联系方式，已备份到本机 SCREENSHOT_BACKUP_DIR（不入库）' : '原始页面截图含联系方式，仅保留本机临时路径');
     manifest.knownDeviations = knownDeviations;
-    manifest.signature = {statement: '验收通过（含已知偏差）', date: new Date().toISOString().slice(0, 10), name: ownerName};
-    await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
+    const writeManifest = async (status, signature) => {
+      manifest.status = status;
+      manifest.signature = signature;
+      await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
+    };
+    // 先完成全部终态检查，再写 passed/signature；失败运行只能留下 pending。
+    try {
+      if (auditRatio !== '1:1') throw new Error('audit/data ratio is ' + auditRatio);
+      if (!undoCleanMatches) throw new Error('clean undo does not match before snapshot');
+      if (!agentLeg) throw new Error('agent review leg did not pass');
+      if (skipped < 1 || forced < 1) throw new Error('conflict skip/forced evidence missing');
+    } catch (error) {
+      await writeManifest('pending', {statement: '', date: '', name: ''}).catch(() => {});
+      throw error;
+    }
+    await writeManifest('passed', {statement: '验收通过（含已知偏差）', date: new Date().toISOString().slice(0, 10), name: ownerName});
     log('manifest written', manifestFile);
-
-    if (auditRatio !== '1:1') throw new Error('audit/data ratio is ' + auditRatio);
-    if (!undoCleanMatches) throw new Error('clean undo does not match before snapshot');
-    if (!agentLeg) throw new Error('agent review leg did not pass');
-    if (skipped < 1 || forced < 1) throw new Error('conflict skip/forced evidence missing');
-
-    const verify = execFileSync(process.execPath, [verifyFile, manifestFile], {cwd: root, encoding: 'utf8'});
+    let verify;
+    try {
+      verify = execFileSync(process.execPath, [verifyFile, manifestFile], {cwd: root, encoding: 'utf8'});
+    } catch (error) {
+      await writeManifest('pending', {statement: '', date: '', name: ''}).catch(() => {});
+      throw new Error('证据包校验未通过：' + String(error.stdout || error.stderr || error.message || error).slice(0, 2000));
+    }
     log('verify', verify.trim());
     // sign README only after verifier success; CONFIRM_SIGN was checked before writing the manifest
     let readme = await readFile(readmeFile, 'utf8');
