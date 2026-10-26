@@ -9,6 +9,8 @@ import {spawn} from 'node:child_process';
 import {createApp} from '../src/server/app.mjs';
 import {Client, StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
 import {StdioClientTransport} from '@modelcontextprotocol/client/stdio';
+import {RecruitStore} from '../src/recruit/store.mjs';
+import {callTool} from '../src/tools/execute.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const BRIDGE = join(root, 'src', 'mcp', 'stdio-bridge.mjs');
@@ -255,6 +257,40 @@ test('stdio-only 宿主经随包桥接到 /mcp：ListTools、CallTool 都可用'
   const result = await client.callTool({name: 'company_list', arguments: {}});
   assert.ok(!result.isError);
   assert.equal(JSON.parse(result.content[0].text).status, 'readable');
+});
+
+test('career_feed 入站 MCP 与 /chat 读同一用户数据，rawText 默认不带', async t => {
+  const {app, alice} = await enabledApp(t);
+  const {token} = await issue(app, alice.cookie, 'feed-client');
+  const tenantDir = join(app.dataDir, 'users', alice.user.id, '.data');
+  const store = RecruitStore.open(join(tenantDir, 'recruit.db'));
+  store.upsertEvent({
+    id: 'f'.repeat(24), sourceId: 'manual', school: '测试大学', city: '成都', kind: '宣讲会',
+    title: 'MCP 信息流活动', company: '信息流公司', startAt: '2026-12-10T14:00:00+08:00',
+    fetchedAt: new Date().toISOString(), confidence: 0.8, rawText: '联系人 张三 电话 13800138000'
+  });
+  store.close();
+
+  const client = await connect(app, token, 'auto', t);
+  const {tools} = await client.listTools();
+  assert.ok(tools.some(tool => tool.name === 'career_feed'), '入站工具面应暴露 career_feed');
+
+  const viaMcp = await client.callTool({name: 'career_feed', arguments: {}});
+  assert.ok(!viaMcp.isError);
+  const feed = JSON.parse(viaMcp.content[0].text);
+  assert.equal(feed.status, 'readable');
+  assert.equal(feed.entries.length, 1);
+  assert.equal(feed.entries[0].record.title, 'MCP 信息流活动');
+  assert.equal(feed.entries[0].rawText, undefined, 'rawText 默认不返回');
+
+  const direct = await callTool('career_feed', {}, {config: {recruitDir: tenantDir, dataDir: tenantDir, userId: alice.user.id}});
+  assert.deepEqual(feed.entries, direct.entries, '入站 MCP 与 /chat 必须读到同一份数据');
+  assert.equal(feed.nextCursor, direct.nextCursor);
+
+  const withRaw = await client.callTool({name: 'career_feed', arguments: {includeRawText: true}});
+  const raw = JSON.parse(withRaw.content[0].text);
+  assert.ok(raw.entries[0].rawText);
+  assert.ok(!raw.entries[0].rawText.includes('13800138000'), '显式请求原文时也要脱敏');
 });
 
 test('stdio 桥缺少配置时直接退出并说明原因', async () => {
