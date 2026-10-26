@@ -148,6 +148,32 @@ function fallbackBlock(task) {
   return '<section class="task-block task-fallback"><h5>回退建议</h5><div class="task-actions"><button type="button" data-fallback-task="' + escape(task.id) + '" data-fallback-kind="' + escape(suggestion.kind) + '" data-fallback-session="' + escape(task.sessionId || '') + '" data-fallback-message="' + escape(suggestion.message || '') + '">' + escape(label) + '</button></div></section>';
 }
 
+// 外部 Agent 复核（#40）：建议制结果只展示问题数与问题列表；不可用时标错误码与恢复建议。
+function reviewBlock(task) {
+  const review = task.review;
+  if (!review) return '';
+  if (review.status === 'unavailable') {
+    const code = review.error?.code ? ' · ' + escape(review.error.code) : '';
+    const message = review.error?.message ? '：' + escape(review.error.message) : '';
+    const recovery = review.error?.recovery ? '（' + escape(review.error.recovery) + '）' : '';
+    return '<section class="task-block task-review" data-review="unavailable"><h5>外部 Agent 复核</h5><p class="task-review-unavailable">复核不可用' + code + message + recovery + '</p></section>';
+  }
+  const count = Number(review.count) || 0;
+  const summary = review.status === 'issues'
+    ? '复核 ' + count + ' 个问题'
+    : review.status === 'unparsed' ? '已复核（未解析出问题列表）' : '已复核（未发现问题）';
+  let body;
+  if (review.status === 'issues') {
+    const rows = (review.issues || []).map(item => '<li><span class="review-row">' + escape(item.row || '') + '</span><span class="review-field">' + escape(item.field || '') + '</span><span class="review-issue">' + escape(item.issue || '') + '</span>' + (item.severity ? '<span class="review-severity">' + escape(item.severity) + '</span>' : '') + '</li>').join('');
+    body = '<ul class="task-review-list">' + rows + '</ul><p class="placeholder">复核是建议制：以上问题不会自动修改写入集。</p>';
+  } else if (review.status === 'unparsed') {
+    body = '<pre class="task-review-raw">' + escape(review.raw || '') + '</pre><p class="placeholder">原始返回已存证据；写入未被修改。</p>';
+  } else {
+    body = '<p class="placeholder">复核为建议制，未发现问题，写入集未被修改。</p>';
+  }
+  return '<section class="task-block task-review" data-review="' + escape(review.status) + '"><details><summary>' + escape(summary) + '</summary>' + body + '</details></section>';
+}
+
 function card(task) {
   const counts = task.counts || {};
   const canStop = ['queued', 'running', 'waiting_confirmation', 'blocked'].includes(task.state);
@@ -161,6 +187,7 @@ function card(task) {
     + '<p class="task-phase">' + escape(task.phase || '') + '</p>'
     + '<div class="task-meta">自动写入 ' + (Number(counts.writes) || 0) + ' 条 · 批次 ' + (Number(counts.batches) || 0) + ' · 工具 ' + (Number(counts.tools) || 0) + ' · 证据 ' + (Number(counts.evidence) || 0) + ' · 草稿 ' + (Number(counts.drafts) || 0) + '</div>'
     + error
+    + reviewBlock(task)
     + fallbackBlock(task)
     + confirmationBlock(task)
     + evidenceBlock(task)
