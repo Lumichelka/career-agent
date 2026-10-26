@@ -11,6 +11,7 @@ export default {
   capabilities: {list: 'static', detail: 'none', projects: 'none'},
   enabled: false,
   listUrl: 'https://scc.cufe.edu.cn/',
+  sourceCheck: {enabled: true},
   note: "当前网络请求失败；重试/浏览器仍失败时只走公众号。",
   fallback: '官方微信公众号「中央财经大学就业指导中心」+ 人工转发链接解析'
 };
