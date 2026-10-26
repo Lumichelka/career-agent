@@ -6,8 +6,10 @@ import {join, dirname} from 'node:path';
 import {PRESETS, isPrivateHostname} from './providers.mjs';
 import {estimateCallCost, formatCny} from './prices.mjs';
 
-export const BACKEND_CHOICES = ['api', 'local', 'codex'];
+// 'agent' 是真实后端种类：外部 Agent 只提供 text + tools，永远不作为视觉候选。
+export const BACKEND_CHOICES = ['api', 'local', 'codex', 'agent'];
 export const BACKEND_KINDS = ['api', 'local', 'codex', 'agent'];
+export {imageContentFor} from './image-parts.mjs';
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_IMAGE_TOTAL_BYTES = 8 * 1024 * 1024;
 export const MAX_IMAGE_COUNT = 5;
@@ -87,19 +89,8 @@ export function validateImages(attachments = []) {
   return {images, totalBytes, error: ''};
 }
 
-// 请求体形状由 api-model 负责；这里按协议给出图片段，日志与证据永不使用 dataUrl。
-export function imageContentFor(protocol, images = []) {
-  const list = (Array.isArray(images) ? images : []).filter(image => image && typeof image.dataUrl === 'string');
-  if (!list.length) return null;
-  if (protocol === 'messages') return list.map(image => ({
-    type: 'image',
-    source: {type: 'base64', media_type: image.mime || 'image/png', data: image.dataUrl.replace(/^data:[^;]+;base64,/, '')}
-  }));
-  if (protocol === 'responses') return list.map(image => ({type: 'input_image', image_url: image.dataUrl}));
-  return list.map(image => ({type: 'image_url', image_url: {url: image.dataUrl}}));
-}
-
-// 每用户「上次选择」：API 侧与 Agent 侧分开存，本票只写 API 侧（api/local/codex）。
+// 每用户「上次选择」：{api, agent} 两个槽位分开存，互不覆盖。
+// api 槽位存 api/local/codex/agent（当前生效的种类），agent 槽位存上次选中的外部 Agent id。
 export class BackendChoice {
   constructor(dir) {
     if (!dir) throw new Error('BackendChoice 需要用户数据目录');
@@ -125,9 +116,15 @@ export class BackendChoice {
     return BACKEND_CHOICES.includes(settings?.mode) ? settings.mode : 'api';
   }
 
-  async set(kind) {
+  // 选中外部 Agent 时同时写 agent 槽位；切回模型 API 时保留 agent 槽位，下次仍可一键切回。
+  async set(kind, {agentId = ''} = {}) {
     if (!BACKEND_CHOICES.includes(kind)) throw new Error('未知的后端');
-    this.state = {...this.state, api: kind};
+    const next = {...this.state, api: kind};
+    if (kind === 'agent') {
+      if (!agentId) throw new Error('选择外部 Agent 需要 agentId');
+      next.agent = String(agentId);
+    }
+    this.state = next;
     await mkdir(dirname(this.file), {recursive: true});
     await writeFile(this.file, JSON.stringify(this.state, null, 2), 'utf8');
     return this.snapshot();
@@ -194,8 +191,9 @@ function unconfiguredEntry(kind) {
   };
 }
 
-// 注册表：codex 占一个槽（owner 才可用），一个已配置的 API/本地接口占一个槽，另一个槽给配置入口。
-export function backendEntries({settings = {}, user = null} = {}) {
+// 注册表：codex 占一个槽（owner 才可用），一个已配置的 API/本地接口占一个槽，另一个槽给配置入口；
+// 每个启用中的外部 Agent 各占一个 agent 槽（只提供 text + tools + agent_tools，永不 vision）。
+export function backendEntries({settings = {}, user = null, agents = []} = {}) {
   const isOwner = user?.name === 'owner';
   const entries = [{
     kind: 'codex',
@@ -215,18 +213,37 @@ export function backendEntries({settings = {}, user = null} = {}) {
     if (endpoint && endpoint.kind === kind) continue;
     entries.push(unconfiguredEntry(kind));
   }
-  entries.push({
-    kind: 'agent',
-    label: '外部 Agent',
-    capabilities: ['text', 'tools'], // 永不 vision
-    preset: '',
-    model: '',
-    configured: false,
-    approxCostPerCall: null,
-    approxCostLabel: '',
-    configTarget: 'agent-settings',
-    note: '外部 Agent 的配置与连接在 #34 接入'
-  });
+  const enabledAgents = (Array.isArray(agents) ? agents : []).filter(agent => agent && agent.id && agent.enabled !== false);
+  for (const agent of enabledAgents) {
+    entries.push({
+      kind: 'agent',
+      agentId: String(agent.id),
+      label: '外部 Agent · ' + String(agent.name || '未命名'),
+      capabilities: ['text', 'tools', 'agent_tools'],
+      preset: '',
+      model: '',
+      configured: true,
+      approxCostPerCall: null,
+      approxCostLabel: '',
+      configTarget: 'agent-settings',
+      note: '外部 Agent 只做文本与工具；不读图，也不作为视觉候选。'
+    });
+  }
+  if (!enabledAgents.length) {
+    entries.push({
+      kind: 'agent',
+      agentId: '',
+      label: '外部 Agent · 待配置',
+      capabilities: ['text', 'tools', 'agent_tools'],
+      preset: '',
+      model: '',
+      configured: false,
+      approxCostPerCall: null,
+      approxCostLabel: '',
+      configTarget: 'agent-settings',
+      note: '在「模型与接口设置」的外部 Agent 页签添加并启用一个 Agent'
+    });
+  }
   return entries;
 }
 
@@ -240,13 +257,14 @@ function toCard(entry) {
     configured: entry.configured === true,
     preset: entry.preset || '',
     model: entry.model || '',
+    agentId: entry.agentId || '',
     configTarget: entry.configTarget || '',
     note: entry.note || ''
   };
 }
 
 function toBackend(entry) {
-  return {kind: entry.kind, label: entry.label, preset: entry.preset || '', model: entry.model || '', capabilities: [...entry.capabilities]};
+  return {kind: entry.kind, label: entry.label, preset: entry.preset || '', model: entry.model || '', agentId: entry.agentId || '', capabilities: [...entry.capabilities]};
 }
 
 function compareCards(a, b) {
@@ -269,23 +287,39 @@ export function candidatesFor(entries = [], capabilities = ['text', 'tools']) {
     .sort(compareCards);
 }
 
+function choiceSnapshot(choice) {
+  return typeof choice?.snapshot === 'function' ? choice.snapshot() : (choice || {});
+}
+
 function currentKindOf(settings = {}, choice = null) {
-  const saved = typeof choice?.snapshot === 'function' ? choice.snapshot().api : choice?.api;
+  const saved = choiceSnapshot(choice).api;
   if (BACKEND_CHOICES.includes(saved)) return saved;
   return BACKEND_CHOICES.includes(settings?.mode) ? settings.mode : 'api';
 }
 
-function cardForKind(kind, settings) {
+function selectedAgentId(choice) {
+  return String(choiceSnapshot(choice).agent || '');
+}
+
+// agent 槽位按 id 精确匹配；只有一个启用 Agent 时可以省略 id。
+function entryFor(entries, kind, agentId = '') {
+  if (kind !== 'agent') return entries.find(entry => entry.kind === kind) || null;
+  const enabled = entries.filter(entry => entry.kind === 'agent' && entry.configured);
+  return enabled.find(entry => entry.agentId === String(agentId || '')) || (enabled.length === 1 ? enabled[0] : null);
+}
+
+function cardForKind(kind, settings, agentId = '') {
   return {
     kind,
-    label: backendLabelFor(kind, settings),
+    label: kind === 'agent' ? '外部 Agent' : backendLabelFor(kind, settings),
     capabilities: [],
     approxCostPerCall: null,
     approxCostLabel: '',
     configured: false,
     preset: settings?.preset || '',
     model: settings?.model || '',
-    configTarget: kind === 'codex' ? 'owner-only' : 'model-settings',
+    agentId: kind === 'agent' ? String(agentId || '') : '',
+    configTarget: kind === 'codex' ? 'owner-only' : kind === 'agent' ? 'agent-settings' : 'model-settings',
     note: ''
   };
 }
@@ -295,27 +329,32 @@ function candidateMessage(current, capabilities) {
     if (current.kind === 'agent') return '外部 Agent 不读图，请选择视觉模型 API 或去掉图片后重试。';
     return '当前后端「' + (current.label || current.kind) + '」不支持本次需要的视觉能力。请选择一个候选后端；也可以去掉图片后重试。';
   }
+  if (current.kind === 'agent') return '外部 Agent 还没有配置或已停用，请选择一个候选后端，或到「模型与接口设置」的外部 Agent 页签启用一个。';
   return '当前后端「' + (current.label || current.kind) + '」还没有配置好，请选择一个候选后端或先到「模型与接口设置」完成配置。';
 }
 
 // 回退建议：一次失败只给一个同能力、已配置的下一个候选；排除当前后端。
+// 外部 Agent 不参与回退建议（§3.5：不跨 Agent、不降级到模型 API），当前是 Agent 时不给建议。
 // 顺序由 candidatesFor 保证：已配置在前 → 约每次费用升序（本机 ¥0 最前）→ 无价排后。
 export function pickFallback(entries = [], {capabilities = ['text', 'tools'], currentKind = ''} = {}) {
+  if (currentKind === 'agent') return null;
   // candidatesFor 会排掉非 owner 的 Codex、视觉任务里的 Agent，并做能力过滤。
   const card = candidatesFor(entries, capabilities)
     .filter(item => item.configured === true)
+    .filter(item => item.kind !== 'agent')
     .find(item => item.kind !== currentKind);
   return card || null;
 }
 
 // 回退建议的门槛：锁定 / 本轮已有工具成功 / 已建议满 3 次 / 连续失败超过 3 次，都不给。
 // depth 由客户端在 /api/chat 里递增；streak 是服务端按会话累计的兜底计数，客户端不老实也封顶。
-export function suggestFallback({settings = {}, user = null, capabilities = ['text', 'tools'], currentKind = '', depth = 0, streak = 1, locked = false, hadToolSuccess = false} = {}) {
+export function suggestFallback({settings = {}, user = null, agents = [], capabilities = ['text', 'tools'], currentKind = '', depth = 0, streak = 1, locked = false, hadToolSuccess = false} = {}) {
   if (locked) return {ok: false, reason: 'LOCKED'};
   if (hadToolSuccess) return {ok: false, reason: 'TOOL_SIDE_EFFECT'};
   if (Number(depth) >= 3) return {ok: false, reason: 'DEPTH_LIMIT'};
   if (Number(streak) > 3) return {ok: false, reason: 'FAILURE_LIMIT'};
-  const card = pickFallback(backendEntries({settings, user}), {capabilities, currentKind});
+  if (currentKind === 'agent') return {ok: false, reason: 'AGENT_NO_FALLBACK'};
+  const card = pickFallback(backendEntries({settings, user, agents}), {capabilities, currentKind});
   if (!card) return {ok: false, reason: 'NO_CANDIDATE'};
   return {
     ok: true,
@@ -333,12 +372,13 @@ export function suggestFallback({settings = {}, user = null, capabilities = ['te
 }
 
 // 本轮开始前解析：满足就返回 backend；不满足就停下列候选（不降级、不猜）。
-export function resolveTurn({settings = {}, choice = null, user = null, requested = '', attachments = []} = {}) {
+export function resolveTurn({settings = {}, choice = null, user = null, agents = [], requested = '', requestedAgent = '', attachments = []} = {}) {
   const capabilities = turnCapabilities(attachments);
-  const entries = backendEntries({settings, user});
+  const entries = backendEntries({settings, user, agents});
   const currentKind = BACKEND_CHOICES.includes(requested) ? requested : currentKindOf(settings, choice);
-  const currentEntry = entries.find(entry => entry.kind === currentKind) || null;
-  const current = currentEntry ? toCard(currentEntry) : cardForKind(currentKind, settings);
+  const agentId = requestedAgent || selectedAgentId(choice);
+  const currentEntry = entryFor(entries, currentKind, agentId);
+  const current = currentEntry ? toCard(currentEntry) : cardForKind(currentKind, settings, agentId);
   const candidates = candidatesFor(entries, capabilities);
   const satisfied = !!currentEntry && currentEntry.configured && capabilities.every(capability => currentEntry.capabilities.includes(capability));
   if (satisfied) return {ok: true, code: 'OK', capabilities, backend: toBackend(currentEntry), current, candidates};
@@ -346,12 +386,13 @@ export function resolveTurn({settings = {}, choice = null, user = null, requeste
 }
 
 // 顶栏要的视图：当前后端、能力、文本任务的候选（视觉候选在 candidate_required 事件里给）。
-export function publicBackends({settings = {}, choice = null, user = null} = {}) {
+// 两个入口（模型 API / 外部 Agent）各自回传自己的槽位；Agent 只出现在文本候选里。
+export function publicBackends({settings = {}, choice = null, user = null, agents = []} = {}) {
   const currentKind = currentKindOf(settings, choice);
-  const entries = backendEntries({settings, user});
-  const currentEntry = entries.find(entry => entry.kind === currentKind) || null;
-  const current = currentEntry ? toCard(currentEntry) : cardForKind(currentKind, settings);
-  const snapshot = typeof choice?.snapshot === 'function' ? choice.snapshot() : (choice || {});
+  const snapshot = choiceSnapshot(choice);
+  const entries = backendEntries({settings, user, agents});
+  const currentEntry = entryFor(entries, currentKind, snapshot.agent);
+  const current = currentEntry ? toCard(currentEntry) : cardForKind(currentKind, settings, snapshot.agent);
   return {
     current: {...current, locked: false},
     capabilities: currentEntry ? [...currentEntry.capabilities] : [],
@@ -363,21 +404,24 @@ export function publicBackends({settings = {}, choice = null, user = null} = {})
 }
 
 // 选择：只有已配置的后端能成为当前选择；codex 仅 owner。切换对下一轮生效。
-export async function selectBackend({settings = {}, choice = null, user = null, kind} = {}) {
+export async function selectBackend({settings = {}, choice = null, user = null, agents = [], kind, agentId = ''} = {}) {
   if (!BACKEND_CHOICES.includes(kind)) return {ok: false, status: 400, code: 'INVALID_BACKEND', message: '未知的后端'};
-  const entries = backendEntries({settings, user});
-  const entry = entries.find(item => item.kind === kind && item.configured);
-  if (!entry) {
+  const entries = backendEntries({settings, user, agents});
+  const entry = entryFor(entries, kind, agentId) || (kind === 'agent' ? null : entries.find(item => item.kind === kind && item.configured));
+  if (!entry || entry.configured !== true) {
     if (kind === 'codex' && user?.name !== 'owner') {
       return {ok: false, status: 403, code: 'CODEX_OWNER_ONLY', message: '只有 owner 能使用本机 Codex，请配置自己的模型 API 或本地模型。'};
     }
+    if (kind === 'agent') {
+      return {ok: false, status: 409, code: 'AGENT_NOT_CONFIGURED', message: '还没有已启用的外部 Agent，请到「模型与接口设置」的外部 Agent 页签添加并启用。', configTarget: 'agent-settings'};
+    }
     return {ok: false, status: 409, code: 'BACKEND_NOT_CONFIGURED', message: '这个后端还没有配置。', configTarget: 'model-settings'};
   }
-  if (choice && typeof choice.set === 'function') await choice.set(kind);
+  if (choice && typeof choice.set === 'function') await choice.set(kind, {agentId: entry.agentId || ''});
   return {
     ok: true,
     code: 'OK',
     current: toCard(entry),
-    choices: {api: kind, agent: (typeof choice?.snapshot === 'function' ? choice.snapshot().agent : '') || ''}
+    choices: {api: kind, agent: (choiceSnapshot(choice).agent) || ''}
   };
 }

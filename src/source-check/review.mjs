@@ -1,7 +1,7 @@
 // 外部 Agent 文本复核（#40）：只把抽取 JSON 与来源元数据交给一个只读、收 prompt 的工具，
 // 只要求返回问题列表 {row, field, issue, severity}；建议制，不修改写入集、不写库、不读图。
 // 复核调用使用 #34/#35 的连接与结果信封；失败只降级成「复核不可用」，不阻断写库。
-import {ExternalToolset, externalError, EXTERNAL_RECOVERY} from '../agents/tools.mjs';
+import {ExternalToolset, externalError, EXTERNAL_RECOVERY, selectPromptTool} from '../agents/tools.mjs';
 
 export const REVIEW_STEP = 'review';
 export const REVIEW_MAX_ISSUES = 100;
@@ -73,16 +73,8 @@ function reviewCallRecord({agent = {}, tool = '', at = new Date().toISOString(),
   return record;
 }
 
-// 只读且收 prompt 的工具才是复核工具；写工具、缺 prompt 的工具一律不选。
-const PROMPT_KEYS = ['prompt', 'query', 'text', 'message', 'input', 'content'];
-export function selectReviewTool(tools = []) {
-  const readOnly = (Array.isArray(tools) ? tools : []).filter(tool => tool && tool.readOnly === true);
-  for (const key of PROMPT_KEYS) {
-    const found = readOnly.find(tool => tool.parameters?.properties && Object.hasOwn(tool.parameters.properties, key));
-    if (found) return {tool: found, key};
-  }
-  return null;
-}
+// 只读且收 prompt 的工具才是复核工具；实现与外部 Agent 聊天执行共用 selectPromptTool。
+export const selectReviewTool = selectPromptTool;
 
 function reviewerError(message, {code = 'UNSUPPORTED', status = 400, recovery = EXTERNAL_RECOVERY.UNSUPPORTED, agent = null, tool = '', attempted = false} = {}) {
   const error = new Error(message);
@@ -95,10 +87,10 @@ function reviewerError(message, {code = 'UNSUPPORTED', status = 400, recovery = 
   return error;
 }
 
-// 默认复核器：取一个启用的外部 Agent，pin 后只调用只读、收 prompt 的工具。
-// 复核由用户发起来源校对时明确触发，且只发送已落在任务证据里的抽取 JSON，所以这里只做一次出网放行；
-// 不把上游写工具、截图或任务工具面交给它。
-export function createExternalReviewer({config, connections, home = '', evidenceDir = '', taskId = '', emit = () => {}, now = Date.now, callTimeoutMs = 60000} = {}) {
+// 默认复核器：取一个已启用且用户已同意出网的外部 Agent，pin 后只调用只读、收 prompt 的工具。
+// 复核在后台任务里跑，不能凭空替用户点头：只有该用户为这个 Agent 持久化过「以后不再问」才发送，
+// 否则本次不发送任何内容，标 AGENT_CONSENT_REQUIRED 让用户去设置里明确同意。
+export function createExternalReviewer({userId = '', config, connections, home = '', evidenceDir = '', taskId = '', emit = () => {}, now = Date.now, callTimeoutMs = 60000} = {}) {
   if (!config || !connections) throw new Error('外部复核需要 config 与 connections');
   return async ({extraction, source, signal} = {}) => {
     const enabled = (config.agents || []).filter(agent => agent && agent.enabled !== false);
@@ -109,9 +101,26 @@ export function createExternalReviewer({config, connections, home = '', evidence
         attempted: false
       });
     }
+    const consented = enabled.filter(agent => typeof config.outboundConsent === 'function' && config.outboundConsent(agent.id)?.neverAsk === true);
+    if (!consented.length) {
+      throw reviewerError('外部 Agent 复核需要你先同意首次出网，本次没有发送任何内容。', {
+        code: 'AGENT_CONSENT_REQUIRED',
+        recovery: '在「模型与接口设置」→「外部 Agent」里点「允许出网」（或在对话里选择「以后不再问」），然后重试来源校对。',
+        attempted: false
+      });
+    }
+    // 只把已同意的 Agent 放进这次 pin；不要让其他未同意 Agent 的工具被选中后收到内容。
+    const scopedConfig = {
+      agents: consented,
+      outboundConsent: id => config.outboundConsent(id),
+      approveOutbound: (id, options) => (typeof config.approveOutbound === 'function' ? config.approveOutbound(id, options) : null)
+    };
     const toolset = new ExternalToolset({
-      userId: '', taskId, home, evidenceDir, config, connections,
-      emit, askConsent: async () => ({decision: 'once'}), now, callTimeoutMs
+      userId, taskId, home, evidenceDir, config: scopedConfig, connections,
+      emit,
+      // 已持久化同意的 Agent 会在 ensureConsent 里直接放行；这个兜底绝不静默发送。
+      askConsent: async () => ({decision: 'reject', message: '复核没有新的出网同意，本次没有发送内容。'}),
+      now, callTimeoutMs
     });
     let snapshot;
     try {

@@ -5,13 +5,15 @@
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
-import {ensureAuditSchema, hasAuditSchema, listAuditBatches} from './audit-store.mjs';
+import {countAuditRows, ensureAuditSchema, hasAuditSchema, listAuditBatches} from './audit-store.mjs';
 import {WRITE_DOMAINS} from './domains.mjs';
 
 // 每个自动写入域一个库；域清单与写网关共用，新增域只改 domains.mjs。
 export const AUDIT_DOMAINS = WRITE_DOMAINS;
 // 清空必须原样输入这句；接口与界面共用同一份文案（接口响应里回传，界面不用自己抄）。
 export const CLEAR_PHRASE = '清空我的审计';
+// 审计体量提示阈值：达到后 /api/audit 回传提示，全局审计界面建议导出后清空。
+export const AUDIT_VOLUME_THRESHOLD = 2000;
 const MAX_LIMIT = 200;
 
 export class AuditQueryError extends Error {
@@ -60,7 +62,8 @@ function emptyView(filters) {
     counts: {batches: 0, rows: 0, create: 0, update: 0, delete: 0, skip: 0},
     filters,
     lastClearedAt: null,
-    clearPhrase: CLEAR_PHRASE
+    clearPhrase: CLEAR_PHRASE,
+    volume: {rows: 0, threshold: AUDIT_VOLUME_THRESHOLD, hint: '', shouldPrompt: false}
   };
 }
 
@@ -69,6 +72,7 @@ export function readAudit({dir, userId, taskId = '', batchId = '', limit = 50, f
   if (!dir || !userId) return emptyView(filters);
   const batches = [];
   let lastClearedAt = null;
+  let totalRows = 0;
   for (const entry of AUDIT_DOMAINS) {
     const file = join(dir, entry.file);
     if (!existsSync(file)) continue;
@@ -77,6 +81,7 @@ export function readAudit({dir, userId, taskId = '', batchId = '', limit = 50, f
       db = new DatabaseSync(file);
       db.exec('PRAGMA busy_timeout = 5000');
       if (!hasAuditSchema(db)) continue;
+      totalRows += countAuditRows(db, userId);
       try {
         const meta = db.prepare('SELECT last_cleared_at FROM audit_meta WHERE domain=?').get(entry.domain);
         if (meta?.last_cleared_at && (!lastClearedAt || String(meta.last_cleared_at) > lastClearedAt)) lastClearedAt = String(meta.last_cleared_at);
@@ -98,7 +103,14 @@ export function readAudit({dir, userId, taskId = '', batchId = '', limit = 50, f
       if (counts[row.action] !== undefined) counts[row.action] += 1;
     }
   }
-  return {batches: capped, counts, filters, lastClearedAt, clearPhrase: CLEAR_PHRASE};
+  const shouldPrompt = totalRows >= AUDIT_VOLUME_THRESHOLD;
+  const volume = {
+    rows: totalRows,
+    threshold: AUDIT_VOLUME_THRESHOLD,
+    shouldPrompt,
+    hint: shouldPrompt ? '审计已 ' + totalRows + ' 条，建议导出后清空' : ''
+  };
+  return {batches: capped, counts, filters, lastClearedAt, clearPhrase: CLEAR_PHRASE, volume};
 }
 
 async function handleAuditQuery({dir, userId, url}) {

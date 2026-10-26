@@ -38,7 +38,7 @@ const state = {
   open: false, scope: 'task', taskId: '', batchId: '', all: false,
   batches: [], preview: null, previewByEvent: new Map(), selectedBatchId: '',
   results: new Map(), summary: null, error: '', mobileDetail: false, busy: false, force: null,
-  filters: emptyFilters(), auditCounts: {batches: 0, rows: 0}, lastClearedAt: '', clearPhrase: CLEAR_PHRASE,
+  filters: emptyFilters(), auditCounts: {batches: 0, rows: 0}, auditVolume: null, lastClearedAt: '', clearPhrase: CLEAR_PHRASE,
   notice: '', exporting: false, clearing: false
 };
 
@@ -85,6 +85,7 @@ function toolbarHtml() {
     '<button type="button" class="audit-clear-open" data-audit-clear-open>清空我的审计</button>' +
     '</div>' +
     '<p class="audit-toolbar-meta" id="audit-toolbar-meta"></p>' +
+    '<p class="audit-volume-hint" id="audit-volume-hint" role="status" hidden></p>' +
     '</div>';
 }
 
@@ -121,6 +122,12 @@ function renderToolbar() {
   if (state.lastClearedAt) parts.push('上次清空 ' + timeLabel(state.lastClearedAt));
   if (state.clearPhrase) parts.push('清空需输入「' + state.clearPhrase + '」');
   meta.textContent = parts.join(' · ');
+  const volume = document.getElementById('audit-volume-hint');
+  if (volume) {
+    const shouldPrompt = state.auditVolume?.shouldPrompt === true;
+    volume.hidden = !shouldPrompt;
+    volume.textContent = shouldPrompt ? (state.auditVolume.hint || ('审计已 ' + state.auditVolume.rows + ' 条，建议导出后清空')) : '';
+  }
 }
 
 async function applyFilters() {
@@ -214,6 +221,8 @@ function ensureAuditStyle() {
     '.audit-toolbar-actions button{border:1px solid #d9e5dc;background:#fff;border-radius:8px;padding:5px 10px;font-size:11px;color:#3f6f57;white-space:nowrap}',
     '.audit-toolbar-actions button.audit-clear-open{border-color:#e3c6a8;color:#8a4f17}',
     '.audit-toolbar-meta{margin:0;font-size:10px;color:#8b9b91;line-height:1.6;word-break:break-word}',
+    '.audit-volume-hint{margin:0;border:1px solid #e8d3a8;background:#fdf6e7;color:#6b4f17;border-radius:8px;padding:5px 8px;font-size:11px;line-height:1.7;word-break:break-word}',
+    '.audit-volume-hint[hidden]{display:none}',
     '#audit-clear-dialog{border:0;border-radius:14px;padding:0;width:min(440px,92vw);max-width:92vw;background:#fff;box-shadow:0 24px 70px #08211640}',
     '#audit-clear-dialog::backdrop{background:#0b1f1880}',
     '.audit-clear-form{padding:16px 18px;display:grid;gap:10px;min-width:0}',
@@ -434,6 +443,7 @@ async function loadData() {
     if (state.scope === 'all') {
       state.auditCounts = audit.counts || {batches: state.batches.length, rows: state.batches.reduce((sum, batch) => sum + (batch.rows || []).length, 0)};
     }
+    state.auditVolume = audit.volume || null;
     state.lastClearedAt = audit.lastClearedAt || '';
     state.clearPhrase = audit.clearPhrase || CLEAR_PHRASE;
     state.preview = preview;
@@ -534,6 +544,7 @@ async function openAll() {
   state.filters = emptyFilters();
   state.notice = '';
   state.auditCounts = {batches: 0, rows: 0};
+  state.auditVolume = null;
   els?.toolbarSlot.replaceChildren();
   openLayer();
   render();

@@ -230,7 +230,7 @@
     const mrtrValue = draft ? draft.mrtr : (agent?.mrtr || {sampling: true, elicitation: true});
     const stdio = transport === 'stdio';
     const url = agent?.http?.url || '';
-    const tokenPlaceholder = agent?.hasToken ? '已保存（' + (agent.tokenMask || '••••••') + '），留空不修改' : '粘贴 token（只存 KeyVault，不回显）';
+    const tokenPlaceholder = agent?.hasToken ? '已保存（' + (agent.tokenMask || '••••••') + '），留空不修改' : '粘贴凭据（只存 KeyVault，不回显）';
     const headerPlaceholder = agent?.http?.hasHeaderValue ? '已保存 · 留空不修改' : '自定义 header 值（可选）';
     const transportOptions = transports.map(item =>
       '<label class="' + (item === transport ? 'on' : '') + '"><input type="radio" name="agents-transport" value="' + esc(item) + '"' + (item === transport ? ' checked' : '') + '> ' + esc(transportLabel(item)) + '</label>'
@@ -247,7 +247,7 @@
           '<p class="agents-hint">公网必须 HTTPS；本机 / 私网 HTTP 需要下面显式允许。' + (agent?.hasUrlCredentials ? ' URL 里的用户信息或查询串已作为凭据保存在 KeyVault，界面只显示脱敏地址。' : '') + '</p></div>' +
           '<div class="agents-field check"><label><input id="agents-private" type="checkbox"' + ((draft ? draft.allowPrivateHttp : agent?.http?.allowPrivateHttp) ? ' checked' : '') + '> 允许局域网 HTTP（本机 / 私网地址）</label></div>' +
           '<div class="agents-field"><label for="agents-token">凭据</label><input id="agents-token" type="password" autocomplete="off" value="' + esc(draft ? draft.token || '' : '') + '" placeholder="' + esc(tokenPlaceholder) + '">' +
-          '<p class="agents-hint">Bearer token 只存 KeyVault，不写进提示词、trace 或证据；401 报 AUTH_FAILED，不做 OAuth 自动刷新。</p></div>' +
+          '<p class="agents-hint">Bearer 凭据只存 KeyVault，不写进提示词、trace 或证据；401 报 AUTH_FAILED，不做 OAuth 自动刷新。</p></div>' +
           '<div class="agents-field"><label for="agents-header">自定义 header（可选）</label><input id="agents-header" type="text" value="' + esc(draft ? draft.headerName : (agent?.http?.headerName || '')) + '" placeholder="例如 X-API-Key；留空走 Authorization: Bearer">' +
           '<input id="agents-header-value" type="password" autocomplete="off" value="' + esc(draft ? draft.headerValue || '' : '') + '" placeholder="' + esc(headerPlaceholder) + '"></div>') +
       '<div class="agents-field check"><label><input id="agents-enabled" type="checkbox"' + (enabledValue ? ' checked' : '') + '> 启用这个 Agent</label></div>' +
@@ -275,7 +275,9 @@
       : (agent.http?.url || '');
     return '<div class="agents-detail-head"><button type="button" class="agents-back" data-act="back">← 全部</button>' +
       '<div class="agents-detail-main"><h3>' + esc(agent.name) + ' <span class="agents-tag">' + esc(modeLabel) + '</span>' + (agent.enabled === false ? ' <span class="agents-tag">已停用</span>' : '') + '</h3>' +
-      '<p class="agents-sub">' + esc(display) + (agent.lastConnectedAt ? ' · 最近连接 ' + esc(fmtTime(agent.lastConnectedAt)) : '') + '</p></div>' +
+      '<p class="agents-sub">' + esc(display) + (agent.lastConnectedAt ? ' · 最近连接 ' + esc(fmtTime(agent.lastConnectedAt)) : '') +
+        ' · 出网：' + (agent.outbound?.neverAsk ? '已同意' : '未同意') + '</p></div>' +
+      (agent.outbound?.neverAsk ? '' : '<button type="button" data-act="consent">允许出网</button>') +
       '<button type="button" data-act="reconnect">重连</button></div>' +
       '<div class="agents-subtabs"><button type="button" data-subtab="status" class="' + (state.subtab === 'status' ? 'on' : '') + '">状态与工具</button><button type="button" data-subtab="config" class="' + (state.subtab === 'config' ? 'on' : '') + '">配置</button></div>' +
       '<div>' + (state.subtab === 'config' ? formHtml(agent, false) : statusPane(agent)) + '</div>';
@@ -446,7 +448,9 @@
       state.busy = false;
       state.feedback = result.ok === false
         ? '失败：' + (result.code || 'CONNECT_FAILED') + '。' + (result.recovery || '')
-        : (path === 'test' ? '连接成功，已发现 ' + (result.agent?.tools?.length || 0) + ' 个工具。' : '已刷新。');
+        : path === 'test' ? '连接成功，已发现 ' + (result.agent?.tools?.length || 0) + ' 个工具。'
+          : path === 'consent' ? '已记录出网同意：之后来源校对的文本复核可以直接执行。'
+            : '已刷新。';
       if (result.ok === false) state.error = result.error || '';
       await load();
       if (path === 'refresh' || path === 'reconnect') state.subtab = 'status';
@@ -516,6 +520,7 @@
     if (action === 'test') { await runAction('test', '正在连接并发现工具'); return; }
     if (action === 'refresh') { await runAction('refresh', '正在刷新工具'); return; }
     if (action === 'reconnect') { await runAction('reconnect', '正在重连'); return; }
+    if (action === 'consent') { await runAction('consent', '正在记录出网同意'); return; }
     if (action === 'delete') { await doDelete(); return; }
     if (action === 'add-env') {
       const rows = $('#agents-env-rows');

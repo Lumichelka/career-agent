@@ -59,10 +59,18 @@
     const c = await ZX.refreshModelLabel();
     try { presets = (await ZX.api('model/presets')).presets || []; } catch { presets = []; }
     const presetOptions = presets.map(p => '<option value="' + esc(p.id) + '">' + esc(p.label) + '</option>').join('');
+    // 型号过期只提示、不自动改：用户点这一下才切换；地址、协议与 Key 都保留。
+    const hint = c.modelHint
+      ? '<div id="ms-model-hint" role="alert" style="border:1px solid #e8d3a8;background:#fdf6e7;color:#6b4f17;border-radius:10px;padding:9px 11px;margin:0 0 12px;font-size:12px;line-height:1.8">' +
+        '<b>该型号可能已下线</b>：' + esc(c.modelHint.current) + '。' +
+        '<button type="button" id="ms-switch-model" style="margin-left:8px;border:1px solid #dcc08a;background:#fff;border-radius:7px;padding:3px 9px;font-size:11px;color:#6b4f17">' + esc(c.modelHint.switchLabel || ('切换到 ' + c.modelHint.suggestion.model)) + '</button>' +
+        '<div style="font-size:10.5px;color:#8a6b2f;margin-top:3px">你的配置不会自动改变；也可以继续使用当前型号。</div></div>'
+      : '';
 
     $('#dialog-content').innerHTML = `
       <h2>模型与接口</h2>
       <p class="platform-note">先选供应商预设，通常只需再填一个 API Key。Key 会加密保存在本机，重启后不用重填。</p>
+      ${hint}
       <form id="ms-form" class="model-grid">
         <label>供应商预设
           <select id="ms-preset">${presetOptions}</select>
@@ -87,7 +95,7 @@
           <small>填到 /v1 或服务根地址即可，程序会补协议路径；粘贴带 /chat/completions 的地址也会自动纠正。</small>
         </label>
         <label>模型名
-          <input id="ms-model" placeholder="deepseek-chat">
+          <input id="ms-model" placeholder="deepseek-flash">
         </label>
         <label>API Key
           <input id="ms-key" type="password" autocomplete="off" placeholder="${c.hasKey ? '已保存（' + esc(c.keySource || '') + '），留空表示不修改' : '粘贴你的 Key；本地模型通常不需要'}">
@@ -111,7 +119,7 @@
           <label class="model-check"><input id="ms-fb-enable" type="checkbox">启用备用接口（主接口失败时自动切换）</label>
           <label>备用供应商<select id="ms-fb-preset">${presetOptions}</select></label>
           <label>备用基础地址<input id="ms-fb-base" placeholder="https://open.bigmodel.cn/api/paas/v4"></label>
-          <label>备用模型名<input id="ms-fb-model" placeholder="glm-4-flash"></label>
+          <label>备用模型名<input id="ms-fb-model" placeholder="glm-5.3-flash"></label>
           <label>备用 API Key<input id="ms-fb-key" type="password" autocomplete="off" placeholder="${c.hasFallbackKey ? '已保存，留空不修改' : '可留空'}"></label>
         </details>
         <div class="model-buttons">
@@ -141,6 +149,20 @@
     applyPreset(c.preset || 'custom');
 
     $('#ms-preset').onchange = () => applyPreset(val('#ms-preset'));
+    const switchModel = $('#ms-switch-model');
+    if (switchModel && c.modelHint?.suggestion?.model) switchModel.onclick = async () => {
+      switchModel.disabled = true;
+      try {
+        const result = await ZX.api('model/switch-model', {model: c.modelHint.suggestion.model, preset: c.modelHint.suggestion.preset});
+        $('#ms-model').value = result.model;
+        $('#ms-preset').value = result.preset;
+        $('#ms-model-hint')?.remove();
+        feedback('已切换到 ' + result.model + '；地址、协议与 Key 未变。');
+      } catch (err) {
+        switchModel.disabled = false;
+        feedback(err.message, true);
+      }
+    };
     $('#ms-fb-preset').onchange = () => {
       const p = presets.find(x => x.id === val('#ms-fb-preset'));
       if (p) { $('#ms-fb-base').value = p.baseUrl || ''; $('#ms-fb-model').value = p.model || ''; }

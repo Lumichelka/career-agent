@@ -3,6 +3,7 @@
 import {mkdir, readFile, writeFile, readdir, rename} from 'node:fs/promises';
 import {join, dirname} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {UserFairGate} from '../lib/fair-gate.mjs';
 
 export const TASK_STATES = ['queued', 'running', 'waiting_confirmation', 'blocked', 'succeeded', 'failed', 'cancelled', 'undone'];
 export const ACTIVE_TASK_STATES = ['queued', 'running', 'waiting_confirmation', 'blocked'];
@@ -45,76 +46,14 @@ export class TaskQueueTimeoutError extends Error {
   }
 }
 
-// 每用户 FIFO、全局共享额度的任务闸。release 幂等；排队超时/取消都会从队列里摘掉。
-export class TaskGate {
+// 每用户 FIFO、全局共享额度的任务闸。队列逻辑与上游闸共用 UserFairGate，只在默认值与错误类型上不同。
+export class TaskGate extends UserFairGate {
   constructor({perUser = 2, global = 8, queueTimeoutMs = 120000} = {}) {
-    this.perUser = Math.max(1, Number(perUser) || 2);
-    this.global = Math.max(1, Number(global) || 8);
-    this.queueTimeoutMs = Math.max(0, Number(queueTimeoutMs ?? 120000));
-    this.active = 0;
-    this.byUser = new Map();
-    this.queue = [];
+    super({perUser, global, queueTimeoutMs, createTimeoutError: waitMs => new TaskQueueTimeoutError(waitMs), createAbortError: abortedError});
   }
 
   snapshot() {
-    return {perUser: this.perUser, global: this.global, active: this.active, queued: this.queue.length, byUser: Object.fromEntries(this.byUser)};
-  }
-
-  acquire(userId, {signal} = {}) {
-    if (!userId) throw new Error('任务闸需要用户身份');
-    if (signal?.aborted) return Promise.reject(abortedError());
-    if (this.#hasCapacity(userId)) return Promise.resolve(this.#grant(userId));
-    return new Promise((resolve, reject) => {
-      const waiter = {userId, resolve, reject, timer: null, onAbort: null};
-      waiter.cleanup = () => {
-        if (waiter.timer) clearTimeout(waiter.timer);
-        if (waiter.onAbort) signal?.removeEventListener('abort', waiter.onAbort);
-      };
-      const settle = (fn, value) => {
-        const index = this.queue.indexOf(waiter);
-        if (index < 0) return false;
-        this.queue.splice(index, 1);
-        waiter.cleanup();
-        fn(value);
-        return true;
-      };
-      waiter.timer = setTimeout(() => settle(reject, new TaskQueueTimeoutError(this.queueTimeoutMs)), this.queueTimeoutMs);
-      if (signal) {
-        waiter.onAbort = () => settle(reject, abortedError());
-        signal.addEventListener('abort', waiter.onAbort, {once: true});
-      }
-      this.queue.push(waiter);
-      if (signal?.aborted) waiter.onAbort?.();
-    });
-  }
-
-  #hasCapacity(userId) {
-    return this.active < this.global && (this.byUser.get(userId) || 0) < this.perUser;
-  }
-
-  #grant(userId) {
-    this.active += 1;
-    this.byUser.set(userId, (this.byUser.get(userId) || 0) + 1);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.active -= 1;
-      const left = (this.byUser.get(userId) || 1) - 1;
-      if (left <= 0) this.byUser.delete(userId);
-      else this.byUser.set(userId, left);
-      this.#pump();
-    };
-  }
-
-  #pump() {
-    while (this.active < this.global) {
-      const index = this.queue.findIndex(waiter => (this.byUser.get(waiter.userId) || 0) < this.perUser);
-      if (index < 0) return;
-      const [waiter] = this.queue.splice(index, 1);
-      waiter.cleanup();
-      waiter.resolve(this.#grant(waiter.userId));
-    }
+    return this.baseSnapshot();
   }
 }
 
