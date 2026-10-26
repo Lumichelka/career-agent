@@ -21,7 +21,8 @@ export const ERROR_RECOVERY = {
   ERA_NEGOTIATION_FAILED: '确认上游是 MCP server 并支持 Streamable HTTP；换传输或换入口后再试。',
   REQUEST_TIMEOUT: '上游响应超时：缩小输入、稍后重试，或换一个 Agent。',
   UPSTREAM_ERROR: '连接已建立但调用/发现失败：查看上游日志后重试。',
-  AGENT_DISABLED: '先在配置里启用这个 Agent。'
+  AGENT_DISABLED: '先在配置里启用这个 Agent。',
+  QUEUE_TIMEOUT: '上游并发已满且排队超时：稍后重试或减少并发。'
 };
 
 export class AgentConnectionError extends Error {
@@ -157,6 +158,8 @@ function runCommand(command, args) {
 
 // 默认连接：@modelcontextprotocol/client 2.4.0，auto 协商现代/legacy 两个时代。
 export async function createSdkConnection({agent, home, credentials, mrtr, handlers = {}, platform = process.platform}) {
+  // handlers 可以是「按 Agent 生成」的工厂：每个连接按该 Agent 自己的 mrtr 开关与身份绑定。
+  const resolved = typeof handlers === 'function' ? (handlers({agent}) || {}) : (handlers || {});
   const capabilities = {};
   if (mrtr?.sampling !== false) capabilities.sampling = {};
   if (mrtr?.elicitation !== false) capabilities.elicitation = {};
@@ -169,9 +172,10 @@ export async function createSdkConnection({agent, home, credentials, mrtr, handl
   const register = (method, handler) => {
     if (typeof handler === 'function') client.setRequestHandler(method, handler);
   };
-  if (mrtr?.sampling !== false) register('sampling/createMessage', handlers.sampling);
-  if (mrtr?.elicitation !== false) register('elicitation/create', handlers.elicitation);
-  register('roots/list', handlers.roots);
+  // 即使开关关闭也注册 handler：上游若仍然请求，明确回 UNSUPPORTED，而不是静默当成能力不存在。
+  register('sampling/createMessage', resolved.sampling);
+  register('elicitation/create', resolved.elicitation);
+  register('roots/list', resolved.roots);
   let transport = null;
   let pid = null;
   let closed = false;
@@ -234,7 +238,10 @@ export class AgentConnectionManager {
     reconnectDelays = RECONNECT_DELAYS_MS,
     reconnectWindowMs = RECONNECT_WINDOW_MS,
     reconnectMax = RECONNECT_MAX,
-    handlers = {}
+    handlers = {},
+    // 统一上游闸（#36）：一次 MCP 出站调用计 1 个额度；userId 决定记在谁名下。
+    gate = null,
+    userId = ''
   } = {}) {
     if (!home || !config) throw new Error('AgentConnectionManager 需要 home 与 AgentConfig');
     this.home = home;
@@ -249,6 +256,8 @@ export class AgentConnectionManager {
     this.reconnectWindowMs = reconnectWindowMs;
     this.reconnectMax = reconnectMax;
     this.handlers = handlers;
+    this.gate = gate;
+    this.userId = userId;
     this.records = new Map();
     this.closed = false;
   }
@@ -373,6 +382,8 @@ export class AgentConnectionManager {
       name: agent.name,
       transport: agent.transport,
       enabled: agent.enabled !== false,
+      // MRTR handler 工厂按 Agent 自己的开关绑定（不是全局开关）。
+      mrtr: agent.mrtr || {sampling: true, elicitation: true},
       stdio: agent.stdio ? {command: agent.stdio.command, args: [...(agent.stdio.args || [])]} : null,
       http: agent.http ? {url: agent.http.url, allowPrivateHttp: agent.http.allowPrivateHttp === true, headerName: agent.http.headerName || ''} : null
     };
@@ -454,18 +465,43 @@ export class AgentConnectionManager {
   }
 
   // #35 的调用接缝：不在这里做统一工具面/证据信封，只把原始 MCP 调用接出去。
+  // #36：一次出站调用（含懒连接）占统一上游闸 1 个额度；MRTR handler 通过 activeCallFor 找到
+  // 当前这次调用所属的任务事件流（表单/费用提示不跟错任务）。
   async callTool(id, name, args = {}, options = {}) {
     const agent = this.agentFromConfig(id);
     if (!agent) throw new AgentConnectionError('AGENT_NOT_FOUND', '没有这个外部 Agent', {status: 404});
     const record = this.#record(agent);
-    if (!record.connection) await this.connect(id);
-    this.#touch(record);
+    const {context = null, ...callOptions} = options || {};
+    const activeCall = {agentId: agent.id, taskId: String(context?.taskId || ''), emit: typeof context?.emit === 'function' ? context.emit : null, signal: context?.signal || callOptions.signal || null, startedAt: this.now()};
+    let release = null;
+    if (this.gate) {
+      try { release = await this.gate.acquire(this.userId || 'unknown-user', {signal: callOptions.signal}); }
+      catch (error) {
+        if (error?.code === 'QUEUE_TIMEOUT') throw new AgentConnectionError('QUEUE_TIMEOUT', error.message, {recovery: ERROR_RECOVERY.QUEUE_TIMEOUT});
+        if (error?.code === 'CANCELLED') throw new AgentConnectionError('CANCELLED', '本次外部调用已取消。', {recovery: ERROR_RECOVERY.QUEUE_TIMEOUT});
+        throw error;
+      }
+    }
+    record.activeCall = activeCall;
     try {
-      return await record.connection.callTool(name, args, options);
+      if (!record.connection) await this.connect(id);
+      this.#touch(record);
+      return await record.connection.callTool(name, args, callOptions);
     } catch (error) {
+      if (error?.code === 'QUEUE_TIMEOUT' || error?.code === 'CANCELLED') {
+        throw new AgentConnectionError(error.code, String(error.message || ''), {recovery: ERROR_RECOVERY[error.code] || ''});
+      }
       const mapped = mapConnectionError(error);
       throw new AgentConnectionError(mapped.code === 'CONNECT_FAILED' ? 'UPSTREAM_ERROR' : mapped.code, mapped.message, {recovery: ERROR_RECOVERY.UPSTREAM_ERROR});
+    } finally {
+      if (record.activeCall === activeCall) record.activeCall = null;
+      if (release) release();
     }
+  }
+
+  // MRTR handler 用来找「当前正在跑的外部调用」：没有活跃调用时表单/提示不能乱投递。
+  activeCallFor(id) {
+    return this.records.get(String(id || ''))?.activeCall || null;
   }
 
   async #close(record, reason) {

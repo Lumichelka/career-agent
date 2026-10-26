@@ -518,6 +518,13 @@ export class TaskManager {
           case 'external_confirm_resolved':
             if (task.state === 'waiting_confirmation') void deferState('running', {phase: '继续执行'});
             break;
+          case 'mrtr_elicit_required':
+            // 外部 Agent 的 MRTR 表单：任务停在待确认，用户提交/拒绝/超时后继续。
+            void deferState('waiting_confirmation', {phase: '等待填写外部 Agent 表单'});
+            break;
+          case 'mrtr_elicit_resolved':
+            if (task.state === 'waiting_confirmation') void deferState('running', {phase: '继续执行'});
+            break;
           case 'platform_resolved':
           case 'confirm_resolved':
             if (task.state === 'waiting_confirmation') void deferState('running', {phase: '继续执行'});

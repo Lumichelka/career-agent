@@ -25,9 +25,11 @@ import {InboundMcp} from '../mcp/inbound.mjs';
 import {createInboundHttp} from './inbound-http.mjs';
 import {AgentConfig} from '../agents/config.mjs';
 import {AgentConnectionManager, createSdkConnection} from '../mcp/client.mjs';
+import {UpstreamGate} from '../mcp/gate.mjs';
+import {createElicitationChannel, createMrtrHandlers} from '../mcp/mrtr.mjs';
 import {ExternalToolset, externalToolsSupported, OUTBOUND_WARNING} from '../agents/tools.mjs';
 import {handleAgents} from '../agents/api.mjs';
-import {handleAudit} from '../writes/audit-api.mjs';
+import {handleAudit, handleAuditClear, handleAuditExport} from '../writes/audit-api.mjs';
 import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
 import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
 import {createSourceCheckService} from '../source-check/pipeline.mjs';
@@ -46,7 +48,11 @@ export async function createApp({
   sourceCheck = {},
   // 测试注入：外部 Agent 连接用假 transport，绝不启动真实进程或联网；时钟可注入以验证空闲回收。
   agentClientFactory = null,
-  agentNow = null
+  agentNow = null,
+  // #36：统一上游闸可注入（测试用短排队超时）；模型采样补全也可注入 fetch。
+  upstreamGate = null,
+  upstreamLimits = {},
+  samplingFetch = null
 } = {}) {
 if (!dataDir) throw new Error('createApp 需要 dataDir：准备数据目录是进程级入口（index.mjs）的职责');
 await mkdir(dataDir, {recursive: true});
@@ -60,6 +66,10 @@ const outboundWaits = new Map();
 const failureStreaks = new Map();
 // 任务闸与任务记录：每用户 2 / 全局 8 / 排队 120s；记录落在 users/<id>/tasks/，供抽屉刷新。
 const taskManager = new TaskManager({dataDir, gate: new TaskGate(taskLimits), maxDurationMs: taskLimits.maxDurationMs});
+// 统一上游闸：模型 API、MCP 出站、入站转发共用；进程内所有用户共享同一实例。
+const gate = upstreamGate || new UpstreamGate(upstreamLimits);
+// MRTR elicitation：表单事件投递到当前任务的 NDJSON，回复走 /api/mrtr/elicit。
+const elicitationChannel = createElicitationChannel();
 // 来源校对：浏览器读取与视觉抽取可注入，确定性测试不启动真实浏览器/视觉 API；live 走真实实现。
 const sourceCheckService = createSourceCheckService({
   dataDir,
@@ -115,11 +125,46 @@ async function tenant(user) {
     model.allowEnvironmentKey = false; // 不继承服务器环境变量里的 Key，避免账号之间串用
     const backends = await new BackendChoice(tenantData).load();
     const agentConfig = await new AgentConfig(home, vault).load();
-    const managerOptions = {home, config: agentConfig};
+    const managerOptions = {home, config: agentConfig, gate, userId: user.id};
     if (agentClientFactory) managerOptions.createConnection = agentClientFactory;
     else managerOptions.createConnection = createSdkConnection;
     if (agentNow) managerOptions.now = agentNow;
-    return {dir: tenantData, models: model, backends, platforms: new PlatformBrowser(home), vault, agents: agentConfig, connections: new AgentConnectionManager(managerOptions)};
+    let connections = null;
+    // MRTR：每个连接按 Agent 的 mrtr 开关绑定；sampling 用该用户当前模型，elicitation 弹到该任务。
+    const mrtr = createMrtrHandlers({
+      userId: user.id,
+      user,
+      home,
+      root,
+      models: model,
+      backends,
+      gate,
+      fetchImpl: samplingFetch,
+      activeCallFor: id => connections?.activeCallFor(id),
+      askElicitation: async payload => {
+        const {context, ...rest} = payload;
+        if (!context?.emit) return {action: 'decline'};
+        const {promise} = elicitationChannel.request({
+          userId: user.id,
+          taskId: context.taskId || '',
+          emit: context.emit,
+          signal: context.signal || null,
+          ...rest
+        });
+        return promise;
+      },
+      // owner 才能用 Codex；这里只把固定约束拼进 prompt，不进入工具循环。
+      codexComplete: async ({prompt, signal, timeoutMs}) => {
+        // Codex 采样同样受 30 秒上限：超时就中止子进程，不让上游无限等。
+        const timeout = AbortSignal.timeout(Math.max(1, Number(timeoutMs) || 30000));
+        const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+        const out = await runModel({root, prompt, schema: 'response.schema.json', search: false, signal: combined, taskId: ''});
+        return {text: String(out?.raw || ''), model: 'codex'};
+      }
+    });
+    managerOptions.handlers = ({agent: connectedAgent}) => mrtr.handlersFor(connectedAgent);
+    connections = new AgentConnectionManager(managerOptions);
+    return {dir: tenantData, models: model, backends, platforms: new PlatformBrowser(home), vault, agents: agentConfig, connections, mrtr};
   })());
   return tenants.get(user.id);
 }
@@ -133,12 +178,15 @@ const inboundMcp = await new InboundMcp({
     if (!user) return {status: 'error', code: 'ACCOUNT_MISSING', message: '该凭据所属账号已不存在', recovery: '请重新登录网页端并重新签发凭据。'};
     const t = await tenant(user);
     const model = t.models.snapshot();
-    return createToolExecutor()(name, args, {
+    // #36 的统一上游闸接缝：转发到上游（mcp__*）的一次调用要计该用户的在途额度；
+    // 本地只读工具不占闸。真正的转发在 #38 接入，这里先把口径固定住。
+    const run = () => createToolExecutor()(name, args, {
       taskId: '',
       config: {searchUrl: model.searchUrl, recruitDir: t.dir, dataDir: t.dir},
       fetchImpl: fetch,
       signal: AbortSignal.timeout(180000)
     });
+    return name.startsWith('mcp__') ? gate.run(userId, run) : run();
   }
 }).init();
 const send = (res, obj, status = 200) => { res.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}); res.end(JSON.stringify(obj)); };
@@ -336,7 +384,16 @@ const server = http.createServer(async (req, res) => {
     // 自动写入审计：只读当前用户自己的库；按任务/批次分组，响应形状供审阅层（#31/#41）复用。
     if (req.method === 'GET' && url.pathname === '/api/audit') {
       const out = await handleAudit({dir, userId: user.id, url});
-      return send(res, out.json);
+      return send(res, out.json, out.status || 200);
+    }
+    // 全局审计导出：服务端按当前筛选生成 JSON/CSV，带文件名与计数；身份只来自当前登录用户。
+    if (req.method === 'GET' && url.pathname === '/api/audit/export') {
+      const out = handleAuditExport({dir, userId: user.id, url});
+      if (out.body !== undefined) {
+        res.writeHead(out.status || 200, out.headers);
+        return res.end(out.body);
+      }
+      return send(res, out.json, out.status || 500);
     }
     // 来源校对的截图/抽取证据：只从本人任务目录取，文件名白名单。
     if (req.method === 'GET' && url.pathname === '/api/source-check/evidence') {
@@ -427,6 +484,14 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse(raw || '{}');
 
       // 首次出网确认的选择：仅本次 / 以后不再问（落该用户 Agent 配置）/ 拒绝；确认不属于本人按不存在处理。
+      // MRTR elicitation 的表单回复：用户提交 / 拒绝 / 取消；等待中的表单只属于当前登录账号。
+      if (url.pathname === '/api/mrtr/elicit') {
+        const out = elicitationChannel.respond({userId: user.id, elicitId: body.elicitId, action: String(body.action || ''), content: body.content});
+        if (!out) return send(res, {error: '没有等待中的外部 Agent 表单（可能已超时或已处理）', code: 'ELICITATION_NOT_PENDING'}, 404);
+        if (out.invalid) return send(res, {error: '表单动作或内容无效', code: 'INVALID_ELICITATION'}, 400);
+        return send(res, out);
+      }
+
       if (url.pathname === '/api/agents/outbound') {
         const out = resolveOutbound({userId: user.id, confirmId: body.confirmId, decision: String(body.decision || '')});
         if (!out) return send(res, {error: '没有等待中的出网确认（可能已超时或已处理）', code: 'CONFIRM_NOT_PENDING'}, 404);
@@ -461,6 +526,11 @@ const server = http.createServer(async (req, res) => {
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
       if (url.pathname === '/api/source-check/start') {
         const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId});
+        return send(res, out.json, out.status || 200);
+      }
+      // 清空审计：必须原样输入指定短语；只删本人的审计与确认记录，幂等行保留到 TTL。
+      if (url.pathname === '/api/audit/clear') {
+        const out = handleAuditClear({dir, userId: user.id, body});
         return send(res, out.json, out.status || 200);
       }
       // 撤销：单批或整任务。撤销本身是新的写入（新 batch_id + undo_of），响应带计数与逐行结果。
@@ -771,9 +841,10 @@ const server = http.createServer(async (req, res) => {
               }
               const result = await runAgent({
                 root,
-                modelCall: options => backend.kind === 'codex'
+                // 一次模型 API / Codex 调用占统一上游闸 1 个额度（与 MCP 出站共用同一把闸）。
+                modelCall: options => gate.run(user.id, () => backend.kind === 'codex'
                   ? runModel({...options, taskBridgeToken})
-                  : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir, userId: user.id, taskId: task.id, actorRef: backend.label}}),
+                  : runApiModel({...options, config: {...modelConfig, bridgeToken: taskBridgeToken, recruitDir: dir, dataDir: dir, userId: user.id, taskId: task.id, actorRef: backend.label}}), {signal: options.signal || signal}),
                 backend,
                 images,
                 session: s,
@@ -853,6 +924,7 @@ const close = () => closing || (closing = (async () => {
   outboundWaits.clear();
   // 外部 Agent 的常驻连接与子进程走同一回收路径；租户还没建起来时跳过。
   await Promise.allSettled([...tenants.values()].map(promise => promise.then(t => t.connections.closeAll()).catch(() => {})));
+  elicitationChannel.close();
   inboundMcp.close().catch(() => {});
   if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
   await new Promise(resolve => server.close(() => resolve()));

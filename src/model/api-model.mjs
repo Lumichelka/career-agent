@@ -419,3 +419,63 @@ export async function runVisionJson({config = {}, prompt = '', images = [], fetc
   return {json, text: cleanJsonText(rawText), usage: normalizeUsage(data.usage, protocol)};
 }
 
+// MRTR sampling（#36）：用用户当前配置的模型做一次「无工具」补全。
+// 固定 system 约束由调用方传入；这里不声明 tools、不进入工具循环，单次硬超时 30 秒。
+export const SAMPLING_TIMEOUT_MS = 30000;
+
+export async function runSamplingCompletion({
+  config = {},
+  messages = [],
+  system = '',
+  maxTokens = 512,
+  fetchImpl = null,
+  signal = null,
+  timeoutMs = SAMPLING_TIMEOUT_MS
+} = {}) {
+  if (!config || !config.baseUrl || !config.model) {
+    const error = new Error('还没有配置可用的模型，无法替外部 Agent 采样。');
+    error.code = 'SAMPLING_UNAVAILABLE';
+    error.recovery = '先在「模型与接口设置」里配置 API 或本地模型，再让外部 Agent 请求采样。';
+    throw error;
+  }
+  const protocol = config.protocol || 'chat';
+  const limit = Math.max(1, Math.min(Number(maxTokens) || 1, 2048));
+  const body = protocol === 'chat'
+    ? {model: config.model, messages: [{role: 'system', content: system}, ...messages], max_tokens: limit, temperature: 0, stream: false}
+    : protocol === 'messages'
+      ? {model: config.model, system, messages, max_tokens: limit, temperature: 0}
+      : {model: config.model, instructions: system, input: messages, max_output_tokens: limit};
+  const doFetch = fetchImpl || makeFetch(config.proxy);
+  const timeoutSignal = AbortSignal.timeout(Math.max(1, Number(timeoutMs) || SAMPLING_TIMEOUT_MS));
+  const combined = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+  let res;
+  try {
+    res = await postWithRetry({config, body, doFetch, signal: combined, timeoutMs: Math.max(1, Number(timeoutMs) || SAMPLING_TIMEOUT_MS)});
+  } catch (error) {
+    const wrapped = new Error('替外部 Agent 采样失败：' + String(error?.message || error).slice(0, 200));
+    wrapped.code = /timeout|timed out|aborted/i.test(String(error?.message)) ? 'REQUEST_TIMEOUT' : 'UPSTREAM_ERROR';
+    wrapped.recovery = '稍后重试；持续失败就在外部 Agent 侧完成这一步。';
+    throw wrapped;
+  }
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 200);
+    const error = new Error('替外部 Agent 采样失败（HTTP ' + res.status + '）' + (detail ? '：' + detail.replace(/\s+/g, ' ').slice(0, 120) : ''));
+    error.code = res.status === 401 || res.status === 403 ? 'AUTH_FAILED' : res.status === 429 ? 'REQUEST_TIMEOUT' : 'UPSTREAM_ERROR';
+    error.recovery = '检查模型 Key、额度与型号后重试。';
+    throw error;
+  }
+  const data = await res.json().catch(() => null);
+  if (!data) {
+    const error = new Error('模型没有返回可解析的 JSON。');
+    error.code = 'INVALID_RESULT';
+    throw error;
+  }
+  const text = protocol === 'chat'
+    ? (data.choices?.[0]?.message?.content || '')
+    : protocol === 'messages'
+      ? (data.content || []).filter(item => item.type === 'text').map(item => item.text).join('')
+      : (data.output || []).filter(item => item.type === 'message').flatMap(item => item.content || []).filter(item => item.type === 'output_text').map(item => item.text).join('');
+  return {text: String(text || ''), model: config.model, usage: normalizeUsage(data.usage, protocol)};
+}
+
+
