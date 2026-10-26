@@ -4,7 +4,7 @@
 // No fabricated evidence: every hash/screenshot/audit row comes from this run.
 import {createApp} from '../src/server/app.mjs';
 import {contentHashOf} from '../docs/acceptance/24-swufe/verify-evidence.mjs';
-import {mkdtemp, readFile, writeFile, mkdir, cp, readdir, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, writeFile, mkdir, cp, rm} from 'node:fs/promises';
 import {existsSync, readFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -304,7 +304,8 @@ async function run() {
 
     const verify = execFileSync(process.execPath, [verifyFile, manifestFile], {cwd: root, encoding: 'utf8'});
     log('verify', verify.trim());
-    // sign README only after verifier success
+    // sign README only after verifier success AND an explicit human/owner opt-in
+    if (process.env.CONFIRM_SIGN !== '1') throw new Error('拒绝自动签字：请 owner 确认后设置 CONFIRM_SIGN=1 再运行（或手动填 README 签字区）。');
     let readme = await readFile(readmeFile, 'utf8');
     const manifestSha = sha(manifestFile);
     readme = readme
