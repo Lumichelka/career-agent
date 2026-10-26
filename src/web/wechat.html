@@ -61,6 +61,21 @@ textarea{min-height:70px}
         <h2>公众号 <span id="wechat-stats" class="hint"></span></h2>
         <div id="account-list"><div class="empty">正在读取…</div></div>
       </div>
+      <div class="panel">
+        <h2>订阅 / 同步</h2>
+        <div class="hint">订阅页是公开的文章列表页（学校就业网、公众号矩阵页等）；同步会抓取页面里的公众号文章链接，自动归属并分析。</div>
+        <label style="margin-top:8px">账号<select id="sub-account"></select></label>
+        <label>订阅页地址<input id="sub-feed" placeholder="https://…（公开来源页）"></label>
+        <div class="row" style="margin-top:8px"><button id="sub-save">保存订阅</button><button id="sub-sync" class="primary">立即同步</button><button id="sub-clear" class="danger">取消订阅</button></div>
+        <span id="sub-status" class="hint"></span>
+      </div>
+      <details class="panel">
+        <summary style="cursor:pointer;font-size:13px">发现公众号</summary>
+        <div class="hint" style="margin-top:8px">粘贴来源页 HTML/正文，或一行一条「账号 | 文章链接」；发现后自动建账号，不认识的 biz 保留待补。</div>
+        <textarea id="disc-text" placeholder="中山大学就业 | https://mp.weixin.qq.com/s?..."></textarea>
+        <div class="row" style="margin-top:8px"><button id="disc-btn" class="primary">发现并订阅</button></div>
+        <div id="disc-result" class="hint"></div>
+      </details>
       <details class="panel">
         <summary style="cursor:pointer;font-size:13px">＋ 添加公众号</summary>
         <form id="new-account" class="grid" style="margin-top:10px">
@@ -130,12 +145,43 @@ async function api(prefix, path, body) {
   return d;
 }
 
+function fillSubscription() {
+  const id = document.querySelector('#sub-account')?.value || state.selectedAccount;
+  const a = state.accounts.find(x => x.id === id);
+  if (!document.querySelector('#sub-feed')) return;
+  $('#sub-feed').value = a?.feedUrl || '';
+  $('#sub-status').textContent = a?.lastSyncAt
+    ? '最近同步 ' + fmt(a.lastSyncAt) + ' · ' + (a.lastSyncStatus || '') + (a.lastSyncError ? ' · ' + a.lastSyncError : '')
+    : '尚未同步过';
+}
+
 function renderAccounts() {
-  $('#wechat-stats').textContent = (state.stats.accounts || 0) + ' 个 / ' + (state.stats.articles || 0) + ' 篇';
+  const st = state.stats || {};
+  $('#wechat-stats').textContent = (st.accounts || 0) + ' 个 / ' + (st.articles || 0) + ' 篇' +
+    (st.subscribed ? ' · 订阅 ' + st.subscribed : '') +
+    (st.unattributed ? ' · 待归属 ' + st.unattributed : '') +
+    (st.demoArticles ? ' · 演示 ' + st.demoArticles : '');
   if (!state.accounts.length) { $('#account-list').innerHTML = '<div class="empty">还没有公众号</div>'; return; }
   $('#account-list').innerHTML = state.accounts.map(a => `<div class="account ${state.selectedAccount === a.id ? 'selected' : ''}" data-account="${esc(a.id)}">
-    <b>${esc(a.name)}</b><div class="meta">${esc(a.school || '未填学校')} · ${a.articles} 篇</div></div>`).join('');
-  document.querySelectorAll('[data-account]').forEach(el => el.onclick = () => { state.selectedAccount = el.dataset.account; renderAccounts(); renderArticles(); });
+    <b>${esc(a.name)}</b><div class="meta">${esc(a.school || '未填学校')} · ${a.articles} 篇 · 招聘 ${a.recruitmentArticles || 0}</div>
+    <div class="meta">${a.biz ? 'biz ' + esc(a.biz.slice(0, 12)) : 'biz 待识别'} · ${a.feedUrl ? '已订阅' + (a.lastSyncAt ? '（' + esc(fmt(a.lastSyncAt)) + '）' : '') : '未订阅'}${a.lastSyncStatus === 'error' ? ' · 同步失败' : ''}</div>
+    ${a.feedUrl ? `<div class="row" style="margin-top:6px"><button data-sync-account="${esc(a.id)}">同步</button></div>` : ''}</div>`).join('');
+  document.querySelectorAll('[data-account]').forEach(el => el.onclick = e => {
+    if (e.target.closest('[data-sync-account]')) return;
+    state.selectedAccount = el.dataset.account; renderAccounts(); renderArticles();
+  });
+  document.querySelectorAll('[data-sync-account]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    b.disabled = true;
+    try { const d = await api('wechat', 'accounts/' + b.dataset.syncAccount + '/sync', {}); toast('同步完成：新增 ' + (d.imported || 0) + ' 篇'); await load(); }
+    catch (err) { toast(err.message); }
+    finally { b.disabled = false; }
+  });
+  const sub = document.querySelector('#sub-account');
+  if (sub) {
+    sub.innerHTML = state.accounts.map(a => `<option value="${esc(a.id)}" ${state.selectedAccount === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('');
+    fillSubscription();
+  }
   const sel = $('#import-account');
   sel.innerHTML = '<option value="">自动识别 biz</option>' + state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
 }
@@ -144,12 +190,22 @@ function renderArticles() {
   const list = state.selectedAccount ? state.articles.filter(a => a.accountId === state.selectedAccount) : state.articles;
   if (!list.length) { $('#article-list').innerHTML = '<div class="empty">还没有文章记录</div>'; return; }
   const accountName = id => state.accounts.find(a => a.id === id)?.name || '未归类';
+  const recruitLabel = a => a.hasRecruitment === 'yes' ? '含招聘信息' : a.hasRecruitment === 'no' ? '未发现招聘' : '待确认';
   $('#article-list').innerHTML = list.map(a => `<article class="article">
     <b><a href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">${esc(a.title)}</a></b>
-    <div class="meta">${esc(accountName(a.accountId))} · ${esc(fmt(a.publishedAt || a.createdAt))}${a.eventId ? ' · 已关联活动' : ''}</div>
-    <div class="row"><button data-import-again="${esc(a.url)}">重新解析</button><button class="danger" data-del-article="${esc(a.id)}">删除</button></div>
+    <div class="meta">${esc(a.accountName || accountName(a.accountId))} · ${esc(fmt(a.publishedAt || a.createdAt))} · ${esc(recruitLabel(a))} · ${a.projectCount || 0} 个项目草稿${a.eventId ? ' · 已入库活动' : ''}</div>
+    <div class="row">${a.eventId ? '' : '<button data-publish-article="' + esc(a.id) + '">生成活动/项目</button>'}<button data-import-again="${esc(a.url)}">重新解析</button><button class="danger" data-del-article="${esc(a.id)}">删除</button></div>
   </article>`).join('');
   document.querySelectorAll('[data-import-again]').forEach(b => b.onclick = () => { $('#import-url').value = b.dataset.importAgain; $('#import-btn').click(); });
+  document.querySelectorAll('[data-publish-article]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const d = await api('wechat', 'articles/' + b.dataset.publishArticle + '/publish', {});
+      toast('已生成活动，项目 ' + (d.projects?.length || 0) + ' 个');
+      await load();
+    } catch (e) { toast(e.message); }
+    finally { b.disabled = false; }
+  });
   document.querySelectorAll('[data-del-article]').forEach(b => b.onclick = async () => {
     if (!confirm('删除这条文章记录？')) return;
     try { await api('wechat', 'articles/' + b.dataset.delArticle + '/delete', {}); await load(); toast('已删除'); } catch (e) { toast(e.message); }
@@ -182,6 +238,50 @@ async function boot() {
   try { await load(); } catch (e) { toast(e.message); }
 }
 
+function subAccountId() { return document.querySelector('#sub-account')?.value || state.selectedAccount || ''; }
+
+document.querySelector('#sub-account').onchange = () => {
+  state.selectedAccount = subAccountId();
+  fillSubscription();
+  renderAccounts();
+  renderArticles();
+};
+$('#sub-save').onclick = async () => {
+  const id = subAccountId();
+  if (!id) { toast('请选择公众号'); return; }
+  try {
+    await api('wechat', 'accounts/' + id + '/subscribe', {feedUrl: $('#sub-feed').value.trim()});
+    toast('订阅已保存'); await load();
+  } catch (e) { toast(e.message); }
+};
+$('#sub-clear').onclick = async () => {
+  const id = subAccountId();
+  if (!id) return;
+  try { await api('wechat', 'accounts/' + id + '/subscribe', {feedUrl: ''}); toast('已取消订阅'); await load(); }
+  catch (e) { toast(e.message); }
+};
+$('#sub-sync').onclick = async () => {
+  const id = subAccountId();
+  if (!id) return;
+  $('#sub-status').textContent = '同步中…';
+  try {
+    const d = await api('wechat', 'accounts/' + id + '/sync', {});
+    $('#sub-status').textContent = '同步完成：新增 ' + (d.imported || 0) + ' 篇，跳过 ' + (d.skipped || 0) + ' 篇';
+    await load();
+  } catch (e) { $('#sub-status').textContent = e.message; toast(e.message); }
+};
+$('#disc-btn').onclick = async () => {
+  const text = $('#disc-text').value.trim();
+  if (!text) { toast('请粘贴来源页内容'); return; }
+  try {
+    const d = await api('wechat', 'discover', {text});
+    $('#disc-result').textContent = d.candidates.length
+      ? d.candidates.map(c => (c.accountName || c.name || '未命名') + (c.biz ? ' · biz ' + c.biz.slice(0, 10) : '') + ' · ' + c.articleUrls.length + ' 篇').join('；')
+      : '没有发现可识别的公众号';
+    await load();
+  } catch (e) { $('#disc-result').textContent = e.message; }
+};
+
 $('#import-btn').onclick = async () => {
   const url = $('#import-url').value.trim();
   if (!url) { toast('请填写文章链接'); return; }
@@ -190,9 +290,9 @@ $('#import-btn').onclick = async () => {
     const d = await api('wechat', 'articles/import', {url, accountId: $('#import-account').value, text: $('#import-text').value});
     state.currentArticle = d.article;
     fillDraft(d.draft);
-    $('#import-status').textContent = '已记录：' + d.article.title;
+    $('#import-status').textContent = '已记录：' + d.article.title + (d.publish?.ok ? '；已生成活动（' + (d.publish.projects?.length || 0) + ' 个项目）' : d.publish?.reason ? '；未生成活动：' + d.publish.reason : '');
     await load();
-    toast('文章已记录');
+    toast(d.publish?.ok ? '文章已入库并生成活动' : '文章已记录');
   } catch (e) { $('#import-status').textContent = e.message; toast(e.message); }
 };
 
