@@ -168,13 +168,15 @@ export function externalEvidence({agentId = '', tool = '', requestId = '', at = 
 }
 
 // 统一信封：status / data / error / evidence / truncated / assets；上游写另带 readOnly 与 retryable。
-export function buildEnvelope({status = 'ok', data = null, error = null, evidence = {}, truncated = false, assets = [], readOnly = false, retryable = true} = {}) {
+export function buildEnvelope({status = 'ok', data = null, error = null, evidence = {}, truncated = false, assets = [], readOnly = false, retryable = true, idempotency = ''} = {}) {
   const out = {
     status,
     evidence: {...evidence, actorType: 'external_agent'},
     readOnly: readOnly === true,
     retryable: retryable !== false
   };
+  // 上游写幂等口径：#36 把 readOnly / retryable / idempotency 三个字段一起放进信封。
+  if (idempotency) out.idempotency = String(idempotency);
   if (status === 'ok') out.data = data || {text: ''};
   else {
     const code = EXTERNAL_ERROR_CODES.includes(error?.code) ? error.code : 'UPSTREAM_ERROR';
@@ -458,6 +460,8 @@ export class ExternalToolset {
     if (signal?.aborted) throw cancelledError();
     const options = {timeout: this.callTimeoutMs, onprogress};
     if (signal) options.signal = signal;
+    // 让连接层把当前任务事件流挂到这次调用上：MRTR 的 elicitation 要弹到正确的对话页。
+    options.context = {taskId: this.taskId, emit: this.emit, signal};
     const call = Promise.resolve().then(() => this.connections.callTool(agent.entity.id, descriptor.upstreamTool, args, options));
     if (!signal) return call;
     const settled = call.then(value => ({value}), error => ({error}));
@@ -616,7 +620,8 @@ export class ExternalToolset {
       truncated,
       assets,
       readOnly: descriptor.readOnly,
-      retryable: prepared.retryable
+      retryable: prepared.retryable,
+      idempotency: prepared.idempotency
     });
     this.#emitEvidence(out, {agent, descriptor, idempotency: prepared.idempotency});
     return out;
