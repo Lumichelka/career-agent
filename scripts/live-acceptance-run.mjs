@@ -23,6 +23,7 @@ const verifyFile = join(root, 'docs', 'acceptance', '24-swufe', 'verify-evidence
 const ownerName = process.env.OWNER_NAME || 'owner';
 const vaultSource = process.env.MODEL_VAULT_DIR || '';
 const claudeBin = process.env.CLAUDE_BIN || 'claude';
+const screenshotBackupDir = process.env.SCREENSHOT_BACKUP_DIR ? resolve(process.env.SCREENSHOT_BACKUP_DIR) : '';
 const log = (...args) => console.log(new Date().toISOString().slice(11, 19), ...args);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -251,15 +252,26 @@ async function run() {
     if (collectorRuns !== 0) throw new Error('检测到采集器 runs 行：' + collectorRuns);
     if (contactFields !== 0) throw new Error('检测到联系方式字段/值：' + contactFields);
 
-    // fill manifest
+    // fill manifest — require explicit owner opt-in BEFORE writing a signed manifest
+    if (process.env.CONFIRM_SIGN !== '1') throw new Error('拒绝自动签字：请 owner 确认后设置 CONFIRM_SIGN=1 再运行（或手动填 README/manifest 签字区）。');
     const manifest = JSON.parse(await readFile(templateFile, 'utf8'));
     const sha = file => createHash('sha256').update(readFileSync(file)).digest('hex');
-    const listPath = join(taskEvidence(clean.taskId), '01-list.png');
-    const detailPath = join(taskEvidence(clean.taskId), '02-detail.png');
+    let listPath = join(taskEvidence(clean.taskId), '01-list.png');
+    let detailPath = join(taskEvidence(clean.taskId), '02-detail.png');
+    if (screenshotBackupDir) {
+      await mkdir(screenshotBackupDir, {recursive: true});
+      const backupList = join(screenshotBackupDir, '01-list.png');
+      const backupDetail = join(screenshotBackupDir, '02-detail.png');
+      await cp(listPath, backupList);
+      await cp(detailPath, backupDetail);
+      listPath = backupList;
+      detailPath = backupDetail;
+      log('screenshots backed up', screenshotBackupDir);
+    }
     manifest.status = 'passed';
     manifest.runAt = new Date().toISOString();
     manifest.owner = ownerName;
-    manifest.environment = {dataDir, userId: owner.id, taskId: clean.taskId, conflictTaskId: conflict.taskId, commit: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim(), nodeVersion: process.version, edgeVersion: (() => { try { return execFileSync('powershell.exe', ['-NoProfile', '-Command', "(Get-Item 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe').VersionInfo.ProductVersion"], {encoding: 'utf8'}).trim(); } catch { return 'unknown'; } })()};
+    manifest.environment = {dataDir, screenshotBackup: screenshotBackupDir || undefined, userId: owner.id, taskId: clean.taskId, conflictTaskId: conflict.taskId, commit: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim(), nodeVersion: process.version, edgeVersion: (() => { try { return execFileSync('powershell.exe', ['-NoProfile', '-Command', "(Get-Item 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe').VersionInfo.ProductVersion"], {encoding: 'utf8'}).trim(); } catch { return 'unknown'; } })()};
     const rel = name => 'evidence/' + name;
     manifest.evidence = {
       extraction: {path: rel('extraction.json'), sha256: sha(join(evidenceDir, 'extraction.json'))},
@@ -286,13 +298,18 @@ async function run() {
       companyDbCreated, duplicateRows, durationMs: Number(cleanTask.durationMs) || 0
     };
     manifest.agentLeg = {passed: agentLeg, tool: cleanTask.review?.tool || 'review', issueCount: reviewIssues};
-    manifest.knownDeviations = [
+    const knownDeviations = [
       '复用本机已有 DeepSeek Key（MODEL_VAULT_DIR 显式传入，运行后删除副本）',
       '复核 Agent 是 claude -p --tools "" 的本地 MCP 桥，不是 claude mcp serve',
-      '列表页 3 场活动均写入；只打开 1 场详情，events[1..2] 复用该详情 URL',
-      '2 个单位名被页面截断，review 已标 high；未编造',
-      '原始页面截图含联系方式，仅保留本机临时路径'
+      '列表页 ' + extraction.events.length + ' 场活动均写入；只打开 1 场详情'
     ];
+    const urlEvents = extraction.events.filter(event => event.sourceUrl).length;
+    if (urlEvents > 1) knownDeviations.push('多个活动共用同一详情 URL（' + urlEvents + ' 场）；review 已标 high');
+    const truncatedNames = (review.issues || []).filter(issue => issue.field === 'company' && /截断|缺少/.test(issue.issue || '')).length;
+    if (truncatedNames) knownDeviations.push(truncatedNames + ' 个单位名被页面截断；review 已标 high，未编造');
+    knownDeviations.push('冲突用例为 out-of-band 改 1 行（不触发写网关/审计），不是界面修改');
+    knownDeviations.push(screenshotBackupDir ? '原始页面截图含联系方式，已备份到本机 SCREENSHOT_BACKUP_DIR（不入库）' : '原始页面截图含联系方式，仅保留本机临时路径');
+    manifest.knownDeviations = knownDeviations;
     manifest.signature = {statement: '验收通过（含已知偏差）', date: new Date().toISOString().slice(0, 10), name: ownerName};
     await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
     log('manifest written', manifestFile);
@@ -304,8 +321,7 @@ async function run() {
 
     const verify = execFileSync(process.execPath, [verifyFile, manifestFile], {cwd: root, encoding: 'utf8'});
     log('verify', verify.trim());
-    // sign README only after verifier success AND an explicit human/owner opt-in
-    if (process.env.CONFIRM_SIGN !== '1') throw new Error('拒绝自动签字：请 owner 确认后设置 CONFIRM_SIGN=1 再运行（或手动填 README 签字区）。');
+    // sign README only after verifier success; CONFIRM_SIGN was checked before writing the manifest
     let readme = await readFile(readmeFile, 'utf8');
     const manifestSha = sha(manifestFile);
     readme = readme
@@ -313,7 +329,7 @@ async function run() {
       .replace(/^- 日期：.*$/m, '- 日期：' + manifest.signature.date)
       .replace(/^- 验收人：.*$/m, '- 验收人：' + ownerName)
       .replace(/^- 证据清单：.*$/m, '- 证据清单：manifest.json sha256 ' + manifestSha)
-      .replace(/^- 备注：.*$/m, '- 备注：live 首验按本 README 执行；确定性回归 333 项通过，证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（显式 MODEL_VAULT_DIR，运行后删副本）；复核为 claude -p --tools \"\" 的本地 MCP 桥，不是 claude mcp serve；列表 3 场活动均写入、events[1..2] 复用同一详情 URL；2 个单位名被页面截断（review 已标 high）；原始截图仅本机临时路径。');
+      .replace(/^- 备注：.*$/m, '- 备注：live 首验按本 README 执行；确定性回归 334 项通过；证据包校验通过。已知偏差：' + manifest.knownDeviations.join('；') + '。');
     await writeFile(readmeFile, readme);
     log('README signed');
     log('DONE dataDir=' + dataDir);
