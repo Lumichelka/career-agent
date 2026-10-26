@@ -267,8 +267,8 @@ async function runOperatorStep(page, step, signal) {
       return;
     case 'playwright':
       // 任意 Playwright 动作：AI/playbook 可在进程内注入函数，不受固定动作表限制。
-      await step.perform({page, signal});
-      return;
+      // 返回值可以是一组后续步骤：用于「先读列表，再按列表逐篇打开」这类运行时才知道的计划。
+      return await step.perform({page, signal});
     default:
       throw new OperatorError('INVALID_OPERATOR_STEP', '未知操作：' + step.action);
   }
@@ -427,10 +427,11 @@ export async function executeOperatorPlan({
       let result = 'ok';
       let reason = '';
       let attempts = 0;
+      let produced = undefined;
 
       while (true) {
         try {
-          await runOperatorStep(page, step, signal);
+          produced = await runOperatorStep(page, step, signal);
           break;
         } catch (error) {
           if (error?.name === 'AbortError' || signal?.aborted) throw operatorAbortError();
@@ -483,6 +484,17 @@ export async function executeOperatorPlan({
         emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '人工处理后继续操作'});
         index += 1;
         continue;
+      }
+
+      // 运行时计划：playwright 步骤返回后续步骤（例如按读到的文章列表逐篇打开）。
+      // 只影响本进程内的计划，HTTP JSON 步骤仍然不可能注入函数。
+      if (Array.isArray(produced) && produced.length) {
+        if (plan.length + produced.length > 200) {
+          throw new OperatorError('INVALID_OPERATOR_STEP', '运行时追加后步骤超过 200 步上限。');
+        }
+        const extra = produced.map((item, offset) => normalizeOperatorStep(item, index + 1 + offset));
+        plan.splice(index + 1, 0, ...extra);
+        emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '继续执行运行时追加的 ' + extra.length + ' 步'});
       }
 
       await recordStep({result, reason, startedAt, started});
@@ -539,7 +551,9 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
 
   // sourceId + playbook = 来源卡上的「AI 兜底」：手动触发，复用同一个 operator 任务/证据/写网关。
   // 不带 playbook 时保持既有行为（任意 URL 或显式 steps），互不影响。
-  async function start({user, sourceId, url, steps, playbook: playbookId} = {}) {
+  // source/title/execute 只给进程内调用方（例如公众号操作）用；HTTP 入口仍然只接受
+  // sourceId|url/playbook + 普通 JSON 步骤，不能从这里注入函数。
+  async function start({user, sourceId, url, steps, playbook: playbookId, source: sourceOverride = null, title: titleOverride = '', execute: executeOverride = null} = {}) {
     let fallback = null;
     if (playbookId) {
       fallback = await loadPlaybook(playbookId);
@@ -550,36 +564,45 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
         return {status: 400, json: {error: 'playbook 没有入口地址：' + fallback.id, code: 'PLAYBOOK_WITHOUT_ENTRY'}};
       }
     }
-    const target = resolveSourceCheckTarget({sourceId, url});
     let source;
-    if (target.error) {
-      // 公众号账号（wechat:<id>）不在源注册表里：用 playbook 的入口地址合成只读目标。
-      // 只有带 playbook 时才这么做，普通 operator 仍按原来的错误返回。
-      if (!fallback || String(url || '').trim()) {
-        return {status: 400, json: {error: target.error.message, code: target.error.code}};
+    if (sourceOverride) {
+      if (sourceOverride.listUrl && !checkOperatorUrl(sourceOverride.listUrl).ok) {
+        return {status: 400, json: {error: '来源地址不在操作员允许范围内', code: 'INVALID_URL'}};
       }
-      const entry = fallback.entry.find(item => /^https?:\/\//i.test(item));
-      const synthetic = resolveSourceCheckTarget({url: entry});
-      if (synthetic.error) return {status: 400, json: {error: synthetic.error.message, code: synthetic.error.code}};
-      const fallbackName = String(sourceId || '').startsWith('wechat:') ? '微信公众号' : fallback.title;
-      source = {...synthetic.source, id: String(sourceId || fallback.id), name: fallbackName, playbook: fallback.id, fallback: true};
+      source = sourceOverride;
     } else {
-      source = target.source;
-      if (fallback && target.kind === 'source' && !playbookMatchesSource(fallback, source.id)) {
-        return {status: 400, json: {error: 'playbook ' + fallback.id + ' 不适用于来源 ' + source.id, code: 'PLAYBOOK_SOURCE_MISMATCH'}};
+      const target = resolveSourceCheckTarget({sourceId, url});
+      if (target.error) {
+        // 公众号账号（wechat:<id>）不在源注册表里：用 playbook 的入口地址合成只读目标。
+        // 只有带 playbook 时才这么做，普通 operator 仍按原来的错误返回。
+        if (!fallback || String(url || '').trim()) {
+          return {status: 400, json: {error: target.error.message, code: target.error.code}};
+        }
+        const entry = fallback.entry.find(item => /^https?:\/\//i.test(item));
+        const synthetic = resolveSourceCheckTarget({url: entry});
+        if (synthetic.error) return {status: 400, json: {error: synthetic.error.message, code: synthetic.error.code}};
+        const fallbackName = String(sourceId || '').startsWith('wechat:') ? '微信公众号' : fallback.title;
+        source = {...synthetic.source, id: String(sourceId || fallback.id), name: fallbackName, playbook: fallback.id, fallback: true};
+      } else {
+        source = target.source;
+        if (fallback && target.kind === 'source' && !playbookMatchesSource(fallback, source.id)) {
+          return {status: 400, json: {error: 'playbook ' + fallback.id + ' 不适用于来源 ' + source.id, code: 'PLAYBOOK_SOURCE_MISMATCH'}};
+        }
+        if (fallback) source = {...source, playbook: fallback.id, fallback: true};
       }
-      if (fallback) source = {...source, playbook: fallback.id, fallback: true};
     }
-    let plan;
-    try {
-      plan = fallback && !(Array.isArray(steps) && steps.length)
-        ? normalizeOperatorSteps(playbookSteps(fallback), {source})
-        : normalizeOperatorSteps(steps, {source});
-    } catch (error) {
-      return {status: 400, json: {error: String(error.message || '操作步骤无效'), code: String(error.code || 'INVALID_OPERATOR_STEP')}};
+    let plan = null;
+    if (typeof executeOverride !== 'function') {
+      try {
+        plan = fallback && !(Array.isArray(steps) && steps.length)
+          ? normalizeOperatorSteps(playbookSteps(fallback), {source})
+          : normalizeOperatorSteps(steps, {source});
+      } catch (error) {
+        return {status: 400, json: {error: String(error.message || '操作步骤无效'), code: String(error.code || 'INVALID_OPERATOR_STEP')}};
+      }
     }
     const label = source.school || source.name || '来源操作';
-    const title = (fallback ? AI_FALLBACK_TITLE_PREFIX : '来源操作 · ') + label;
+    const title = String(titleOverride || ((fallback ? AI_FALLBACK_TITLE_PREFIX : '来源操作 · ') + label)).slice(0, 200);
     const session = {
       id: randomUUID(),
       title,
@@ -597,25 +620,23 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
       userId: user.id,
       sessionId: session.id,
       title,
-      sourceName: fallback ? 'AI 兜底' : '来源操作',
+      sourceName: fallback ? 'AI 兜底' : (executeOverride ? (source.name || '来源操作') : '来源操作'),
       onCreate: task => resolveCreated(task),
       execute: async ({task, signal, emit, addEvidence, setPhase, suspendTimeout}) => {
         let ok = false;
         try {
-          const out = await executeOperatorPlan({
-            profileDir: operatorProfileDir(dataDir, user.id),
-            evidenceDir: evidenceDirFor(dataDir, user.id, task.id),
-            taskId: task.id,
-            steps: plan,
-            source,
-            launch,
-            maxActiveMs,
-            signal,
-            emit,
-            addEvidence,
-            setPhase,
-            askHuman: info => askHuman({userId: user.id, taskId: task.id, info, emit, signal, suspendTimeout})
-          });
+          const profileDir = operatorProfileDir(dataDir, user.id);
+          const evidenceDir = evidenceDirFor(dataDir, user.id, task.id);
+          const ask = info => askHuman({userId: user.id, taskId: task.id, info, emit, signal, suspendTimeout});
+          const out = typeof executeOverride === 'function'
+            ? await executeOverride({
+              task, signal, emit, addEvidence, setPhase, suspendTimeout, askHuman: ask,
+              source, launch, maxActiveMs, profileDir, evidenceDir
+            })
+            : await executeOperatorPlan({
+              profileDir, evidenceDir, taskId: task.id, steps: plan, source, launch, maxActiveMs,
+              signal, emit, addEvidence, setPhase, askHuman: ask
+            });
           ok = true;
           return out;
         } finally {

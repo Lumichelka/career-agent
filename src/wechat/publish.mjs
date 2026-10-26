@@ -136,11 +136,13 @@ export async function publishArticle({dir, articleId, store, recruitStore, analy
       });
       const payload = {articleId: article.id, sourceId, title, startAt, projects: rows};
       const idempotencyKey = String(audit.idempotencyKey || ('wechat-publish:' + sha1([article.id, title, startAt, JSON.stringify(rows)].join('|')).slice(0, 24))).slice(0, 200);
+      // 公众号操作员可以把证据文件挂到审计来源（artifact:<file>），feed 的 evidence_ref/evidence_available 据此解析。
+      const sourceRef = Object.hasOwn(audit, 'sourceRef') ? audit.sourceRef : {article: article.url, articleId: article.id};
       outcome = await gateway.write({
         tool: audit.tool || 'career_wechat_publish',
         payload,
         idempotencyKey,
-        sourceRef: {article: article.url, articleId: article.id},
+        sourceRef,
         execute: write
       });
     } else {

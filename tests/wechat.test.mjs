@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, rm, readdir, writeFile} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -11,6 +12,17 @@ import {analyzeArticle} from '../src/wechat/analyze.mjs';
 import {handleRecruit} from '../src/recruit/api.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {publishArticle} from '../src/wechat/publish.mjs';
+import {readFeed} from '../src/recruit/feed.mjs';
+import {feed as careerFeed} from '../src/tools/handlers/recruit.mjs';
+import {undoTask} from '../src/writes/undo.mjs';
+import {
+  OperatorError, OPERATOR_LAUNCH_OPTIONS
+} from '../src/source-check/operator.mjs';
+import {
+  WECHAT_OPERATOR_TOOL, WECHAT_ARTICLE_LIMIT,
+  pickWechatOperatorAccount, normalizeWechatOperatorArticles, wechatProfileUrl,
+  runWechatOperator
+} from '../src/wechat/operator.mjs';
 
 async function withDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'zx-wechat-'));
@@ -538,5 +550,213 @@ test('升级真实旧库：清演示数据、把“未归类”文章自动归�
       assert.ok(!store.listAccounts().some(a => a.name === '未归类公众号'));
       assert.equal(store.getAccount(zhongda.id).biz, 'ZdReal');
     } finally { store.close(); }
+  });
+});
+
+// ---- 公众号 AI 操作员（#59）----
+
+const WECHAT_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+
+function fakeWechatPage({title = '公众号文章列表', text = '西南财经大学公众号'} = {}) {
+  const calls = [];
+  const handlers = new Map();
+  let currentUrl = 'https://mp.weixin.qq.com/mp/profile_ext?action=home';
+  const page = {
+    calls,
+    url: () => currentUrl,
+    setUrl: value => { currentUrl = String(value); },
+    title: async () => title,
+    goto: async url => { calls.push({action: 'goto', url}); currentUrl = url; },
+    click: async selector => { calls.push({action: 'click', selector}); },
+    fill: async (selector, value) => { calls.push({action: 'fill', selector, value}); },
+    press: async (selector, key) => { calls.push({action: 'press', selector, key}); },
+    evaluate: async script => {
+      if (typeof script === 'function') { calls.push({action: 'evaluate_fn'}); return text; }
+      calls.push({action: 'evaluate', script});
+      return null;
+    },
+    screenshot: async ({path}) => { calls.push({action: 'screenshot', path}); await writeFile(path, WECHAT_PNG); },
+    waitForTimeout: async ms => { calls.push({action: 'wait', ms}); await new Promise(resolve => setTimeout(resolve, ms)); },
+    on: (name, handler) => { if (!handlers.has(name)) handlers.set(name, []); handlers.get(name).push(handler); return page; },
+    emit: async (name, value) => { for (const handler of handlers.get(name) || []) await handler(value); }
+  };
+  return page;
+}
+
+function fakeWechatLauncher(page, capture = {}) {
+  const context = {
+    pages: () => [page],
+    newPage: async () => page,
+    route: async () => {},
+    on: () => {},
+    close: async () => { capture.closed = true; }
+  };
+  return async options => { capture.options = options; return context; };
+}
+
+const WECHAT_ARTICLE_URLS = {
+  jobfair: 'https://mp.weixin.qq.com/s?__biz=MzM5MDAxMzM4MQ%3D%3D&mid=2650000001&idx=1&sn=jobfair59',
+  nodate: 'https://mp.weixin.qq.com/s?__biz=MzM5MDAxMzM4MQ%3D%3D&mid=2650000002&idx=1&sn=nodate59',
+  monthly: 'https://mp.weixin.qq.com/s?__biz=MzM5MDAxMzM4MQ%3D%3D&mid=2650000003&idx=1&sn=monthly59'
+};
+
+function fixtureWechatReaders({listError = null} = {}) {
+  const jobfair = readFileSync(new URL('./fixtures/wechat-xicai-article.txt', import.meta.url), 'utf8');
+  const bodies = {
+    jobfair59: {title: '西南财经大学2027届秋季双选会邀请函', nickname: '西财校招', publishedAt: '2026-11-10', text: jobfair},
+    nodate59: {title: '西南财经大学秋季双选会参会单位', nickname: '西财校招', text: '西南财经大学秋季双选会参会单位\n中国工商银行股份有限公司\n成都银行股份有限公司\n本次双选会由学校就业指导中心组织，请同学们携带简历参加。具体举办时间与地点请关注后续通知，不要错过与用人单位当面交流的机会。请提前准备纸质简历，并留意现场引导与展位分布。'},
+    monthly59: {title: '@西财学子 你有一份2026就业升学月历待查收', nickname: '西财校招', text: '西南财经大学就业\n求职 寒假实习招聘仍在报名。\n计划就业的应届毕业生可以先明确目标，合理安排求职节奏。\n本月还有多场就业指导讲座与简历门诊活动，欢迎同学们关注学校就业信息网，及时了解最新安排。请合理安排课程与求职时间，提前做好材料准备。学校就业指导中心将持续发布招聘信息与活动通知，请保持关注。'}
+  };
+  const calls = [];
+  let listCalls = 0;
+  return {
+    calls,
+    bodies,
+    list: async () => {
+      listCalls += 1;
+      calls.push({kind: 'list', n: listCalls});
+      if (listError && listCalls === 1) throw listError;
+      return [
+        {title: '西南财经大学2027届秋季双选会邀请函', url: WECHAT_ARTICLE_URLS.jobfair},
+        {title: '西南财经大学秋季双选会参会单位', url: WECHAT_ARTICLE_URLS.nodate},
+        {title: '@西财学子 你有一份2026就业升学月历待查收', url: WECHAT_ARTICLE_URLS.monthly}
+      ];
+    },
+    article: async ({article}) => {
+      calls.push({kind: 'article', url: article.url});
+      return bodies[new URL(article.url).searchParams.get('sn')];
+    }
+  };
+}
+
+function xicaiAccount(dir) {
+  const store = WeChatStore.open(join(dir, 'wechat.db'));
+  try { return store.listAccounts().find(account => account.name === '西财校招'); } finally { store.close(); }
+}
+
+test('公众号 AI 操作员：首选西财校招、次选上财就业，列表只收公众号文章链接', () => {
+  assert.equal(pickWechatOperatorAccount([{name: '上海财经大学就业', biz: 'sufe'}, {name: '西财校招', biz: 'xicai'}]).name, '西财校招');
+  assert.equal(pickWechatOperatorAccount([{name: '上海财经大学就业', biz: 'sufe'}]).name, '上海财经大学就业');
+  assert.equal(pickWechatOperatorAccount([]), null);
+  assert.match(wechatProfileUrl({biz: 'abc+/='}), /__biz=abc%2B%2F%3D/);
+  const list = normalizeWechatOperatorArticles([
+    {title: '一', url: 'https://mp.weixin.qq.com/s?__biz=X&mid=1&idx=1&sn=1'},
+    {title: '重复', url: 'http://mp.weixin.qq.com/s?__biz=X&mid=1&idx=1&sn=1&chksm=y#rd'},
+    {title: '外部', url: 'https://example.com/s?x=1'},
+    {title: '主页', url: 'https://mp.weixin.qq.com/mp/profile_ext?action=home&__biz=X'}
+  ], {limit: 5});
+  assert.equal(list.length, 1);
+  assert.equal(list[0].url, 'https://mp.weixin.qq.com/s?__biz=X&mid=1&idx=1&sn=1');
+  assert.equal(WECHAT_ARTICLE_LIMIT, 5);
+});
+
+test('公众号 AI 操作员：fixture 文章列表+正文 → 活动/项目/证据/feed/撤销', {timeout: 30000}, async () => {
+  await withDir(async dir => {
+    const account = xicaiAccount(dir);
+    const taskId = '77777777-7777-4777-8777-777777777777';
+    const readers = fixtureWechatReaders();
+    const page = fakeWechatPage();
+    const capture = {};
+    const evidence = [];
+    const out = await runWechatOperator({
+      dataDir: dir, wechatDir: dir, userId: 'user-59', task: {id: taskId}, account,
+      launch: fakeWechatLauncher(page, capture), readers,
+      emit: () => {}, addEvidence: entry => evidence.push(entry), setPhase: () => {},
+      askHuman: async () => { throw new Error('fixture 流程不应暂停'); }
+    });
+
+    assert.equal(out.ok, true);
+    assert.equal(out.articles, 3);
+    assert.equal(out.published.length, 1);
+    assert.deepEqual(out.skipped.map(item => item.reason).sort(), ['invalid_start_at', 'no_units']);
+    assert.equal(out.written, 7, '1 场活动 + 6 个单位');
+    assert.equal(capture.options.profileDir, join(dir, 'users', 'user-59', 'profile'));
+    assert.equal(capture.options.options.headless, false);
+    assert.equal(OPERATOR_LAUNCH_OPTIONS.headless, false);
+    assert.equal(capture.closed, true);
+    assert.deepEqual(readers.calls.map(call => call.kind), ['list', 'article', 'article', 'article']);
+    assert.equal(page.calls.filter(call => call.action === 'goto').length, 4, '列表 1 次 + 正文 3 篇');
+    assert.ok(page.calls.filter(call => call.action === 'screenshot').length >= 4, '每步截图');
+
+    const evidenceDir = join(dir, 'users', 'user-59', 'tasks', taskId, 'evidence');
+    const files = await readdir(evidenceDir);
+    for (const file of ['wechat-list.json', 'wechat-article-001.json', 'wechat-article-002.json', 'wechat-article-003.json']) {
+      assert.ok(files.includes(file), '缺证据文件：' + file);
+    }
+    assert.ok(evidence.some(item => /公众号文章列表/.test(item.label)));
+    assert.ok(evidence.some(item => /公众号文章/.test(item.label)));
+
+    const rs = RecruitStore.open(join(dir, 'recruit.db'));
+    let audits;
+    try {
+      const events = rs.listEvents({limit: 10, withProjects: true});
+      assert.equal(events.length, 1, '只对「单位 + 合法 startAt」的文章生成活动');
+      const event = events[0];
+      assert.equal(event.sourceUrl, WECHAT_ARTICLE_URLS.jobfair);
+      assert.equal(event.startAt, '2026-11-20T14:00:00+08:00');
+      assert.ok(event.sourceId.startsWith('wechat:'));
+      assert.equal(event.projects.length, 6);
+      const fixtureText = readers.bodies.jobfair59.text;
+      assert.ok(event.projects.every(project => fixtureText.includes(project.company)), '0 编造：单位都能在正文里找到');
+
+      audits = rs.db.prepare('SELECT * FROM write_audit ORDER BY seq').all();
+      assert.equal(audits.length, 7);
+      assert.ok(audits.every(row => row.user_id === 'user-59' && row.task_id === taskId && row.tool === WECHAT_OPERATOR_TOOL));
+      assert.ok(audits.every(row => row.source_ref === 'artifact:wechat-article-001.json'));
+
+      const feed = readFeed({db: rs.db, dataDir: dir, userId: 'user-59', types: ['event', 'project']});
+      assert.equal(feed.entries.length, 7);
+      for (const entry of feed.entries) {
+        const record = entry.record;
+        assert.equal(record.source_url, WECHAT_ARTICLE_URLS.jobfair);
+        assert.match(record.fetched_at, /^\d{4}-\d{2}-\d{2}T/);
+        assert.ok(record.confidence > 0);
+        assert.equal(record.evidence_ref, 'artifact:wechat-article-001.json');
+        assert.equal(record.evidence_available, true);
+        assert.equal(record.operation_id, taskId);
+      }
+    } finally { rs.close(); }
+
+    // /chat 与入站 MCP 共用的 career_feed 工具读同一条路径。
+    const chatFeed = await careerFeed({}, {config: {recruitDir: dir, dataDir: dir, userId: 'user-59'}});
+    assert.equal(chatFeed.status, 'readable');
+    assert.ok(chatFeed.entries.length >= 3);
+    assert.ok(chatFeed.entries.every(entry => entry.record.evidence_ref && entry.record.source_url));
+
+    // 可撤销：任务级撤销删回所有业务行，feed 增量里能看到 undo。
+    const undo = await undoTask({dir, userId: 'user-59', taskId});
+    assert.ok(undo.counts.undone >= 7, '活动与项目都要能撤销');
+    const after = RecruitStore.open(join(dir, 'recruit.db'));
+    try {
+      assert.equal(after.listEvents({limit: 10}).length, 0);
+      assert.equal(after.db.prepare('SELECT COUNT(*) c FROM event_projects').get().c, 0);
+      const incremental = readFeed({db: after.db, dataDir: dir, userId: 'user-59', types: ['event', 'project'], since: 0});
+      assert.ok(incremental.entries.some(entry => entry.op === 'undo'));
+    } finally { after.close(); }
+  });
+});
+
+test('公众号 AI 操作员：登录墙暂停 waiting_login，人工继续后从停点续跑并写库', {timeout: 30000}, async () => {
+  await withDir(async dir => {
+    const account = xicaiAccount(dir);
+    const readers = fixtureWechatReaders({listError: new OperatorError('OPERATOR_LOGIN_REQUIRED', '公众号文章列表需要登录或验证，请在本窗口登录后点「已登录，继续」。', '不要绕过微信验证。')});
+    const page = fakeWechatPage();
+    const capture = {};
+    const humans = [];
+    const out = await runWechatOperator({
+      dataDir: dir, wechatDir: dir, userId: 'user-59b', task: {id: '88888888-8888-4888-8888-888888888888'}, account,
+      launch: fakeWechatLauncher(page, capture), readers,
+      emit: () => {}, addEvidence: async () => {}, setPhase: () => {},
+      askHuman: async info => { humans.push(info); return {action: 'resume'}; }
+    });
+
+    assert.equal(out.ok, true);
+    assert.equal(humans.length, 1);
+    assert.equal(humans[0].state, 'waiting_login');
+    assert.equal(humans[0].kind, 'login');
+    assert.match(humans[0].reason, /登录/);
+    assert.equal(readers.calls.filter(call => call.kind === 'list').length, 2, '人工处理后重试读列表，不重跑已完成的打开页面');
+    assert.equal(page.calls.filter(call => call.action === 'goto').length, 4);
+    assert.equal(out.published.length, 1);
   });
 });

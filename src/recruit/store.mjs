@@ -401,22 +401,23 @@ export class RecruitStore {
       const sourceKey = String(p.sourceKey || createHash('sha1').update([sourceId, company, title, p.sourceUrl || ''].join('|')).digest('hex').slice(0, 32));
       const existing = this.db.prepare('SELECT * FROM event_projects WHERE event_id=? AND source_id=? AND source_key=?').get(eventId, sourceId, sourceKey);
       if (existing) {
-        this.db.prepare(`UPDATE event_projects SET company=?,title=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,notes=?,confidence=?,raw_text=?,status='active',missing_runs=0,last_seen_at=?,updated_at=? WHERE id=?`)
+        this.db.prepare(`UPDATE event_projects SET company=?,title=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,notes=?,confidence=?,raw_text=?,status='active',missing_runs=0,last_seen_at=?,updated_at=?,fetched_at=? WHERE id=?`)
           .run(company, title, String(p.positions || '').slice(0, 2000), String(p.requirements || '').slice(0, 4000),
             String(p.applyMode || '').slice(0, 60), String(p.applyUrl || '').slice(0, 500), String(p.sourceUrl || '').slice(0, 500),
             String(p.notes || '').slice(0, 2000), Number.isFinite(Number(p.confidence)) ? Number(p.confidence) : 0.8,
-            String(p.rawText || '').slice(0, 4000), now, now, existing.id);
+            String(p.rawText || '').slice(0, 4000), now, now, now, existing.id);
         const saved = this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(existing.id);
         changes.push({action: 'update', entity: 'event_projects', entityId: existing.id, oldValues: rowToProject(existing), newValues: rowToProject(saved), note: '来源项目同步'});
         result.updated++;
       } else {
         const id = randomUUID();
-        this.db.prepare(`INSERT INTO event_projects(id,event_id,company,title,positions,requirements,apply_mode,apply_url,source_url,notes,source_id,source_key,status,confidence,first_seen_at,last_seen_at,missing_runs,raw_text,created_at,updated_at)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`)
+        // 列顺序必须与 VALUES 对齐：first_seen_at, last_seen_at, missing_runs(0), raw_text, created_at, updated_at, fetched_at。
+        this.db.prepare(`INSERT INTO event_projects(id,event_id,company,title,positions,requirements,apply_mode,apply_url,source_url,notes,source_id,source_key,status,confidence,first_seen_at,last_seen_at,missing_runs,raw_text,created_at,updated_at,fetched_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)`)
           .run(id, eventId, company, title, String(p.positions || '').slice(0, 2000), String(p.requirements || '').slice(0, 4000),
             String(p.applyMode || '').slice(0, 60), String(p.applyUrl || '').slice(0, 500), String(p.sourceUrl || '').slice(0, 500),
             String(p.notes || '').slice(0, 2000), sourceId, sourceKey, 'active',
-            Number.isFinite(Number(p.confidence)) ? Number(p.confidence) : 0.8, now, String(p.rawText || '').slice(0, 4000), now, now);
+            Number.isFinite(Number(p.confidence)) ? Number(p.confidence) : 0.8, now, now, String(p.rawText || '').slice(0, 4000), now, now, now);
         const saved = this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(id);
         changes.push({action: 'create', entity: 'event_projects', entityId: id, oldValues: null, newValues: rowToProject(saved), note: '来源项目同步'});
         result.created++;

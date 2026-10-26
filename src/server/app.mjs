@@ -13,6 +13,8 @@ import {listPlatformJobs, savePlatformJobs} from '../recruit/platform-jobs-servi
 import {handleResume} from '../resume/api.mjs';
 import {handleCompany} from '../company/api.mjs';
 import {handleWechat} from '../wechat/api.mjs';
+import {WeChatStore} from '../wechat/store.mjs';
+import {runWechatOperator, pickWechatOperatorAccount, wechatProfileUrl} from '../wechat/operator.mjs';
 import http from 'node:http';
 import os from 'node:os';
 import {readFile, mkdir, writeFile, readdir, copyFile, unlink} from 'node:fs/promises';
@@ -110,6 +112,42 @@ const operatorService = createOperatorService({
   ...(sourceCheck?.operator?.launch ? {launch: sourceCheck.operator.launch} : {}),
   ...(sourceCheck?.operator?.maxActiveMs ? {maxActiveMs: sourceCheck.operator.maxActiveMs} : {})
 });
+
+// 公众号 AI 操作员（#59）：连同账号解析一起挂到同一个 operator 任务上。
+// HTTP 只传 accountId；页面读取器可在测试里注入 fixture，不访问真实微信网络。
+async function startWechatOperator({user, dir, body = {}}) {
+  const store = WeChatStore.open(join(dir, 'wechat.db'));
+  let account = null;
+  try {
+    account = body.accountId ? store.getAccount(String(body.accountId)) : pickWechatOperatorAccount(store.listAccounts());
+  } finally { store.close(); }
+  if (!account) {
+    return {status: 400, json: {error: '没有可用的公众号账号；请先添加公众号或导入一篇文章识别 biz。', code: 'WECHAT_OPERATOR_NO_ACCOUNT'}};
+  }
+  if (!account.biz) {
+    return {status: 400, json: {error: '这个公众号还没有 biz 标识，无法打开文章列表；请先导入一篇文章自动识别 biz。', code: 'WECHAT_OPERATOR_NO_BIZ'}};
+  }
+  const out = await operatorService.start({
+    user,
+    title: '公众号操作 · ' + account.name,
+    source: {id: 'wechat:' + account.id, name: account.name, school: account.school || '', listUrl: wechatProfileUrl(account)},
+    execute: ctx => runWechatOperator({
+      ...ctx,
+      dataDir,
+      userId: user.id,
+      account,
+      wechatDir: dir,
+      readers: sourceCheck?.wechatOperator?.readers || undefined,
+      limit: sourceCheck?.wechatOperator?.limit
+    })
+  });
+  if (out.json) {
+    out.json.accountId = account.id;
+    out.json.accountName = account.name;
+    out.json.mode = 'wechat_operator';
+  }
+  return out;
+}
 let actualPort = Number(port);
 let localOrigin = 'http://127.0.0.1:' + actualPort;
 let allowedHosts = new Set();
@@ -610,6 +648,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (url.pathname === '/api/source-check/operator/confirm') {
         const out = operatorService.confirm({userId: user.id, taskId: body.taskId, decision: body.decision});
+        return send(res, out.json, out.status || 200);
+      }
+      // 公众号 AI 采集：默认西财校招，次选上财就业；浏览器在可见窗口里登录，用户人工接管。
+      if (url.pathname === '/api/wechat/operator/start') {
+        const out = await startWechatOperator({user, dir, body});
         return send(res, out.json, out.status || 200);
       }
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
