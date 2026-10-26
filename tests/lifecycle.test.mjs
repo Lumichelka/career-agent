@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {extractInterview} from '../src/recruit/collect.mjs';
+import {SOURCES, REMOVED_SOURCES} from '../src/recruit/sources/index.mjs';
 
 const now = () => new Date().toISOString();
 const baseEvent = (over = {}) => ({
@@ -139,3 +140,110 @@ test('多源合并时保留已有的环节/类型', async () => {
     } finally { store.close(); }
   });
 });
+
+// —— 来源生命周期与谱系（#47）——
+
+// 稳定的活动 id（24 位逐条唯一）；source_id 决定学校/城市/类型。
+const mkEvent = (i, sourceId, over = {}) => ({
+  id: String(i).padStart(24, '0'),
+  sourceId,
+  school: sourceId === 'nankai-recruitment' ? '南开大学' : '中山大学',
+  city: sourceId === 'nankai-recruitment' ? '天津' : '广州',
+  kind: sourceId === 'nankai-recruitment' ? '双选会' : '宣讲会',
+  title: '测试活动' + i,
+  company: '',
+  startAt: '2026-11-01T09:00:00+08:00',
+  endAt: '',
+  venue: '',
+  fetchedAt: now(),
+  confidence: 0.6,
+  ...over
+});
+
+test('来源对账：注册表源保持 active，墓碑源保留并标 orphaned', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      const states = store.sourceStates();
+      const byId = Object.fromEntries(states.map(s => [s.id, s]));
+      assert.equal(states.length, SOURCES.length + REMOVED_SOURCES.length);
+      assert.equal(byId['scu-employ'].orphaned, 0);
+      assert.equal(byId['nankai-recruitment'].orphaned, 1);
+      assert.equal(byId['nankai-recruitment'].enabled, 0);
+      assert.equal(byId['nankai-recruitment'].name, '南开大学 · 双选会信息');
+      assert.equal(byId['sysu-home'].orphaned, 1);
+    } finally { store.close(); }
+  });
+});
+
+test('来源对账：表里有但不在注册表/墓碑的源标 orphaned，不删除', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      // 模拟漂移：下一次同步时某源从注册表消失，且没有墓碑
+      const trimmed = SOURCES.filter(s => s.id !== 'cufe-scc');
+      store.syncSources(trimmed, REMOVED_SOURCES);
+      const byId = Object.fromEntries(store.sourceStates().map(s => [s.id, s]));
+      assert.equal(byId['cufe-scc'].orphaned, 1);
+      assert.equal(byId['cufe-scc'].enabled, 0);
+    } finally { store.close(); }
+  });
+});
+
+test('谱系迁移：孤儿源活动标 orphaned，重复执行幂等', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.upsertEvent(mkEvent(1, 'nankai-recruitment'));
+      store.upsertEvent(mkEvent(2, 'sysu-home'));
+      assert.equal(store.getEvent(String(1).padStart(24, '0')).status, 'active');
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      assert.equal(store.getEvent(String(1).padStart(24, '0')).status, 'orphaned');
+      assert.equal(store.getEvent(String(2).padStart(24, '0')).status, 'orphaned');
+      // 幂等：再跑一次结果不变
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      assert.equal(store.getEvent(String(1).padStart(24, '0')).status, 'orphaned');
+    } finally { store.close(); }
+  });
+});
+
+test('谱系迁移：取消活动即使来自孤儿源也保持 cancelled', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.upsertEvent(mkEvent(1, 'nankai-recruitment', {status: 'cancelled', title: '活动取消通知'}));
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      assert.equal(store.getEvent(String(1).padStart(24, '0')).status, 'cancelled');
+    } finally { store.close(); }
+  });
+});
+
+test('谱系验收：孤儿活动都能追溯到历史来源（source_id 有 orphaned 行）', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      for (let i = 1; i <= 20; i++) store.upsertEvent(mkEvent(i, 'nankai-recruitment'));
+      for (let i = 21; i <= 29; i++) store.upsertEvent(mkEvent(i, 'sysu-home'));
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      const byId = Object.fromEntries(store.sourceStates().map(s => [s.id, s]));
+      let orphaned = 0;
+      for (let i = 1; i <= 29; i++) {
+        const e = store.getEvent(String(i).padStart(24, '0'));
+        assert.equal(e.status, 'orphaned');
+        const src = byId[e.sourceId];
+        assert.ok(src, '缺少历史来源行：' + e.sourceId);
+        assert.equal(src.orphaned, 1);
+        orphaned++;
+      }
+      assert.equal(orphaned, 29);
+      // 0 个「有数据但来源表不存在」的源：每个 events.source_id 都能解析到行
+      const ids = new Set(store.db.prepare('SELECT DISTINCT source_id FROM events').all().map(r => r.source_id));
+      for (const id of ids) {
+        assert.ok(byId[id] || SOURCES.some(s => s.id === id), '存在无来源行的 source_id：' + id);
+      }
+    } finally { store.close(); }
+  });
+});
+

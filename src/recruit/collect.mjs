@@ -2,7 +2,7 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {fetchText} from './fetch.mjs';
-import {SOURCES, sourceById, guessKind, guessCompany, normalizeCity} from './sources/index.mjs';
+import {SOURCES, REMOVED_SOURCES, sourceById, guessKind, guessCompany, normalizeCity} from './sources/index.mjs';
 import {browserText, parseRenderedText} from './browser.mjs';
 import {RecruitStore} from './store.mjs';
 
@@ -98,7 +98,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
   const store = persist ? RecruitStore.open(join(dir, 'recruit.db')) : null;
-  if (store) store.syncSources(SOURCES);
+  if (store) store.syncSources(SOURCES, REMOVED_SOURCES);
   const result = {id: source.id, name: source.name, status: 'ok', fetched: 0, created: 0, updated: 0, projects: 0, projectEvents: 0, projectErrors: 0, message: '', durationMs: 0};
   try {
     if (!source.enabled) {

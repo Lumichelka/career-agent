@@ -252,6 +252,7 @@ function renderSources(sources,wechat){
   const rows=[];
   const manualLine=s=>{const m=sourceManual[s.id];return m?'<div class="src-sub manual-read">最近手动读取 '+esc(String(m.at||'').slice(0,16).replace('T',' '))+' · '+esc(m.reason||'')+'</div>':''};
   const statusBadge=s=>{
+    if(s.orphaned)return '<span class="badge err">来源已下线</span>';
     if(!s.enabled)return '<span class="badge off">未接入</span>';
     const st=s.last_status||'待采集';
     return '<span class="badge '+(/^(ok|connected)$/.test(st)?'ok':'off')+'">'+esc(st)+'</span>';
@@ -271,7 +272,7 @@ function renderSources(sources,wechat){
   }
   const rest=[];for(const [school,list] of wxBySchool)if(!shown.has(school))rest.push(...list);
   if(rest.length){rows.push('<div class="src-cat">公众号</div>');rows.push(...rest.map(accountRow));}
-  const sel=el('#ms-source');if(sel&&sel.options.length<=1)sel.innerHTML='<option value="">选择信息源</option>'+sources.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>').join('');
+  const sel=el('#ms-source');if(sel&&sel.options.length<=1)sel.innerHTML='<option value="">选择信息源</option>'+sources.filter(s=>!s.orphaned).map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>').join('');
   el('#sources').innerHTML='<div class="src-table"><div class="src-head"><span>来源 / 状态</span><span>方式</span><span>学校</span><span>最近</span><span>项目</span><span>操作</span></div>'+rows.join('')+'</div>';
 }
 function fmtTime(iso){
@@ -300,7 +301,7 @@ function renderDayDetail(){
   if(!day){el('#day-detail').innerHTML='<div class="empty">这天没有活动。</div>';return}
   const events=day.events.map(e=>{
     const projects=(e.projects||[]).map(p=>'<div class="project"><div><b>'+esc(p.company||'未填单位')+'</b> '+esc(p.title||'')+'<div class="hint">'+esc(p.positions||'')+(p.applyMode?' · '+esc(p.applyMode):'')+(p.applyUrl?' · '+esc(p.applyUrl):'')+'</div></div><a class="hint" href="/chat?project='+encodeURIComponent(p.id)+'">研究 ↗</a><button data-del-project="'+esc(p.id)+'">删除</button></div>').join('');
-    const flags=[e.status==='possibly_removed'?'<span class="flag bad">可能撤下</span>':'',e.interviewStage?'<span class="flag">'+esc([...new Set([e.interviewStage,e.interviewType].filter(Boolean))].join(' · '))+'</span>':'',(e.crossSources||[]).length>1?'<span class="flag ok">多源收录</span>':''].filter(Boolean).join(' ');
+    const flags=[e.status==='orphaned'?'<span class="flag bad">来源已下线</span>':'',e.status==='possibly_removed'?'<span class="flag bad">可能撤下</span>':'',e.interviewStage?'<span class="flag">'+esc([...new Set([e.interviewStage,e.interviewType].filter(Boolean))].join(' · '))+'</span>':'',(e.crossSources||[]).length>1?'<span class="flag ok">多源收录</span>':''].filter(Boolean).join(' ');
     return '<article class="ev"><time>'+esc(fmtTime(e.startAt))+(e.endAt?'–'+esc(fmtTime(e.endAt)):'')+'</time><div><p class="title">'+esc(e.title)+'</p><div class="meta">'+(e.company?'<b><a href="/companies?name='+encodeURIComponent(e.company)+'">'+esc(e.company)+'</a></b> · ':'')+esc(e.school)+' · '+esc(e.kind)+(e.venue?'<br>地点：'+esc(e.venue):'')+'<br>招聘项目：'+(e.projects||[]).length+' 个</div><div class="row">'+(e.sourceUrl?'<a href="'+esc(e.sourceUrl)+'" target="_blank" rel="noopener noreferrer">来源 ↗</a>':'')+'<a href="'+esc(mapFor(e))+'" target="_blank" rel="noopener noreferrer">地图 ↗</a><button data-verify="'+esc(e.id)+'">复核来源</button><button data-add-project="'+esc(e.id)+'">＋ 招聘项目</button><button data-bulk-project="'+esc(e.id)+'">批量粘贴</button></div><div class="projects">'+(projects||'<div class="hint">还没有拆分项目；双选会可在这里补充参会单位/岗位。</div>')+'</div><div class="bulk-form" data-bulk="'+esc(e.id)+'" hidden><textarea data-bulk-text placeholder="每行一个：单位 | 岗位 | 要求 | 投递方式 | 链接"></textarea><button data-save-bulk="'+esc(e.id)+'">批量保存</button></div><div class="project-form" data-form="'+esc(e.id)+'" hidden><input data-p-company placeholder="单位名称"><input data-p-title placeholder="项目/岗位名称"><input data-p-positions placeholder="岗位要求/专业"><input data-p-apply placeholder="投递方式（网申/邮箱/现场）"><input data-p-url placeholder="投递链接"><button data-save-project="'+esc(e.id)+'">保存项目</button></div></div><div class="side">'+flags+'</div></article>';
   }).join('');
   el('#day-detail').innerHTML='<h3 style="font-size:14px;margin:0 0 8px">'+esc(day.date)+' <span class="hint">'+events.length+' 项</span></h3>'+events;
