@@ -58,7 +58,7 @@ docs/acceptance/24-swufe/
        记录两次读取的 URL、页面标题、时间与视口（`screenshots.json`）。
 3. [x] 视觉模型 API 只依据两张截图抽取，产出 `extraction.json`：本次列表 3 场活动均写入、单位 10 家、读不到留空；列表 3 场与 events[1..2] 复用同一详情 URL 为已知偏差；
        联系方式 0 条（任务卡标「含联系方式，已跳过」）。
-4. [x] 外部 Agent 只收到抽取 JSON 与来源元数据做文本复核，产出 `review.json`（5 个问题，含 2 个截断单位名 high）；
+4. [x] 外部 Agent 只收到抽取 JSON 与来源元数据做文本复核，产出 `review.json`（3 个问题：1 个详情 URL 复用 + 2 个截断单位名 high）；
        问题只作建议，**写入集未被修改**；若复核不可用，本项记未通过，不得签「验收通过」。
 5. [x] 写库后核对：只写 `events` / `event_projects`；`source_id='manual'`；`source_url` 只记录；
        `notes` 标「浏览器截图读取（非采集器）」；`company.db` 未创建；无重复活动/单位；联系方式 0 条入库。
