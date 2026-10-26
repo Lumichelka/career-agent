@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {CompanyStore} from './store.mjs';
 import {RecruitStore} from '../recruit/store.mjs';
 import {ResumeStore} from '../resume/store.mjs';
+import {generateCompanyProfiles} from './research.mjs';
 
 const norm = s => String(s || '').replace(/\s+/g, '').toLowerCase();
 function sameCompany(a, b) {
@@ -32,7 +33,7 @@ function artifactName(title, body) {
   return String(body || '').split('\n').map(s => s.trim()).find(Boolean)?.slice(0, 80) || '未命名公司';
 }
 
-export async function handleCompany({method, pathname, body, dir}) {
+export async function handleCompany({method, pathname, body, dir, searchUrl = '', fetchImpl = fetch}) {
   const store = CompanyStore.open(join(dir, 'company.db'));
   try {
     const parts = pathname.split('/').filter(Boolean);
@@ -48,6 +49,16 @@ export async function handleCompany({method, pathname, body, dir}) {
     }
 
     if (method === 'POST') {
+      if (pathname === 'companies/generate') {
+        const out = await generateCompanyProfiles({
+          dataDir: dir,
+          searchUrl,
+          fetchImpl,
+          limit: Number(body?.limit) || undefined
+        });
+        return {json: out};
+      }
+
       if (pathname === 'companies') return {json: {company: store.save(body || {})}};
 
       if (pathname === 'companies/from-session') {

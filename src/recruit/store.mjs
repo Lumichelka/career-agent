@@ -232,6 +232,20 @@ export class RecruitStore {
     return this.db.prepare('SELECT * FROM event_projects WHERE event_id=? ORDER BY created_at ASC').all(eventId).map(rowToProject);
   }
 
+  // 高频单位：合并活动与项目里的单位名，按出现次数降序、名称升序排列。
+  // 排除取消/归档的活动、已移除的项目与空单位名；同名只做 TRIM 归并，不做简称/全称归一。
+  unitNameCounts({limit = 100} = {}) {
+    const rows = this.db.prepare(`
+      SELECT name, SUM(c) AS count FROM (
+        SELECT TRIM(company) AS name, COUNT(*) AS c FROM events
+          WHERE TRIM(company) != '' AND status NOT IN ('cancelled','archived') GROUP BY TRIM(company)
+        UNION ALL
+        SELECT TRIM(company) AS name, COUNT(*) AS c FROM event_projects
+          WHERE TRIM(company) != '' AND status != 'removed' GROUP BY TRIM(company)
+      ) GROUP BY name ORDER BY count DESC, name ASC LIMIT ?`).all(limit);
+    return rows.map(r => ({name: r.name, count: Number(r.count) || 0}));
+  }
+
   upsertProject(input) {
     const eventId = String(input.eventId || '');
     if (!eventId || !this.getEvent(eventId)) throw new Error('关联活动不存在');
