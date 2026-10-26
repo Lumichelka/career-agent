@@ -166,26 +166,38 @@ function projectRow(row) {
   };
 }
 
-// 按批次分组，批次新→旧，行内按 seq 升序；limit 限制批次数（默认 50，最多 200）。
-export function listAuditBatches(db, {userId, taskId = '', batchId = '', limit = 50, domain = ''} = {}) {
-  if (!userId) return [];
+// 行级筛选条件：时间/发起者/工具/实体/任务。批次先按命中行选出，再只取命中行，
+// 这样筛选结果与导出内容一致，不会把同一批次里没命中的行混进来。
+function rowFilters({userId, taskId = '', batchId = '', from = '', to = '', actorType = '', actorRef = '', tool = '', entity = ''} = {}) {
   const filters = ['user_id = ?'];
-  const filterArgs = [String(userId)];
-  if (taskId) { filters.push('task_id = ?'); filterArgs.push(String(taskId)); }
-  if (batchId) { filters.push('batch_id = ?'); filterArgs.push(String(batchId)); }
-  const where = filters.join(' AND ');
+  const args = [String(userId)];
+  if (taskId) { filters.push('task_id = ?'); args.push(String(taskId)); }
+  if (batchId) { filters.push('batch_id = ?'); args.push(String(batchId)); }
+  if (from) { filters.push('occurred_at >= ?'); args.push(String(from)); }
+  if (to) { filters.push('occurred_at <= ?'); args.push(String(to)); }
+  if (actorType) { filters.push('actor_type = ?'); args.push(String(actorType)); }
+  if (actorRef) { filters.push('actor_ref = ?'); args.push(String(actorRef)); }
+  if (tool) { filters.push('tool = ?'); args.push(String(tool)); }
+  if (entity) { filters.push('entity = ?'); args.push(String(entity)); }
+  return {where: filters.join(' AND '), args};
+}
+
+// 按批次分组，批次新→旧，行内按 seq 升序；limit 限制批次数（默认 50，最多 200）。
+export function listAuditBatches(db, {userId, taskId = '', batchId = '', limit = 50, domain = '', from = '', to = '', actorType = '', actorRef = '', tool = '', entity = ''} = {}) {
+  if (!userId) return [];
+  const {where, args} = rowFilters({userId, taskId, batchId, from, to, actorType, actorRef, tool, entity});
   let batchIds;
   if (batchId) {
     batchIds = [String(batchId)];
   } else {
     const max = Math.max(1, Math.min(200, Number(limit) || 50));
     batchIds = db.prepare(`SELECT batch_id FROM write_audit WHERE ${where} GROUP BY batch_id ORDER BY MAX(seq) DESC LIMIT ?`)
-      .all(...filterArgs, max).map(row => row.batch_id);
+      .all(...args, max).map(row => row.batch_id);
   }
   if (!batchIds.length) return [];
   const marks = batchIds.map(() => '?').join(',');
-  const rows = db.prepare(`SELECT * FROM write_audit WHERE user_id = ? AND batch_id IN (${marks}) ORDER BY seq ASC`)
-    .all(String(userId), ...batchIds);
+  const rows = db.prepare(`SELECT * FROM write_audit WHERE ${where} AND batch_id IN (${marks}) ORDER BY seq ASC`)
+    .all(...args, ...batchIds);
   const byBatch = new Map(batchIds.map(id => [id, []]));
   for (const row of rows) {
     if (!byBatch.has(row.batch_id)) byBatch.set(row.batch_id, []);
