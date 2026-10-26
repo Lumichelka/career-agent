@@ -12,7 +12,8 @@
     "conflictTaskId": "271ffabf-e380-4abc-8c9f-e5120b7da5b8",
     "commit": "e2d59e0ee768b5753b354e8580c955e5a2c4a3c5",
     "nodeVersion": "v24.18.0",
-    "edgeVersion": "150.0.4078.65"
+    "edgeVersion": "150.0.4078.65",
+    "screenshotBackup": "C:\\Users\\cccHaozz\\Documents\\career-agent-acceptance\\24-swufe"
   },
   "evidence": {
     "extraction": {
@@ -33,11 +34,11 @@
     },
     "screenshots": {
       "list": {
-        "path": "C:\\Users\\cccHaozz\\AppData\\Local\\Temp\\zx-live-accept-kh8HeH\\users\\7b8c1684-aba8-4f7c-aa5c-a591556be94d\\tasks\\1af5e208-cd2f-4a69-af63-06056e95d89b\\evidence\\01-list.png",
+        "path": "C:\\Users\\cccHaozz\\Documents\\career-agent-acceptance\\24-swufe\\01-list.png",
         "sha256": "9cbd3315508fa9c772a0ded8c1a8fef7e09201c32f9ac5777122b80980388c65"
       },
       "detail": {
-        "path": "C:\\Users\\cccHaozz\\AppData\\Local\\Temp\\zx-live-accept-kh8HeH\\users\\7b8c1684-aba8-4f7c-aa5c-a591556be94d\\tasks\\1af5e208-cd2f-4a69-af63-06056e95d89b\\evidence\\02-detail.png",
+        "path": "C:\\Users\\cccHaozz\\Documents\\career-agent-acceptance\\24-swufe\\02-detail.png",
         "sha256": "3b487d968fb8ecc8eab2cc833ae464fcf7d7ce22ab67d7872e4b6409dc09ee04"
       },
       "uiTaskCard": {
@@ -108,6 +109,6 @@
     "复核 Agent 是 claude -p --tools \"\" 的本地 MCP 桥，不是 claude mcp serve",
     "列表页 3 场活动均写入；只打开 1 场详情，events[1..2] 复用该详情 URL",
     "2 个单位名被页面截断，review 已标 high；未编造",
-    "原始页面截图含联系方式，仅保留本机临时路径"
+    "原始页面截图含联系方式，仅保留本机 Documents 备份路径（不入库）"
   ]
 }

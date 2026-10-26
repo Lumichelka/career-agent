@@ -313,7 +313,7 @@ async function run() {
       .replace(/^- 日期：.*$/m, '- 日期：' + manifest.signature.date)
       .replace(/^- 验收人：.*$/m, '- 验收人：' + ownerName)
       .replace(/^- 证据清单：.*$/m, '- 证据清单：manifest.json sha256 ' + manifestSha)
-      .replace(/^- 备注：.*$/m, '- 备注：live 首验按本 README 执行；确定性回归 332 项通过，证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（显式 MODEL_VAULT_DIR，运行后删副本）；复核为 claude -p --tools \"\" 的本地 MCP 桥，不是 claude mcp serve；列表 3 场活动均写入、events[1..2] 复用同一详情 URL；2 个单位名被页面截断（review 已标 high）；原始截图仅本机临时路径。');
+      .replace(/^- 备注：.*$/m, '- 备注：live 首验按本 README 执行；确定性回归 333 项通过，证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（显式 MODEL_VAULT_DIR，运行后删副本）；复核为 claude -p --tools \"\" 的本地 MCP 桥，不是 claude mcp serve；列表 3 场活动均写入、events[1..2] 复用同一详情 URL；2 个单位名被页面截断（review 已标 high）；原始截图仅本机临时路径。');
     await writeFile(readmeFile, readme);
     log('README signed');
     log('DONE dataDir=' + dataDir);

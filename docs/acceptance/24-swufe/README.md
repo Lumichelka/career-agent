@@ -83,8 +83,8 @@ docs/acceptance/24-swufe/
 | 复核输出 | `evidence/review.json` | evidence/review.json | 5fd58d87c00b06063ccd0cd69aecfc1582a5c682ee67816dc3d331b8f45e2d81 |
 | 审计导出 | `evidence/audit-export.json` | evidence/audit-export.json | a30a323a2a7ad26ae7ca3be2a389195341aaad619201bed9c639d433f29286fe |
 | 任务日志 | `evidence/task.json` | evidence/task.json | 024d6f3797a6901740b7166c28c3813bc21d2da796ba82919964602e54307587 |
-| 截图 1 列表页 | 本机 `.../evidence/01-list.png` | C:\Users\cccHaozz\AppData\Local\Temp\zx-live-accept-kh8HeH\users\7b8c1684-aba8-4f7c-aa5c-a591556be94d\tasks\1af5e208-cd2f-4a69-af63-06056e95d89b\evidence\01-list.png | 9cbd3315508fa9c772a0ded8c1a8fef7e09201c32f9ac5777122b80980388c65 |
-| 截图 2 活动详情 | 本机 `.../evidence/02-detail.png` | C:\Users\cccHaozz\AppData\Local\Temp\zx-live-accept-kh8HeH\users\7b8c1684-aba8-4f7c-aa5c-a591556be94d\tasks\1af5e208-cd2f-4a69-af63-06056e95d89b\evidence\02-detail.png | 3b487d968fb8ecc8eab2cc833ae464fcf7d7ce22ab67d7872e4b6409dc09ee04 |
+| 截图 1 列表页 | 本机 `.../evidence/01-list.png` | C:\Users\cccHaozz\Documents\career-agent-acceptance\24-swufe\01-list.png | 9cbd3315508fa9c772a0ded8c1a8fef7e09201c32f9ac5777122b80980388c65 |
+| 截图 2 活动详情 | 本机 `.../evidence/02-detail.png` | C:\Users\cccHaozz\Documents\career-agent-acceptance\24-swufe\02-detail.png | 3b487d968fb8ecc8eab2cc833ae464fcf7d7ce22ab67d7872e4b6409dc09ee04 |
 | 任务卡截图 | `evidence/ui-task-card.png` | evidence/ui-task-card.png | 932a5de66772f4bef745e6722ae48bf2d9ca2d5513642791d180893234befc33 |
 | 审阅层截图 | `evidence/ui-audit-review.png` | evidence/ui-audit-review.png | 34c0082e3b126527624476eabf1ac322e513d43636acaee8d6b8ea0b1938e827 |
 | 强制撤销确认截图 | `evidence/ui-force-confirm.png` | evidence/ui-force-confirm.png | 1ace002de45db1f775f45f87598d80329b5cc57148ee0ef97adee7233ebaf1e5 |
@@ -165,8 +165,8 @@ node docs/acceptance/24-swufe/verify-evidence.mjs docs/acceptance/24-swufe/manif
 - 结论：验收通过（含已知偏差）
 - 日期：2026-10-26
 - 验收人：owner
-- 证据清单：manifest.json sha256 6e9f1a1d44bc8c5dec79644c99b821b8b25553aa40e89fccd6255d724113f75f
-- 备注：live 首验按本 README 执行；确定性回归 332 项通过，证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（显式 MODEL_VAULT_DIR，运行后删副本）；复核为 claude -p --tools "" 的本地 MCP 桥，不是 claude mcp serve；列表 3 场活动均写入、events[1..2] 复用同一详情 URL；2 个单位名被页面截断（review 已标 high）；原始截图仅本机临时路径。
+- 证据清单：manifest.json sha256 6834203fc2805b6df6634a504122db98f69780f2f471df28c117edb6d478ef20
+- 备注：live 首验按本 README 执行；确定性回归 333 项通过，证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（显式 MODEL_VAULT_DIR，运行后删副本）；复核为 claude -p --tools "" 的本地 MCP 桥，不是 claude mcp serve；列表 3 场活动均写入、events[1..2] 复用同一详情 URL；2 个单位名被页面截断（review 已标 high）；原始截图已备份到本机 Documents（含联系方式，不入库）。
 
 > 签字前必须已运行 §6 校验并通过。**不得**在未执行 live、或校验未通过时填写「验收通过」。
 
