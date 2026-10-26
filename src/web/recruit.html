@@ -333,7 +333,8 @@ function renderSources(sources,wechat){
     if(s.failureStreak>0) html+='<div><span class="flag bad">连续失败 '+esc(s.failureStreak)+' 次</span></div>';
     return html;
   };
-  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b>'+(a.feedUrl?'<span class="badge ok">已订阅</span>':'<span class="badge off">未订阅</span>')+'<div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.biz?' · biz '+esc(String(a.biz).slice(0,10)):' · biz 待识别')+(a.lastArticleAt?' · 最近文章 '+esc(String(a.lastArticleAt).slice(0,10)):'')+(a.lastSyncAt?' · 同步 '+esc(shortStamp(a.lastSyncAt)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions">'+fallbackButton(a.sourceId||('wechat:'+a.id),a.aiFallback)+(a.biz?'<button data-wx-operator="'+esc(a.id)+'" title="用应用内浏览器打开公众号文章列表；登录/验证由你人工接管">AI 采集</button>':'')+(a.feedUrl?'<button data-wx-sync="'+esc(a.id)+'">同步</button>':'')+'<a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
+  // 公众号只保留账号级「AI 采集」：通用 wechat playbook 会落到 mp 首页，读不到目标账号的文章列表（#54 评审）。
+  const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b>'+(a.feedUrl?'<span class="badge ok">已订阅</span>':'<span class="badge off">未订阅</span>')+'<div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.biz?' · biz '+esc(String(a.biz).slice(0,10)):' · biz 待识别')+(a.lastArticleAt?' · 最近文章 '+esc(String(a.lastArticleAt).slice(0,10)):'')+(a.lastSyncAt?' · 同步 '+esc(shortStamp(a.lastSyncAt)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions">'+(a.biz?'<button data-wx-operator="'+esc(a.id)+'" title="用应用内浏览器打开公众号文章列表；登录/验证由你人工接管">AI 采集</button>':'')+(a.feedUrl?'<button data-wx-sync="'+esc(a.id)+'">同步</button>':'')+'<a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
   const group={};
   for(const s of sources)(group[s.category] ||= []).push(s);
   for(const [cat,list] of Object.entries(group)){
@@ -452,11 +453,12 @@ async function startSourceCheck(sourceId,button,url){
     location.href='/chat?session='+encodeURIComponent(d.sessionId)+'&workflow=open';
   }catch(e){toast(e.message);if(button)button.disabled=false}
 }
-// AI 兜底：用户点按钮才发起（ADR 0003）。复用 source-check operator 任务与证据，不另起一套采集。
+// AI 兜底：用户点按钮并确认一次才发起（ADR 0001/0003）。复用 source-check operator 任务与证据，不另起一套采集。
 async function startAiFallback(sourceId,playbook,button){
+  if(!window.confirm('这是 AI 兜底，不是自动采集。\n会在应用内可见窗口打开来源页，可能用到已登录的浏览器 profile，每一步都会留截图与动作日志。\n\n确认现在开始？'))return;
   if(button)button.disabled=true;
   try{
-    const resp=await fetch('/api/source-check/operator/start',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({sourceId,playbook})});
+    const resp=await fetch('/api/source-check/operator/start',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({sourceId,playbook,confirm:true})});
     const d=await resp.json().catch(()=>({error:'返回格式异常'}));
     if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));
     location.href='/chat?session='+encodeURIComponent(d.sessionId)+'&workflow=open';
@@ -480,7 +482,7 @@ document.addEventListener('click',async e=>{
   if(b.dataset.aiFallback){await startAiFallback(b.dataset.aiFallback,b.dataset.playbook,b);return}
   if(b.dataset.sourceCheck){await startSourceCheck(b.dataset.sourceCheck,b);return}
   if(b.dataset.collect){await collect([b.dataset.collect],'采集 '+b.dataset.collect);return}
-  if(b.dataset.wxOperator){b.disabled=true;try{const r=await fetch('/api/wechat/operator/start',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({accountId:b.dataset.wxOperator})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));location.href='/chat?session='+encodeURIComponent(d.sessionId)+'&workflow=open'}catch(err){toast(err.message);b.disabled=false}return}
+  if(b.dataset.wxOperator){if(!window.confirm('这是 AI 采集，不是自动采集。\n会在应用内可见窗口打开公众号文章列表，微信登录/验证由你人工接管，每一步都会留证据。\n\n确认现在开始？'))return;b.disabled=true;try{const r=await fetch('/api/wechat/operator/start',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({accountId:b.dataset.wxOperator,confirm:true})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));location.href='/chat?session='+encodeURIComponent(d.sessionId)+'&workflow=open'}catch(err){toast(err.message);b.disabled=false}return}
   if(b.dataset.wxSync){b.disabled=true;try{const r=await fetch('/api/wechat/accounts/'+b.dataset.wxSync+'/sync',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:'{}'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||('HTTP '+r.status));toast('同步完成：新增 '+(d.imported||0)+' 篇');await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}
   if(b.dataset.export){const f=b.dataset.export;try{const r=await fetch('/api/recruit/export.'+f+'?days='+days(),{headers:{'x-career-token':TOKEN}});if(!r.ok)throw new Error('导出失败');const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='zhixiang-schedule.'+f;a.click();setTimeout(()=>URL.revokeObjectURL(u),2000);toast('已导出 '+f.toUpperCase())}catch(err){toast(err.message)}return}
   if(b.dataset.wxPublish){b.disabled=true;try{const r=await fetch('/api/wechat/articles/'+b.dataset.wxPublish+'/publish',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:'{}'});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||d.reason||('HTTP '+r.status));toast('已生成活动，项目 '+(d.projects?.length||0)+' 个');await loadAll()}catch(err){toast(err.message)}finally{b.disabled=false}return}

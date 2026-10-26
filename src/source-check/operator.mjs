@@ -8,7 +8,7 @@ import {mkdir, appendFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {chromium} from 'playwright';
-import {isPrivateSourceHost} from './config.mjs';
+import {validateHttpUrl} from './config.mjs';
 import {detectBlock} from './browser.mjs';
 import {operatorProfileDir} from '../config/paths.mjs';
 import {resolveSourceCheckTarget, evidenceDirFor, userDataDir, recordManualRead, runExtractionAndWrite} from './pipeline.mjs';
@@ -34,29 +34,26 @@ export const OPERATOR_LAUNCH_OPTIONS = {
   permissions: ['clipboard-read', 'clipboard-write']
 };
 
-const BLOCKED_SCHEME = /^(file|chrome|chrome-extension|edge|about|javascript|data|blob|view-source|devtools|moz-extension|ms-browser-extension):/i;
-
 function blockedUrl(reason) {
   return {ok: false, code: 'OPERATOR_URL_BLOCKED', reason: String(reason).slice(0, 300)};
 }
 
 // 操作员唯一允许的页面地址：http/https，且默认拒绝 localhost/私网/链路本地。
-// 这是字面判断，不做 DNS 解析；DNS rebinding 不在本票承诺内。
+// 规则与来源校对的 normalizeSourceCheckUrl 共用 validateHttpUrl；这是字面判断，
+// 不做 DNS 解析，DNS rebinding 不在本票承诺内（ADR 0001 已记录）。
 export function checkOperatorUrl(url, {allowPrivate = false} = {}) {
   const raw = String(url ?? '').trim();
-  if (!raw) return blockedUrl('地址为空，不能打开。');
-  if (BLOCKED_SCHEME.test(raw)) return blockedUrl('不允许打开特殊协议地址：' + raw.slice(0, 80));
-  let parsed;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    return blockedUrl('不是合法的 http/https 地址：' + raw.slice(0, 120));
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol)) return blockedUrl('只允许 http/https 地址。');
-  if (!allowPrivate && isPrivateSourceHost(parsed.hostname)) {
-    return blockedUrl('不允许访问本机或私网地址：' + parsed.hostname);
-  }
-  return {ok: true, url: parsed.href};
+  const checked = validateHttpUrl(raw, {allowPrivate});
+  if (checked.ok) return {ok: true, url: checked.url};
+  const messages = {
+    empty: '地址为空，不能打开。',
+    'too-long': '地址过长，不能打开。',
+    scheme: '不允许打开特殊协议或非法地址：' + raw.slice(0, 80),
+    parse: '不是合法的 http/https 地址：' + raw.slice(0, 120),
+    protocol: '只允许 http/https 地址。',
+    private: '不允许访问本机或私网地址：' + String(checked.host || '')
+  };
+  return blockedUrl(messages[checked.code] || '地址被拒绝。');
 }
 
 const DANGER_PATTERNS = [
@@ -67,9 +64,23 @@ const DANGER_PATTERNS = [
   {kind: 'submit', reason: '提交表单', re: /(提交|保存|发布|确认|submit|send)/i}
 ];
 
+// playbook 的 forbiddenActions 是给人评审的短语列表（投递、报名、支付…）。
+// 这里只按中文顿号/逗号切词做「文本包含」匹配，空格与斜杠不切，避免把「访问」这类泛词变成误报。
+export function forbiddenTerms(list) {
+  const out = [];
+  for (const item of Array.isArray(list) ? list : []) {
+    for (const part of String(item ?? '').split(/[、，,；;]+/)) {
+      const term = part.trim().replace(/^[和与及\s]+|[\s。.]+$/g, '');
+      if (term.length >= 2 && !out.includes(term)) out.push(term);
+    }
+  }
+  return out;
+}
+
 // 危险动作的「尽力而为」硬确认：只对点击/提交/按键生效，命中即暂停等用户确认。
-// 提示词与 selector 都可能被页面误导；这里不承诺防任意 JS 绕过。
-export function classifyDangerousAction(step = {}) {
+// DANGER_PATTERNS 与 playbook.forbiddenActions 合并；提示词与 selector 都可能被页面误导，
+// 任意 JS / evaluate 仍可绕过，这里不是安全边界（ADR 0001）。
+export function classifyDangerousAction(step = {}, {forbiddenActions = []} = {}) {
   const action = String(step.action || '').toLowerCase();
   if (!['click', 'submit', 'press'].includes(action)) return {dangerous: false};
   if (action === 'submit') {
@@ -79,6 +90,12 @@ export function classifyDangerousAction(step = {}) {
   for (const pattern of DANGER_PATTERNS) {
     if (pattern.re.test(text)) {
       return {dangerous: true, kind: pattern.kind, reason: pattern.reason, text};
+    }
+  }
+  const haystack = text.toLowerCase();
+  for (const term of forbiddenTerms(forbiddenActions)) {
+    if (haystack.includes(term.toLowerCase())) {
+      return {dangerous: true, kind: 'forbidden', reason: 'playbook 禁止的动作（' + term + '）', text, term};
     }
   }
   return {dangerous: false};
@@ -98,6 +115,8 @@ export async function launchOperatorBrowser({profileDir, options = {}} = {}) {
 }
 
 export const OPERATOR_ACTIONS = ['goto', 'click', 'fill', 'press', 'evaluate', 'wait', 'screenshot', 'submit', 'playwright'];
+// ADR 0001：不限制列表/详情数量、翻页或步数。这里只留一个「计划很长」的安全日志阈值，不是硬上限。
+export const OPERATOR_STEP_LOG_THRESHOLD = 500;
 
 export class OperatorError extends Error {
   constructor(code, message, recovery = '') {
@@ -167,7 +186,7 @@ export function normalizeOperatorSteps(steps, {source = {}} = {}) {
     return [{action: 'goto', url: source.listUrl}, {action: 'screenshot', label: '来源列表'}]
       .map((step, index) => normalizeOperatorStep(step, index));
   }
-  if (steps.length > 200) throw new OperatorError('INVALID_OPERATOR_STEP', '一次最多 200 步。');
+  // ADR 0001 明确不设步数硬上限：只逐条校验动作，长计划由执行循环的超时/暂停兜底。
   return steps.map((step, index) => normalizeOperatorStep(step, index));
 }
 
@@ -285,17 +304,21 @@ async function takeStepScreenshot(page, evidenceDir, step) {
   }
 }
 
+// 动作名 → 展示文案只维护这一张表，避免 switch 与 OPERATOR_ACTIONS 漂移。
+const ACTION_LABELS = {
+  goto: '打开页面',
+  click: '点击',
+  fill: '填写',
+  press: '按键',
+  evaluate: '执行 JS',
+  wait: '等待',
+  screenshot: '截图',
+  submit: '提交表单',
+  playwright: 'Playwright'
+};
+
 function actionLabel(step) {
-  if (step.action === 'goto') return '打开页面';
-  if (step.action === 'click') return '点击';
-  if (step.action === 'fill') return '填写';
-  if (step.action === 'press') return '按键';
-  if (step.action === 'evaluate') return '执行 JS';
-  if (step.action === 'wait') return '等待';
-  if (step.action === 'screenshot') return '截图';
-  if (step.action === 'submit') return '提交表单';
-  if (step.action === 'playwright') return 'Playwright';
-  return step.action;
+  return ACTION_LABELS[step.action] || step.action;
 }
 
 // 执行一份步骤计划。askHuman 由服务层实现（落任务状态、等用户点继续/确认）；
@@ -306,6 +329,7 @@ export async function executeOperatorPlan({
   taskId,
   steps,
   source = {},
+  forbiddenActions = [],
   launch = launchOperatorBrowser,
   maxActiveMs = OPERATOR_MAX_ACTIVE_MS,
   signal,
@@ -336,37 +360,55 @@ export async function executeOperatorPlan({
   const actions = [];
   const screenshots = [];
   let index = 0;
-  let segmentStart = now();
+  // 只累计「真正在执行」的时间：askHuman 等人工接管时冻结，用户继续后重新挂起；
+  // 总活跃时间不得超过 maxActiveMs，多次人工继续也不会把额度清零（ADR 0001）。
+  let activeMs = 0;
+  let activeStart = now();
+  const freezeActive = () => { activeMs += Math.max(0, now() - activeStart); activeStart = now(); };
+  const remainingActive = () => maxActiveMs - (activeMs + Math.max(0, now() - activeStart));
+  const pause = async info => {
+    freezeActive();
+    try { return await askHuman(info); } finally { activeStart = now(); }
+  };
 
   try {
     await writeFile(logFile, '', 'utf8');
     emit({type: 'operator_running', taskId, phase: '正在应用内浏览器执行操作', total: plan.length, step: 1});
+    if (plan.length > OPERATOR_STEP_LOG_THRESHOLD) {
+      emit({type: 'operator_running', taskId, script: 'long_plan', phase: '操作计划较长（' + plan.length + ' 步）；ADR 0001 不设步数硬上限，到时间上限会暂停转人工。'});
+    }
 
     while (index < plan.length) {
       if (signal?.aborted) throw operatorAbortError();
       const step = plan[index];
       const stepNo = index + 1;
 
-      // 单次操作硬上限：到点暂停为人工接管，用户续跑后重新计时；不判失败。
-      if (now() - segmentStart >= maxActiveMs) {
-        const answer = await askHuman({
+      // 总活跃时间上限：到点暂停为人工接管；继续后 watchdog 重新挂起，但额度不清零。
+      // 已耗尽还继续，就停止执行剩余步骤并给恢复建议——总活跃时间不允许超过 maxActiveMs（ADR 0001）。
+      if (remainingActive() <= 0) {
+        const answer = await pause({
           state: 'waiting_human', kind: 'timeout', step: stepNo, total: plan.length,
-          reason: '单次操作已到 10 分钟上限，已暂停。你可以先处理后点「已处理，继续」从未完成步骤继续。'
+          reason: '总活跃运行时间已到上限，已暂停。你可以人工处理或停止任务；点「已处理，继续」不会重置额度。'
         });
         if (answer?.action === 'cancel') throw operatorAbortError();
-        segmentStart = now();
+        if (remainingActive() <= 0) {
+          throw new OperatorError(
+            'OPERATOR_ACTIVE_LIMIT',
+            '总活跃运行时间已达 ' + Math.max(1, Math.round(maxActiveMs / 60000)) + ' 分钟上限，未执行剩余步骤。',
+            '人工完成剩余步骤，或停止任务后改用来源校对/手动导入。'
+          );
+        }
         emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '人工处理后继续操作'});
       }
 
       if (policyState.blocked) {
         const blocked = policyState.blocked;
         policyState.blocked = null;
-        const answer = await askHuman({
+        const answer = await pause({
           state: 'waiting_human', kind: 'policy', policyKind: blocked.kind,
           step: stepNo, total: plan.length, target: actionTarget(step), reason: blocked.reason
         });
         if (answer?.action === 'cancel') throw operatorAbortError();
-        segmentStart = now();
         emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '人工处理后继续操作'});
       }
 
@@ -407,9 +449,9 @@ export async function executeOperatorPlan({
         return entry;
       };
 
-      const danger = classifyDangerousAction(step);
+      const danger = classifyDangerousAction(step, {forbiddenActions});
       if (danger.dangerous) {
-        const answer = await askHuman({
+        const answer = await pause({
           state: 'waiting_confirmation', kind: 'confirm', confirmKind: danger.kind,
           step: stepNo, total: plan.length, target: actionTarget(step), text: danger.text,
           reason: '这一步会' + danger.reason + '，需要你确认后才执行。'
@@ -421,7 +463,6 @@ export async function executeOperatorPlan({
           index += 1;
           continue;
         }
-        segmentStart = now();
         emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '确认后继续操作'});
       }
 
@@ -444,7 +485,7 @@ export async function executeOperatorPlan({
             throw new OperatorError('OPERATOR_STEP_FAILED', '步骤 ' + stepNo + ' 连续失败：' + String(error?.message || error).slice(0, 300), '人工接管处理页面后重试。');
           }
           const loginLike = error?.code === 'OPERATOR_LOGIN_REQUIRED';
-          const answer = await askHuman({
+          const answer = await pause({
             state: loginLike ? 'waiting_login' : 'waiting_human',
             kind: loginLike ? 'login' : 'error',
             step: stepNo, total: plan.length, target: actionTarget(step),
@@ -453,22 +494,20 @@ export async function executeOperatorPlan({
           if (answer?.action === 'cancel') throw operatorAbortError();
           result = 'paused';
           reason = String(error?.message || error).slice(0, 300);
-          segmentStart = now();
           emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '人工处理后继续操作'});
         }
       }
 
       // 登录/验证码/访问限制：先把这一步标成暂停并落证据，再等人处理，任务卡在等待时就能看到时间线。
       if (result === 'ok') {
-        const pause = await detectOperatorPause(page);
-        if (pause) {
-          await recordStep({result: 'paused', reason: pause.reason, startedAt, started});
-          const answer = await askHuman({
-            state: pause.state, kind: pause.kind, step: stepNo, total: plan.length,
-            target: actionTarget(step), reason: pause.reason
+        const detected = await detectOperatorPause(page);
+        if (detected) {
+          await recordStep({result: 'paused', reason: detected.reason, startedAt, started});
+          const answer = await pause({
+            state: detected.state, kind: detected.kind, step: stepNo, total: plan.length,
+            target: actionTarget(step), reason: detected.reason
           });
           if (answer?.action === 'cancel') throw operatorAbortError();
-          segmentStart = now();
           emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '人工处理后继续操作'});
           index += 1;
           continue;
@@ -479,12 +518,11 @@ export async function executeOperatorPlan({
         const blocked = policyState.blocked;
         policyState.blocked = null;
         await recordStep({result: 'blocked', reason: blocked.reason, startedAt, started});
-        const answer = await askHuman({
+        const answer = await pause({
           state: 'waiting_human', kind: 'policy', policyKind: blocked.kind,
           step: stepNo, total: plan.length, target: actionTarget(step), reason: blocked.reason
         });
         if (answer?.action === 'cancel') throw operatorAbortError();
-        segmentStart = now();
         emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '人工处理后继续操作'});
         index += 1;
         continue;
@@ -493,11 +531,12 @@ export async function executeOperatorPlan({
       // 运行时计划：playwright 步骤返回后续步骤（例如按读到的文章列表逐篇打开）。
       // 只影响本进程内的计划，HTTP JSON 步骤仍然不可能注入函数。
       if (Array.isArray(produced) && produced.length) {
-        if (plan.length + produced.length > 200) {
-          throw new OperatorError('INVALID_OPERATOR_STEP', '运行时追加后步骤超过 200 步上限。');
-        }
+        // ADR 0001 不设步数上限：运行时追加只记一条安全日志，不做硬拒绝。
         const extra = produced.map((item, offset) => normalizeOperatorStep(item, index + 1 + offset));
         plan.splice(index + 1, 0, ...extra);
+        if (plan.length > OPERATOR_STEP_LOG_THRESHOLD) {
+          emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, script: 'long_plan', phase: '运行时追加后计划 ' + plan.length + ' 步；不设步数硬上限，到时间上限会暂停。'});
+        }
         emit({type: 'operator_running', taskId, step: stepNo, total: plan.length, phase: '继续执行运行时追加的 ' + extra.length + ' 步'});
       }
 
@@ -580,7 +619,11 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
   // 不带 playbook 时保持既有行为（任意 URL 或显式 steps），互不影响。
   // source/title/execute 只给进程内调用方（例如公众号操作）用；HTTP 入口仍然只接受
   // sourceId|url/playbook + 普通 JSON 步骤，不能从这里注入函数。
-  async function start({user, sourceId, url, steps, playbook: playbookId, source: sourceOverride = null, title: titleOverride = '', execute: executeOverride = null, models = {}} = {}) {
+  async function start({user, sourceId, url, steps, playbook: playbookId, source: sourceOverride = null, title: titleOverride = '', execute: executeOverride = null, models = {}, confirm = false} = {}) {
+    // 每次 AI 采集/兜底都要一次明确确认（ADR 0001/0003）：没有 confirm:true 不排队任务。
+    if (confirm !== true) {
+      return {status: 400, json: {error: 'AI 采集/兜底需要你先确认一次；未确认不会启动浏览器任务。', code: 'OPERATOR_CONFIRM_REQUIRED'}};
+    }
     let fallback = null;
     if (playbookId) {
       fallback = await loadPlaybook(playbookId);
@@ -589,6 +632,11 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
       }
       if (!fallback.entry.length) {
         return {status: 400, json: {error: 'playbook 没有入口地址：' + fallback.id, code: 'PLAYBOOK_WITHOUT_ENTRY'}};
+      }
+      // 公众号只能走账号级「AI 采集」（/api/wechat/operator/start）：通用入口会落到 mp 首页，
+      // 既读不到目标账号的文章列表，也和 #59 的账号级流程重复。
+      if (fallback.id === 'wechat' && typeof executeOverride !== 'function') {
+        return {status: 400, json: {error: '公众号请用账号级「AI 采集」；通用 AI 兜底不再打开 mp 首页。', code: 'WECHAT_OPERATOR_REQUIRES_ACCOUNT'}};
       }
     }
     let source;
@@ -653,12 +701,17 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
       ...(fallback ? {
         describeUndo: ({task: finished}) => summarizeTaskUndo({dir: userDataDir(dataDir, user.id), userId: user.id, taskId: finished.id})
       } : {}),
-      execute: async ({task, signal, emit, addEvidence, setPhase, suspendTimeout}) => {
+      execute: async ({task, signal, emit, addEvidence, setPhase, suspendTimeout, resumeTimeout}) => {
         let ok = false;
         try {
           const profileDir = operatorProfileDir(dataDir, user.id);
           const evidenceDir = evidenceDirFor(dataDir, user.id, task.id);
-          const ask = info => askHuman({userId: user.id, taskId: task.id, info, emit, signal, suspendTimeout});
+          // 人工接管期间暂停整任务 watchdog；用户点继续后再挂起，暂停时间不消耗任务时长。
+          const ask = async info => {
+            const answer = await askHuman({userId: user.id, taskId: task.id, info, emit, signal, suspendTimeout});
+            if (answer?.action !== 'cancel') resumeTimeout?.();
+            return answer;
+          };
           const out = typeof executeOverride === 'function'
             ? await executeOverride({
               task, signal, emit, addEvidence, setPhase, suspendTimeout, askHuman: ask,
@@ -666,6 +719,7 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
             })
             : await executeOperatorPlan({
               profileDir, evidenceDir, taskId: task.id, steps: plan, source, launch, maxActiveMs,
+              forbiddenActions: fallback?.forbiddenActions || [],
               signal, emit, addEvidence, setPhase, askHuman: ask
             });
           // 兜底不是「打开页面就算完成」：动作跑完后复用 source-check 的抽取/复核/写入尾段，
@@ -678,12 +732,29 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
                 '兜底需要列表页与详情页两张截图，实际只拿到 ' + shots.length + ' 张；请检查 playbook 入口与 detailSelector。',
                 '重新点击「AI 兜底」；仍失败就改用手动导入。');
             }
+            // 列表页与详情页必须是两个不同页面：没有 detailSelector / 点击没跳转时，
+            // 两张截图其实是同一页，抽取与 source_url 都会写错。宁可失败关闭，不写库。
+            const listShot = shots.find(shot => shot.id === 'list');
             const detail = shots.find(shot => shot.id === 'detail');
+            const pageKey = value => {
+              try {
+                const parsed = new URL(String(value || ''));
+                parsed.hash = '';
+                return parsed.href;
+              } catch { return String(value || '').trim(); }
+            };
+            if (!listShot?.url || !detail?.url || pageKey(listShot.url) === pageKey(detail.url)) {
+              throw new OperatorError(
+                'OPERATOR_SAME_PAGE',
+                '兜底的列表页与详情页是同一个页面（' + (detail?.url || '无 URL') + '），未写入任何数据。',
+                '检查 playbook 的 detailSelector 是否指向可打开的详情链接，或改用手动导入。'
+              );
+            }
             const written = await runExtractionAndWrite({
               dataDir, userId: user.id, task, shots, models, extractor, reviewer,
               source: {...source, detailUrl: detail?.url || source.listUrl},
               actorRef: String(models?.label || ''), signal, emit, addEvidence, setPhase,
-              evidenceDir, addScreenshotEvidence: false, label: 'AI 兜底'
+              evidenceDir, addScreenshotEvidence: false, label: 'AI 兜底', playbook: fallback
             });
             ok = true;
             return {...out, extraction: written.extraction, write: written.write, screenshots: written.screenshots, review: written.review};

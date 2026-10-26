@@ -172,9 +172,10 @@ function renderAccounts() {
   });
   document.querySelectorAll('[data-operator-account]').forEach(b => b.onclick = async e => {
     e.stopPropagation();
+    if (!window.confirm('这是 AI 采集，不是自动采集。\n会在应用内可见窗口打开公众号文章列表，微信登录/验证由你人工接管，每一步都会留证据。\n\n确认现在开始？')) return;
     b.disabled = true;
     try {
-      const d = await api('wechat', 'operator/start', {accountId: b.dataset.operatorAccount});
+      const d = await api('wechat', 'operator/start', {accountId: b.dataset.operatorAccount, confirm: true});
       location.href = '/chat?session=' + encodeURIComponent(d.sessionId) + '&workflow=open';
     } catch (err) { toast(err.message); b.disabled = false; }
   });

@@ -83,6 +83,7 @@ export async function feed(args, ctx) {
       types: args.types,
       sourceId: args.sourceId || '',
       limit: args.limit,
+      offset: args.offset,
       includeRawText: args.includeRawText === true
     });
   } catch (error) {

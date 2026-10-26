@@ -13,7 +13,7 @@ import {resolveSource, resolveSourceCheckTarget, SOURCE_CHECK_NOTES} from '../sr
 import {normalizeSourceCheckUrl, sourceCheckEnabled, sourceCheckConfig, selectDetailHref} from '../src/source-check/config.mjs';
 import {buildExtractionPrompt, normalizeExtraction} from '../src/source-check/extract.mjs';
 import {operatorProfileDir} from '../src/config/paths.mjs';
-import {checkOperatorUrl, classifyDangerousAction, actionScreenshotName, OPERATOR_MAX_ACTIVE_MS, executeOperatorPlan, OPERATOR_LAUNCH_OPTIONS, normalizeOperatorSteps} from '../src/source-check/operator.mjs';
+import {checkOperatorUrl, classifyDangerousAction, actionScreenshotName, OPERATOR_MAX_ACTIVE_MS, OPERATOR_STEP_LOG_THRESHOLD, executeOperatorPlan, OPERATOR_LAUNCH_OPTIONS, normalizeOperatorSteps, forbiddenTerms} from '../src/source-check/operator.mjs';
 import {SourceCheckBlockedError} from '../src/source-check/browser.mjs';
 import {listPlaybooks, loadPlaybook, playbookForSource, playbookSteps} from '../src/source-check/playbook.mjs';
 
@@ -186,6 +186,23 @@ test('operator 危险动作：投递/支付/删除/退出/提交表单命中硬�
   ]) {
     assert.equal(classifyDangerousAction(step).dangerous, false, JSON.stringify(step) + ' 不应误报');
   }
+
+  // playbook.forbiddenActions 与 DANGER_PATTERNS 合并：短语按顿号/逗号切词后做文本匹配。
+  const pb = ['投递、报名、支付、删除、退出登录', '提交任何表单（除非用户确认）', '关注公众号、修改账号设置'];
+  assert.ok(forbiddenTerms(pb).includes('报名'));
+  assert.ok(!forbiddenTerms(pb).includes('访问'), '不把单个泛词切出来');
+  const byPlaybook = classifyDangerousAction({action: 'click', target: '#follow', text: '关注公众号'}, {forbiddenActions: pb});
+  assert.equal(byPlaybook.dangerous, true);
+  assert.equal(byPlaybook.kind, 'forbidden');
+  assert.match(byPlaybook.reason, /关注公众号/);
+  assert.equal(classifyDangerousAction({action: 'click', target: '#next', text: '下一页'}, {forbiddenActions: pb}).dangerous, false, '普通点击不因 playbook 误报');
+});
+
+test('operator 不设步数硬上限（ADR 0001）：超过 200 步仍可归一化，仅保留安全日志阈值', () => {
+  const steps = Array.from({length: 250}, () => ({action: 'wait', ms: 0}));
+  const out = normalizeOperatorSteps(steps, {source: {}});
+  assert.equal(out.length, 250);
+  assert.ok(OPERATOR_STEP_LOG_THRESHOLD >= 200);
 });
 
 test('operator 每步截图文件名稳定：action-001.png 起，按步号补零', () => {
@@ -380,12 +397,12 @@ test('operator 硬确认：投递命中等你确认；拒绝不点击，接受�
   }
 });
 
-test('operator 时间上限：单次到 10 分钟上限暂停 waiting_human，续跑后继续而不是判失败', {timeout: 30000}, async t => {
+test('operator 时间上限：总活跃时间到上限后暂停；继续不重置额度，剩余步骤不再执行', {timeout: 30000}, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'zx-operator-timeout-'));
   t.after(() => rm(dir, {recursive: true, force: true}));
   const page = fakeOperatorPage();
   const human = [];
-  const out = await executeOperatorPlan({
+  await assert.rejects(executeOperatorPlan({
     profileDir: operatorProfileDir(dir, 'user-a'),
     evidenceDir: join(dir, 'evidence'),
     taskId: '44444444-4444-4444-8444-444444444444',
@@ -398,13 +415,12 @@ test('operator 时间上限：单次到 10 分钟上限暂停 waiting_human，�
     emit: () => {},
     addEvidence: async () => {},
     askHuman: async info => { human.push(info); return {action: 'resume'}; }
-  });
-  assert.equal(out.ok, true);
-  assert.equal(human.length, 1);
+  }), error => error?.code === 'OPERATOR_ACTIVE_LIMIT');
+  assert.equal(human.length, 1, '到上限只暂停一次，然后失败关闭');
   assert.equal(human[0].state, 'waiting_human');
   assert.equal(human[0].kind, 'timeout');
-  assert.match(human[0].reason, /10 分钟|上限/);
-  assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 1, '暂停后继续执行剩余步骤');
+  assert.match(human[0].reason, /上限/);
+  assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 0, '总活跃额度耗尽后不能再执行剩余步骤');
 });
 
 test('operator 禁止下载/上传：命中即暂停，人工处理后跳过该步并留证据', {timeout: 30000}, async t => {
@@ -471,14 +487,7 @@ test('operator HTTP：AI 采集打开可见 profile，登录暂停后点继续�
   const listUrl = 'https://mp.weixin.qq.com/s/example';
   const loginUrl = 'https://mp.weixin.qq.com/login';
 
-  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {
-    url: listUrl,
-    steps: [
-      {action: 'goto', url: listUrl},
-      {action: 'evaluate', script: 'document.title'},
-      {action: 'screenshot', label: '文章列表'}
-    ]
-  });
+  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {url: listUrl, confirm: true});
   assert.equal(started.ok, true);
   assert.match(started.taskId, /^[a-f0-9-]{36}$/);
   assert.match(started.sessionId, /^[a-f0-9-]{36}$/);
@@ -527,10 +536,9 @@ test('operator HTTP：AI 采集打开可见 profile，登录暂停后点继续�
     return listed.tasks[0]?.state === 'succeeded' ? listed.tasks[0] : null;
   });
   assert.equal(finished.operator.state, 'succeeded');
-  assert.equal(finished.operator.actions.length, 3);
-  assert.deepEqual(finished.operator.actions.map(item => item.action), ['goto', 'evaluate', 'screenshot']);
+  assert.equal(finished.operator.actions.length, 2);
+  assert.deepEqual(finished.operator.actions.map(item => item.action), ['goto', 'screenshot']);
   assert.equal(page.calls.filter(call => call.action === 'goto').length, 1, '续跑不重跑登录前的步骤');
-  assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 1);
   assert.equal(capture.closed, true, '任务完成后关闭浏览器上下文');
   assert.equal((await getJson(app, '/api/tasks', user.cookie)).badge, 0);
 });
@@ -541,25 +549,30 @@ test('operator HTTP：危险动作硬确认可拒绝/接受；等待中可停止
   const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}});
   const user = await register(app, 'operator-confirm-user');
 
-  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {
+  // HTTP 不再接受客户端 steps；危险动作场景走进程内注入（服务端/测试），继续/确认仍走 HTTP。
+  const started = await app.operator.start({
+    user: user.user,
     url: 'https://career.uibe.edu.cn/zhaopin/',
+    confirm: true,
     steps: [
       {action: 'click', target: '#apply', text: '投递简历'},
       {action: 'evaluate', script: 'document.title'}
     ]
   });
+  assert.equal(started.status, 200);
   const pending = await waitFor(async () => {
     const listed = await getJson(app, '/api/tasks', user.cookie);
-    return listed.tasks[0]?.state === 'waiting_confirmation' ? listed.tasks[0] : null;
+    const task = listed.tasks.find(item => item.id === started.json.taskId);
+    return task?.state === 'waiting_confirmation' ? task : null;
   });
   assert.equal(pending.operator.waiting.kind, 'confirm');
   assert.equal(pending.operator.waiting.confirmKind, 'apply');
   assert.match(pending.operator.waiting.reason, /投递|确认/);
 
-  await postJson(app, '/api/source-check/operator/confirm', user.cookie, {taskId: started.taskId, decision: 'reject'});
+  await postJson(app, '/api/source-check/operator/confirm', user.cookie, {taskId: started.json.taskId, decision: 'reject'});
   const finished = await waitFor(async () => {
     const listed = await getJson(app, '/api/tasks', user.cookie);
-    return listed.tasks[0]?.state === 'succeeded' ? listed.tasks[0] : null;
+    return listed.tasks.find(item => item.id === started.json.taskId)?.state === 'succeeded' ? listed.tasks.find(item => item.id === started.json.taskId) : null;
   });
   assert.equal(page.calls.filter(call => call.action === 'click').length, 0, '拒绝后不执行危险点击');
   assert.equal(finished.operator.actions[0].result, 'rejected');
@@ -570,10 +583,7 @@ test('operator HTTP：危险动作硬确认可拒绝/接受；等待中可停止
   const capture2 = {};
   const app2 = await startApp(t, {operator: {launch: fakeOperatorLauncher(page2, capture2)}});
   const user2 = await register(app2, 'operator-stop-user');
-  await postJson(app2, '/api/source-check/operator/start', user2.cookie, {
-    url: 'https://mp.weixin.qq.com/s/x',
-    steps: [{action: 'goto', url: 'https://mp.weixin.qq.com/s/x'}, {action: 'screenshot', label: '列表'}]
-  });
+  await postJson(app2, '/api/source-check/operator/start', user2.cookie, {url: 'https://mp.weixin.qq.com/s/x', confirm: true});
   const paused = await waitFor(async () => {
     const listed = await getJson(app2, '/api/tasks', user2.cookie);
     return listed.tasks[0]?.state === 'waiting_login' ? listed.tasks[0] : null;
@@ -588,22 +598,37 @@ test('operator HTTP：危险动作硬确认可拒绝/接受；等待中可停止
   assert.equal(capture2.closed, true, '停止后必须关闭浏览器上下文');
 });
 
-test('operator HTTP：非法步骤/私网地址返回 400，不排队任务；跨用户不能续跑别人任务', {timeout: 30000}, async t => {
+test('operator HTTP：客户端 steps/evaluate 被拒绝、未确认不启动、私网地址 400；跨用户不能续跑', {timeout: 30000}, async t => {
   const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(fakeOperatorPage(), {})}});
   const user = await register(app, 'operator-invalid-user');
-  const badStep = await postJson(app, '/api/source-check/operator/start', user.cookie, {
-    url: 'https://career.uibe.edu.cn/',
-    steps: [{action: 'goto', url: 'file:///C:/Windows/win.ini'}]
+  const base = 'https://career.uibe.edu.cn/';
+
+  // P0：任何 web token 持有者都不能通过 HTTP 注入步骤/JS 去驱动登录 profile。
+  const clientSteps = await postJson(app, '/api/source-check/operator/start', user.cookie, {
+    url: base, confirm: true, steps: [{action: 'goto', url: base}]
   }, 400);
-  assert.equal(badStep.code, 'INVALID_OPERATOR_STEP');
-  const privateUrl = await postJson(app, '/api/source-check/operator/start', user.cookie, {url: 'http://127.0.0.1:4189/'}, 400);
+  assert.equal(clientSteps.code, 'OPERATOR_STEPS_FORBIDDEN');
+  const clientEvaluate = await postJson(app, '/api/source-check/operator/start', user.cookie, {
+    url: base, confirm: true, evaluate: 'document.cookie'
+  }, 400);
+  assert.equal(clientEvaluate.code, 'OPERATOR_STEPS_FORBIDDEN');
+  const viaStart = await postJson(app, '/api/source-check/start', user.cookie, {
+    mode: 'operator', url: base, confirm: true, steps: [{action: 'goto', url: base}]
+  }, 400);
+  assert.equal(viaStart.code, 'OPERATOR_STEPS_FORBIDDEN', 'source-check/start 的 operator 分支同样拒绝 steps');
+
+  // 每次 AI 采集/兜底都要一次明确确认。
+  const noConfirm = await postJson(app, '/api/source-check/operator/start', user.cookie, {url: base}, 400);
+  assert.equal(noConfirm.code, 'OPERATOR_CONFIRM_REQUIRED');
+  const noConfirmWechat = await postJson(app, '/api/wechat/operator/start', user.cookie, {}, 400);
+  assert.equal(noConfirmWechat.code, 'OPERATOR_CONFIRM_REQUIRED');
+
+  const privateUrl = await postJson(app, '/api/source-check/operator/start', user.cookie, {url: 'http://127.0.0.1:4189/', confirm: true}, 400);
   assert.equal(privateUrl.code, 'INVALID_URL');
-  const unknownAction = await postJson(app, '/api/source-check/operator/start', user.cookie, {
-    url: 'https://career.uibe.edu.cn/',
-    steps: [{action: 'drag', target: '#x'}]
-  }, 400);
-  assert.equal(unknownAction.code, 'INVALID_OPERATOR_STEP');
-  assert.equal((await getJson(app, '/api/tasks', user.cookie)).tasks.length, 0, '非法请求不产生任务');
+  const unknownAction = await app.operator.start({user: user.user, url: base, confirm: true, steps: [{action: 'drag', target: '#x'}]});
+  assert.equal(unknownAction.status, 400);
+  assert.equal(unknownAction.json.code, 'INVALID_OPERATOR_STEP');
+  assert.equal((await getJson(app, '/api/tasks', user.cookie)).tasks.length, 0, '非法/未确认请求不产生任务');
 
   const other = await register(app, 'operator-other-user');
   const continueOther = await postJson(app, '/api/source-check/operator/continue', other.cookie, {taskId: '99999999-9999-4999-8999-999999999999'}, 404);
@@ -621,7 +646,7 @@ test('operator HTTP：公众号 AI 采集默认西财校招，读文章写入并
   };
   const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}, wechatOperator: {readers}});
   const user = await register(app, 'wechat-operator-http-user');
-  const started = await postJson(app, '/api/wechat/operator/start', user.cookie, {});
+  const started = await postJson(app, '/api/wechat/operator/start', user.cookie, {confirm: true});
   assert.equal(started.ok, true);
   assert.equal(started.mode, 'wechat_operator');
   assert.match(started.accountName, /西财校招/);
@@ -811,6 +836,7 @@ test('playbook：UIBE/SWUFE/WeChat 各一份，front matter 含入口/domains/�
     assert.ok(pb.markdown.length > 200, pb.id + ' 缺 Markdown 正文');
     const host = new URL(pb.entry[0]).hostname;
     assert.ok(pb.domains.some(domain => host === domain || host.endsWith('.' + domain)), pb.id + ' domains 必须覆盖入口主机 ' + host);
+    assert.match(pb.detailSelector, /.+/, pb.id + ' 必须有 detailSelector，兜底才能截到列表 + 详情两页');
   }
 
   assert.equal((await loadPlaybook('uibe-career')).id, 'uibe-career');
@@ -821,13 +847,20 @@ test('playbook：UIBE/SWUFE/WeChat 各一份，front matter 含入口/domains/�
   assert.equal(await playbookForSource('sufe-xjh'), null, '采集器源不自动拥有 AI 兜底');
 
   const pb = await loadPlaybook('uibe-career');
+  assert.match(pb.detailSelector, /zph\.jspa/, 'UIBE 兜底必须有详情选择器');
   const steps = playbookSteps(pb);
   assert.equal(steps[0].action, 'goto');
   assert.equal(steps[0].url, pb.entry[0], 'playbook 入口成为第一步 goto');
   assert.equal(steps.at(-1).action, 'screenshot');
-  assert.ok(steps.length >= 2);
-  assert.ok(!steps.some(step => step.action === 'click'), '没有 detailSelector 的 playbook 不生成点击步骤');
+  assert.deepEqual(steps.map(step => step.action), ['goto', 'click', 'screenshot']);
+  assert.equal(steps[1].target, pb.detailSelector);
   assert.doesNotThrow(() => normalizeOperatorSteps(steps, {source: {listUrl: steps[0].url}}), 'playbook 生成的动作必须能过 operator 校验');
+
+  // successMarkers / extractHints / domains 不是死配置：真的进视觉抽取 prompt。
+  const prompt = buildExtractionPrompt({name: '对外经济贸易大学'}, pb);
+  for (const marker of pb.successMarkers) assert.ok(prompt.includes(marker), 'prompt 缺成功标志：' + marker);
+  for (const hint of pb.extractHints) assert.ok(prompt.includes(hint), 'prompt 缺抽取提示：' + hint);
+  for (const domain of pb.domains) assert.ok(prompt.includes(domain), 'prompt 缺允许域提示：' + domain);
 
   // 西南财大兜底要截到「列表 + 详情」：入口 → 点开第一场详情 → 关键截图。
   const swufe = await loadPlaybook('swufe-xjh');
@@ -839,13 +872,14 @@ test('playbook：UIBE/SWUFE/WeChat 各一份，front matter 含入口/domains/�
 });
 
 test('AI 兜底入口：operator start 接受 sourceId+playbook，用 playbook 入口生成步骤并标明是兜底', {timeout: 60000}, async t => {
-  const page = fakeOperatorPage();
+  const detailUrl = 'https://career.uibe.edu.cn/front/zph.jspa?tid=2101594239258345474';
+  const page = fakeOperatorPage({onAfter: {'a[href*="/front/zph.jspa"]': async target => target.setUrl(detailUrl)}});
   const capture = {};
   // 兜底跑完动作后会复用 source-check 的视觉抽取/写入；这里注入假视觉，不调模型 API。
   const app = await startApp(t, {extractor: fakeExtractor(), operator: {launch: fakeOperatorLauncher(page, capture)}});
   const user = await register(app, 'ai-fallback-user');
 
-  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'uibe-career', playbook: 'uibe-career'});
+  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'uibe-career', playbook: 'uibe-career', confirm: true});
   assert.equal(started.mode, 'operator');
   assert.equal(started.fallback, true, '响应要标明这是手动兜底');
   assert.equal(started.playbook, 'uibe-career');
@@ -869,9 +903,9 @@ test('AI 兜底入口：operator start 接受 sourceId+playbook，用 playbook �
   const sources = await getJson(app, '/api/recruit/sources', user.cookie);
   assert.match(sources.manualReads['uibe-career'].reason, /AI 兜底/);
 
-  const mismatch = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'swufe-xjh', playbook: 'uibe-career'}, 400);
+  const mismatch = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'swufe-xjh', playbook: 'uibe-career', confirm: true}, 400);
   assert.equal(mismatch.code, 'PLAYBOOK_SOURCE_MISMATCH');
-  const unknown = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'uibe-career', playbook: 'nope'}, 400);
+  const unknown = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'uibe-career', playbook: 'nope', confirm: true}, 400);
   assert.equal(unknown.code, 'UNKNOWN_PLAYBOOK');
   assert.equal((await getJson(app, '/api/tasks', user.cookie)).tasks.length, 1, '被拒绝的兜底请求不排队任务');
 });
@@ -893,9 +927,9 @@ test('来源卡 AI 兜底能力：有 playbook 的源与公众号账号标记 ai
   const withAccount = await getJson(app, '/api/recruit/sources', user.cookie);
   const account = withAccount.wechat.accounts.find(item => item.id === accountId);
   assert.ok(account, '公众号账号要出现在来源卡数据里');
-  assert.equal(account.aiFallback.available, true);
-  assert.equal(account.aiFallback.playbookId, 'wechat');
-  assert.match(account.aiFallback.note, /这是兜底，不是自动采集/);
+  assert.equal(account.aiFallback.available, false, '公众号不再有 mp 首页的通用 AI 兜底');
+  assert.equal(account.aiFallback.playbookId, '');
+  assert.equal(account.sourceId, 'wechat:' + accountId, '账号级 AI 采集用账号自己的来源 id');
 
   const playbooks = await getJson(app, '/api/source-check/playbooks', user.cookie);
   assert.deepEqual(playbooks.playbooks.map(item => item.id).sort(), ['swufe-xjh', 'uibe-career', 'wechat']);
@@ -909,28 +943,17 @@ test('来源卡 AI 兜底能力：有 playbook 的源与公众号账号标记 ai
   }
 });
 
-test('AI 兜底也能用于公众号账号：wechat:<id> 用 wechat playbook 的入口生成步骤', {timeout: 30000}, async t => {
+test('公众号不再有通用 AI 兜底入口：通用 operator 入口拒绝 wechat playbook，必须走账号级 AI 采集', {timeout: 30000}, async t => {
   const page = fakeOperatorPage();
   const capture = {};
   const app = await startApp(t, {extractor: fakeExtractor(), operator: {launch: fakeOperatorLauncher(page, capture)}});
   const user = await register(app, 'ai-fallback-wechat');
 
-  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'wechat:abc-123', playbook: 'wechat'});
-  assert.equal(started.fallback, true);
-  assert.equal(started.playbook, 'wechat');
-  assert.equal(started.sourceId, 'wechat:abc-123', '公众号账号保留自己的来源 id，便于来源卡记最近手动读取');
-
-  const finished = await waitFor(async () => {
-    const listed = await getJson(app, '/api/tasks', user.cookie);
-    const task = listed.tasks.find(item => item.id === started.taskId);
-    return task && ['succeeded', 'failed'].includes(task.state) ? task : null;
-  });
-  assert.equal(finished.state, 'succeeded', '公众号兜底任务应完成：' + JSON.stringify(finished.error));
-  const goes = page.calls.filter(call => call.action === 'goto').map(call => call.url);
-  assert.equal(goes[0], 'https://mp.weixin.qq.com/');
-
-  const sources = await getJson(app, '/api/recruit/sources', user.cookie);
-  assert.match(sources.manualReads['wechat:abc-123'].reason, /AI 兜底/);
+  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'wechat:abc-123', playbook: 'wechat', confirm: true}, 400);
+  assert.equal(started.code, 'WECHAT_OPERATOR_REQUIRES_ACCOUNT');
+  assert.match(started.error, /账号级/);
+  assert.equal((await getJson(app, '/api/tasks', user.cookie)).tasks.length, 0, '被拒绝的通用入口不排队任务');
+  assert.equal(page.calls.length, 0, '不能打开 mp 首页');
 });
 
 test('不自动切换：确定性来源被阻断/失败后不会自动启动 AI 兜底', {timeout: 60000}, async t => {
@@ -1043,13 +1066,19 @@ test('SWUFE 对照：source-check 与手动 AI 兜底写同一条记录，字段
   assert.equal(eventBefore.record.city, '成都');
   assert.equal(eventBefore.record.kind, '双选会');
   assert.equal(eventBefore.record.source_url, SWUFE_DETAIL_URL);
-  assert.equal(eventBefore.record.operation_id, first.taskId);
+  assert.equal(eventBefore.record.source_id, 'swufe-xjh', '来源 id 跟随实际来源');
+  assert.match(eventBefore.record.operation_id, new RegExp('^' + first.taskId + ':\\d+$'), 'operation_id = taskId:runSeq');
   assert.equal(eventBefore.record.evidence_ref, 'artifact:02-detail.png');
   assert.equal(eventBefore.record.evidence_available, true);
   assert.deepEqual(feedCompanies(afterSourceCheck), [...companies].sort());
+  // 兜底/对照记录能被 career_feed({sourceId}) 过滤，不再全部压成 manual。
+  const filtered = await callTool('career_feed', {sourceId: 'swufe-xjh'}, {config});
+  assert.equal(filtered.entries.length, 4, 'sourceId=swufe-xjh 应能过滤到 4 条');
+  const manualFiltered = await callTool('career_feed', {sourceId: 'manual'}, {config});
+  assert.equal(manualFiltered.entries.length, 0, '来源 id 已不是 manual');
 
   // 2) 用户手动点「AI 兜底」：playbook 入口 + 打开详情页 + 截图；抽取/写入复用同一套写网关。
-  const fallback = await postJson(app, '/api/source-check/operator/start', member.cookie, {sourceId: 'swufe-xjh', playbook: 'swufe-xjh'});
+  const fallback = await postJson(app, '/api/source-check/operator/start', member.cookie, {sourceId: 'swufe-xjh', playbook: 'swufe-xjh', confirm: true});
   assert.equal(fallback.fallback, true, '响应要标明这是手动兜底');
   assert.equal(fallback.playbook, 'swufe-xjh');
   assert.match(fallback.title, /AI 兜底/);
@@ -1093,7 +1122,7 @@ test('SWUFE 对照：source-check 与手动 AI 兜底写同一条记录，字段
     assert.equal(eventAfter.record[field], eventBefore.record[field], field + ' 两条路径必须一致');
   }
   assert.deepEqual(feedCompanies(afterFallback), [...companies].sort(), '单位集合保持一致');
-  assert.equal(eventAfter.record.operation_id, fallback.taskId, '操作 id 指向兜底任务');
+  assert.match(eventAfter.record.operation_id, new RegExp('^' + fallback.taskId + ':\\d+$'), '操作 id 指向兜底任务');
   assert.match(eventAfter.record.evidence_ref, /^artifact:action-\d{3}\.png$/, '证据指向兜底的详情截图');
   assert.equal(eventAfter.record.evidence_available, true);
 
@@ -1138,7 +1167,7 @@ test('AI 兜底遇到登录会暂停且不写记录：用户继续/取消前库�
   const member = await register(app, 'swufe-fallback-waiting');
   const config = feedConfig(app, member.user);
 
-  const started = await postJson(app, '/api/source-check/operator/start', member.cookie, {sourceId: 'swufe-xjh', playbook: 'swufe-xjh'});
+  const started = await postJson(app, '/api/source-check/operator/start', member.cookie, {sourceId: 'swufe-xjh', playbook: 'swufe-xjh', confirm: true});
   const waiting = await waitTask(app, member.cookie, started.taskId, ['waiting_login']);
   assert.equal(waiting.state, 'waiting_login');
   assert.equal(waiting.operator.waiting.kind, 'login');
@@ -1157,14 +1186,35 @@ test('AI 兜底截图不足时失败关闭：不猜着写库，给出可执行�
   const member = await register(app, 'swufe-fallback-shots');
   const config = feedConfig(app, member.user);
 
-  const started = await postJson(app, '/api/source-check/operator/start', member.cookie, {
+  // 自定义步骤只能由服务端注入：HTTP 不再接受 steps，这里直接调进程内服务。
+  const started = await app.operator.start({
+    user: member.user,
     sourceId: 'swufe-xjh',
     playbook: 'swufe-xjh',
+    confirm: true,
     steps: [{action: 'goto', url: 'https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm'}]
   });
-  const finished = await waitTask(app, member.cookie, started.taskId, ['failed']);
+  assert.equal(started.status, 200);
+  const finished = await waitTask(app, member.cookie, started.json.taskId, ['failed']);
   assert.equal(finished.state, 'failed');
   assert.equal(finished.error.code, 'OPERATOR_SCREENSHOTS_MISSING');
   assert.match(finished.error.recovery, /重试|手动导入/);
   assert.equal((await callTool('career_feed', {}, {config})).entries.length, 0, '截图不足不能写任何记录');
+});
+
+test('AI 兜底列表与详情是同一页时失败关闭（OPERATOR_SAME_PAGE），不写库', {timeout: 60000}, async t => {
+  // 假页面点击详情选择器但不跳转：两张截图 URL 相同，正是 #54 评审指出的问题。
+  const page = fakeOperatorPage();
+  const app = await startApp(t, {extractor: fakeExtractor(), operator: {launch: fakeOperatorLauncher(page, {})}});
+  const member = await register(app, 'swufe-fallback-same-page');
+  const config = feedConfig(app, member.user);
+
+  const started = await postJson(app, '/api/source-check/operator/start', member.cookie, {
+    sourceId: 'swufe-xjh', playbook: 'swufe-xjh', confirm: true
+  });
+  const finished = await waitTask(app, member.cookie, started.taskId, ['failed']);
+  assert.equal(finished.state, 'failed');
+  assert.equal(finished.error.code, 'OPERATOR_SAME_PAGE');
+  assert.match(finished.error.recovery, /detailSelector|手动导入/);
+  assert.equal((await callTool('career_feed', {}, {config})).entries.length, 0, '同一页不能写任何记录');
 });

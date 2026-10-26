@@ -48,14 +48,66 @@ export function validateBulkPayload(events, projects, source) {
   return null;
 }
 
-function findEvent(store, {sourceId, sourceKey, title, startAt}) {
-  const identity = sourceKey
-    ? createHash('sha1').update('event|' + sourceId + '|' + sourceKey).digest('hex').slice(0, 24)
-    : createHash('sha1').update('event|' + title + '|' + startAt).digest('hex').slice(0, 24);
+// 去重口径（#54 评审）：不再用「标题 + startAt」逐字相等。AI 与确定性源对同一场活动
+// 的措辞可能不同（“邀请函/通知”后缀、全半角、空白、时区写法），所以先归一化：
+//   标题 → NFKC + 去空白/标点 + 去常见后缀；
+//   时间 → 统一按 +08:00 折成 YYYY-MM-DDTHH:mm；
+//   单位 → company 优先，没有就用 school（再没有才留空）。
+// 匹配时单位只在双方都有值时比较，避免 AI 补了 company 而确定性源没写就判成两条。
+export function normalizeEventTitle(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, '')
+    .replace(/[·•・\-—_/\\|｜:：,，。.;；!！?？'"“”‘’()（）\[\]【】<>《》]+/g, '')
+    .replace(/(邀请函|通知|公告|详情|简章|海报|预告|邀请)$/,'');
+}
+
+export function normalizeEventMoment(value) {
+  const raw = String(value ?? '').trim();
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return new Date(parsed.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 16);
+  return raw.slice(0, 16);
+}
+
+function eventUnit(record) {
+  return normalizeEventTitle(record.company || record.school || '');
+}
+
+export function eventIdentityKey(record) {
+  return [normalizeEventTitle(record.title), normalizeEventMoment(record.startAt), eventUnit(record)].join('|');
+}
+
+function findEvent(store, {sourceId, sourceKey, title, startAt, company, school}) {
+  const incoming = {title, startAt, company, school};
+  let identity;
+  if (sourceKey) {
+    identity = createHash('sha1').update('event|' + sourceId + '|' + sourceKey).digest('hex').slice(0, 24);
+    const row = store.getEvent(identity);
+    if (row) return {id: identity, row};
+    // 没命中 sourceKey 时仍做一次归一化匹配：手工预置/另一条路径写的同一场活动要更新而不是新增。
+  } else {
+    identity = createHash('sha1').update('event|' + eventIdentityKey(incoming)).digest('hex').slice(0, 24);
+  }
   const byId = store.getEvent(identity);
   if (byId) return {id: identity, row: byId};
-  const row = store.db.prepare('SELECT * FROM events WHERE title=? AND start_at=? ORDER BY last_seen_at DESC LIMIT 1').get(title, startAt);
-  return row ? {id: row.id, row: store.getEvent(row.id)} : {id: identity, row: null};
+  const date = normalizeEventMoment(startAt).slice(0, 10);
+  const candidates = store.db.prepare('SELECT * FROM events WHERE substr(start_at, 1, 10)=? ORDER BY last_seen_at DESC').all(date);
+  const wantedTitle = normalizeEventTitle(title);
+  const wantedMoment = normalizeEventMoment(startAt);
+  const wantedCompany = normalizeEventTitle(company);
+  const wantedSchool = normalizeEventTitle(school);
+  for (const row of candidates) {
+    if (normalizeEventTitle(row.title) !== wantedTitle) continue;
+    if (normalizeEventMoment(row.start_at) !== wantedMoment) continue;
+    // 单位只在双方都写了 company 时强比较：AI 补了 company、确定性源没写，不能判成两条。
+    const rowCompany = normalizeEventTitle(row.company);
+    if (wantedCompany && rowCompany && wantedCompany !== rowCompany) continue;
+    // 双方都没有 company 时才用 school 兜底区分。
+    if (!wantedCompany && !rowCompany && wantedSchool && row.school && normalizeEventTitle(row.school) !== wantedSchool) continue;
+    return {id: row.id, row: store.getEvent(row.id)};
+  }
+  return {id: identity, row: null};
 }
 
 function eventRecord(input, previous, {sourceId, sourceUrl, sourceNotes}) {
@@ -115,7 +167,7 @@ export function bulkWriteRows({store, events, projects = [], source}) {
     const title = text(input.title, 200);
     const startAt = text(input.startAt, 40);
     const sourceKey = text(input.sourceKey, 200);
-    const found = findEvent(store, {sourceId: origin.sourceId, sourceKey, title, startAt});
+    const found = findEvent(store, {sourceId: origin.sourceId, sourceKey, title, startAt, company: text(input.company, 120), school: text(input.school, 60)});
     const record = eventRecord({...input, id: found.id}, found.row, origin);
     record.id = found.id;
     store.upsertEvent(record);

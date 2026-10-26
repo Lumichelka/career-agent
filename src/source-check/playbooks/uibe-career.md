@@ -10,6 +10,7 @@ aliases:
   - 对外经贸
 entry:
   - https://career.uibe.edu.cn/front/channel.jspa?channelId=766&parentId=625
+detailSelector: a[href*="/front/zph.jspa"]
 domains:
   - career.uibe.edu.cn
 successMarkers:
@@ -53,4 +54,7 @@ extractHints:
 ## 边界
 
 - 只读公开页面；投递/支付/删除/退出/提交表单由 operator 的硬确认拦住。
-- 单次 <10 分钟，超时暂停等待人工接管，不判失败。
+- 单次总活跃时间 <10 分钟；到点暂停等待人工接管，继续后额度不清零。
+- **robots 未确认前默认不自动采集**：页面自身 JS 仍会 POST /front/zp_query/，而 robots.txt
+  禁止该路径；确定性源 `uibe-career` 因此默认 `enabled:false`，本 playbook 只用于人工点击的兜底/来源校对。
+- 详情页逐条请求间隔 1.2s（`detailDelayMs`）；列表每页 20 条、共 202 页。

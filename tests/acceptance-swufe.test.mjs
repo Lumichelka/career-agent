@@ -334,7 +334,7 @@ test('首验回归：来源校对全链路（两次浏览器读取 + 抽取 + �
   }));
   assert.equal(rows.events.length, 1);
   assert.equal(rows.projects.length, 3);
-  assert.equal(rows.events[0].source_id, 'manual');
+  assert.equal(rows.events[0].source_id, 'swufe-xjh', '来源 id 跟随实际来源，而不是硬编码 manual');
   assert.equal(rows.events[0].source_url, DETAIL_URL);
   assert.match(rows.events[0].notes, /浏览器截图读取（非采集器）/);
   assert.equal(rows.events[0].school, '西南财经大学');
@@ -342,7 +342,7 @@ test('首验回归：来源校对全链路（两次浏览器读取 + 抽取 + �
   assert.equal(rows.events[0].kind, '双选会');
   assert.equal(SOURCE_CHECK_NOTES, '浏览器截图读取（非采集器）');
   for (const project of rows.projects) {
-    assert.equal(project.source_id, 'manual');
+    assert.equal(project.source_id, 'swufe-xjh');
     assert.equal(project.source_url, DETAIL_URL);
     assert.match(project.notes, /浏览器截图读取（非采集器）/);
   }
@@ -442,11 +442,11 @@ test('首验回归：冲突 1 条 skip + 其余撤销；强制撤销写回旧值
   const seedEventId = 'seed-event-acceptance-0001';
   let seedProjectId = '';
   const seedSourceKey = createHash('sha1')
-    .update(['manual', project0.company, project0.title, ''].join('|'))
+    .update(['swufe-xjh', project0.company, project0.title, ''].join('|'))
     .digest('hex').slice(0, 32);
   const before = withStore(app, member.user, store => {
     store.upsertEvent({
-      id: seedEventId, sourceId: 'manual', school: '西南财经大学', city: '成都', kind: '双选会',
+      id: seedEventId, sourceId: 'swufe-xjh', school: '西南财经大学', city: '成都', kind: '双选会',
       title: rawFixture.events[0].title, startAt: rawFixture.events[0].startAt,
       venue: '旧场馆', company: '旧单位', fetchedAt: '2026-01-01T00:00:00.000Z',
       confidence: 0.5, status: 'active', notes: '人工预置（无审计）'
@@ -454,7 +454,7 @@ test('首验回归：冲突 1 条 skip + 其余撤销；强制撤销写回旧值
     const seeded = store.upsertProject({
       eventId: seedEventId, company: project0.company, title: project0.title,
       positions: '旧岗位', requirements: '旧要求', applyMode: '现场投递',
-      sourceId: 'manual', sourceKey: seedSourceKey, sourceUrl: 'https://example.com/jobs/boc',
+      sourceId: 'swufe-xjh', sourceKey: seedSourceKey, sourceUrl: 'https://example.com/jobs/boc',
       notes: '人工预置（无审计）', confidence: 0.6
     });
     seedProjectId = seeded.id;
