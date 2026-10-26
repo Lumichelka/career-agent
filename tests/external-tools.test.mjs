@@ -302,13 +302,16 @@ test('上游写：readOnlyHint 缺省按写；幂等键透传，否则 retryable
   const lookup = await toolset.callTool('mcp__dify__lookup', {q: 'x'}, {});
   assert.equal(lookup.readOnly, true);
   assert.equal(lookup.retryable, true);
+  assert.equal(lookup.idempotency, 'read_only', '信封标出只读调用无需幂等键');
   const publish = await toolset.callTool('mcp__dify__publish', {title: 't'}, {});
   const publishCall = connections.log.filter(item => item.kind === 'callTool').at(-1);
   assert.match(publishCall.args.idempotencyKey, /^task-task-1-\d+$/, '有幂等键字段就透传我们的键');
   assert.equal(publish.readOnly, false);
   assert.equal(publish.retryable, true);
+  assert.equal(publish.idempotency, 'idempotencyKey', '信封标出透传的是哪个幂等键字段');
   const remove = await toolset.callTool('mcp__dify__remove', {title: 't'}, {});
   assert.equal(remove.retryable, false, '没有幂等键字段就标不可重试');
+  assert.equal(remove.idempotency, 'upstream_unsupported', '信封明确写上游不支持幂等');
   assert.equal(connections.log.filter(item => item.kind === 'callTool').at(-1).args.idempotencyKey, undefined);
   const evidence = events.filter(event => event.type === 'evidence').map(event => event.evidence);
   assert.ok(evidence.some(item => /写/.test(item.label)), '写调用记外部调用事件并提示远端副作用不可撤销');
