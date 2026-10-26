@@ -12,6 +12,7 @@ import {parseRenderedText} from './browser.mjs';
 import {WeChatStore} from '../wechat/store.mjs';
 import {listPlatformJobs} from './platform-jobs-service.mjs';
 import {sourceCheckEnabled} from '../source-check/config.mjs';
+import {listPlaybooks, AI_FALLBACK_NOTE} from '../source-check/playbook.mjs';
 
 const MAX_DAYS = 180;
 
@@ -40,13 +41,20 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   if (method === 'GET') {
     if (pathname === 'sources') {
       const data = withStore(dir, store => ({sources: store.sourceStates(), runs: store.recentRuns(10), stats: store.stats(), manualReads: store.manualReads()}));
-      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', sourceCheck: sourceCheckEnabled(s), loginRequired: s.loginRequired === true, manualConfirm: s.manualConfirm === true, collectMode: s.collectMode || 'auto', capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: true}}]));
+      // AI 兜底能力只由 playbook 决定：没有 playbook 的源就没有这个入口（不是自动采集，ADR 0003）。
+      const playbooks = await listPlaybooks();
+      const playbookFor = id => playbooks.find(pb => pb.id === id || pb.sourceIds.includes(id) || pb.aliases.includes(id)) || null;
+      const aiFallback = playbook => ({available: Boolean(playbook), playbookId: playbook?.id || '', note: playbook ? AI_FALLBACK_NOTE : ''});
+      const catalog = Object.fromEntries(SOURCES.map(s => {
+        const playbook = playbookFor(s.id);
+        return [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', sourceCheck: sourceCheckEnabled(s), loginRequired: s.loginRequired === true, manualConfirm: s.manualConfirm === true, collectMode: s.collectMode || 'auto', capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: true}, aiFallback: aiFallback(playbook)}];
+      }));
       let wechat = {accounts: [], stats: {accounts: 0, articles: 0}};
       try {
         const ws = WeChatStore.open(join(dir, 'wechat.db'));
         try {
           wechat = {
-            accounts: ws.listAccounts().map(a => ({...a, sourceId: 'wechat:' + a.id, sourceType: 'wechat', enabled: true})),
+            accounts: ws.listAccounts().map(a => ({...a, sourceId: 'wechat:' + a.id, sourceType: 'wechat', enabled: true, aiFallback: aiFallback(playbookFor('wechat'))})),
             stats: ws.stats()
           };
         } finally { ws.close(); }

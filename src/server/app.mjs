@@ -39,6 +39,7 @@ import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writ
 import {createSourceCheckService} from '../source-check/pipeline.mjs';
 import {createOperatorService} from '../source-check/operator.mjs';
 import {createExternalReviewer} from '../source-check/review.mjs';
+import {listPlaybooks} from '../source-check/playbook.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -465,6 +466,11 @@ const server = http.createServer(async (req, res) => {
       }
       return send(res, out.json, out.status || 500);
     }
+    // 来源 playbook 清单：来源卡与「AI 兜底」只读这一份源知识；不返回 Markdown 正文。
+    if (req.method === 'GET' && url.pathname === '/api/source-check/playbooks') {
+      const playbooks = await listPlaybooks();
+      return send(res, {playbooks: playbooks.map(({markdown, ...rest}) => rest)});
+    }
     // 来源校对的截图/抽取证据：只从本人任务目录取，文件名白名单。
     if (req.method === 'GET' && url.pathname === '/api/source-check/evidence') {
       const out = await sourceCheckService.readEvidence({userId: user.id, taskId: url.searchParams.get('taskId'), file: url.searchParams.get('file')});
@@ -595,7 +601,7 @@ const server = http.createServer(async (req, res) => {
 
       // 来源操作（AI 采集）入口：打开应用内可见 profile，任务在后台运行/等待人工接管。
       if (url.pathname === '/api/source-check/operator/start') {
-        const out = await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps});
+        const out = await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps, playbook: body.playbook});
         return send(res, out.json, out.status || 200);
       }
       if (url.pathname === '/api/source-check/operator/continue') {
@@ -609,7 +615,7 @@ const server = http.createServer(async (req, res) => {
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
       if (url.pathname === '/api/source-check/start') {
         const out = body.mode === 'operator'
-          ? await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps})
+          ? await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps, playbook: body.playbook})
           : await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId, url: body.url});
         return send(res, out.json, out.status || 200);
       }

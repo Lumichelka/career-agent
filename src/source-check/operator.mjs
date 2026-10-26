@@ -11,12 +11,17 @@ import {chromium} from 'playwright';
 import {isPrivateSourceHost} from './config.mjs';
 import {detectBlock} from './browser.mjs';
 import {operatorProfileDir} from '../config/paths.mjs';
-import {resolveSourceCheckTarget, evidenceDirFor, userDataDir} from './pipeline.mjs';
+import {resolveSourceCheckTarget, evidenceDirFor, userDataDir, recordManualRead} from './pipeline.mjs';
+import {loadPlaybook, playbookMatchesSource, playbookSteps, AI_FALLBACK_NOTE} from './playbook.mjs';
 
 export {operatorProfileDir};
 
 // 单次 AI 操作（从开始/上次人工续跑到下一次暂停）的硬上限：<10 分钟。
 export const OPERATOR_MAX_ACTIVE_MS = 10 * 60 * 1000;
+
+// AI 兜底是手动入口（ADR 0003）：来源卡上的原因文案与任务标题都用这一句，避免被当成自动采集。
+export const AI_FALLBACK_REASON = 'AI 兜底（手动）：' + AI_FALLBACK_NOTE;
+export const AI_FALLBACK_TITLE_PREFIX = 'AI 兜底 · ';
 
 // 启动与上下文参数是公开契约：必须可见（headless:false）、禁用下载、授予剪贴板读写。
 export const OPERATOR_LAUNCH_OPTIONS = {
@@ -532,20 +537,52 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
     });
   }
 
-  async function start({user, sourceId, url, steps} = {}) {
+  // sourceId + playbook = 来源卡上的「AI 兜底」：手动触发，复用同一个 operator 任务/证据/写网关。
+  // 不带 playbook 时保持既有行为（任意 URL 或显式 steps），互不影响。
+  async function start({user, sourceId, url, steps, playbook: playbookId} = {}) {
+    let fallback = null;
+    if (playbookId) {
+      fallback = await loadPlaybook(playbookId);
+      if (!fallback) {
+        return {status: 400, json: {error: '没有这个 playbook：' + String(playbookId).slice(0, 80), code: 'UNKNOWN_PLAYBOOK'}};
+      }
+      if (!fallback.entry.length) {
+        return {status: 400, json: {error: 'playbook 没有入口地址：' + fallback.id, code: 'PLAYBOOK_WITHOUT_ENTRY'}};
+      }
+    }
     const target = resolveSourceCheckTarget({sourceId, url});
-    if (target.error) return {status: 400, json: {error: target.error.message, code: target.error.code}};
-    const source = target.source;
+    let source;
+    if (target.error) {
+      // 公众号账号（wechat:<id>）不在源注册表里：用 playbook 的入口地址合成只读目标。
+      // 只有带 playbook 时才这么做，普通 operator 仍按原来的错误返回。
+      if (!fallback || String(url || '').trim()) {
+        return {status: 400, json: {error: target.error.message, code: target.error.code}};
+      }
+      const entry = fallback.entry.find(item => /^https?:\/\//i.test(item));
+      const synthetic = resolveSourceCheckTarget({url: entry});
+      if (synthetic.error) return {status: 400, json: {error: synthetic.error.message, code: synthetic.error.code}};
+      const fallbackName = String(sourceId || '').startsWith('wechat:') ? '微信公众号' : fallback.title;
+      source = {...synthetic.source, id: String(sourceId || fallback.id), name: fallbackName, playbook: fallback.id, fallback: true};
+    } else {
+      source = target.source;
+      if (fallback && target.kind === 'source' && !playbookMatchesSource(fallback, source.id)) {
+        return {status: 400, json: {error: 'playbook ' + fallback.id + ' 不适用于来源 ' + source.id, code: 'PLAYBOOK_SOURCE_MISMATCH'}};
+      }
+      if (fallback) source = {...source, playbook: fallback.id, fallback: true};
+    }
     let plan;
     try {
-      plan = normalizeOperatorSteps(steps, {source});
+      plan = fallback && !(Array.isArray(steps) && steps.length)
+        ? normalizeOperatorSteps(playbookSteps(fallback), {source})
+        : normalizeOperatorSteps(steps, {source});
     } catch (error) {
       return {status: 400, json: {error: String(error.message || '操作步骤无效'), code: String(error.code || 'INVALID_OPERATOR_STEP')}};
     }
     const label = source.school || source.name || '来源操作';
+    const title = (fallback ? AI_FALLBACK_TITLE_PREFIX : '来源操作 · ') + label;
     const session = {
       id: randomUUID(),
-      title: '来源操作 · ' + label,
+      title,
       memory: '',
       messages: [],
       artifacts: [],
@@ -559,23 +596,41 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
     const run = taskManager.run({
       userId: user.id,
       sessionId: session.id,
-      title: '来源操作 · ' + label,
-      sourceName: '来源操作',
+      title,
+      sourceName: fallback ? 'AI 兜底' : '来源操作',
       onCreate: task => resolveCreated(task),
-      execute: async ({task, signal, emit, addEvidence, setPhase, suspendTimeout}) => executeOperatorPlan({
-        profileDir: operatorProfileDir(dataDir, user.id),
-        evidenceDir: evidenceDirFor(dataDir, user.id, task.id),
-        taskId: task.id,
-        steps: plan,
-        source,
-        launch,
-        maxActiveMs,
-        signal,
-        emit,
-        addEvidence,
-        setPhase,
-        askHuman: info => askHuman({userId: user.id, taskId: task.id, info, emit, signal, suspendTimeout})
-      })
+      execute: async ({task, signal, emit, addEvidence, setPhase, suspendTimeout}) => {
+        let ok = false;
+        try {
+          const out = await executeOperatorPlan({
+            profileDir: operatorProfileDir(dataDir, user.id),
+            evidenceDir: evidenceDirFor(dataDir, user.id, task.id),
+            taskId: task.id,
+            steps: plan,
+            source,
+            launch,
+            maxActiveMs,
+            signal,
+            emit,
+            addEvidence,
+            setPhase,
+            askHuman: info => askHuman({userId: user.id, taskId: task.id, info, emit, signal, suspendTimeout})
+          });
+          ok = true;
+          return out;
+        } finally {
+          // 兜底同样算一次「最近手动读取」：来源卡能看到原因；采集器 last_run 不受影响。
+          if (fallback) {
+            try {
+              recordManualRead({
+                dataDir, userId: user.id, sourceId: source.id, taskId: task.id, sessionId: session.id,
+                status: ok ? 'succeeded' : 'failed',
+                reason: AI_FALLBACK_REASON + ' · playbook ' + fallback.id
+              });
+            } catch { /* 来源卡展示信息，失败不影响任务结果 */ }
+          }
+        }
+      }
     });
     run.catch(() => {});
     const task = await created;
@@ -584,10 +639,13 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
       json: {
         ok: true,
         mode: 'operator',
+        fallback: Boolean(fallback),
+        playbook: fallback?.id || '',
         sourceId: source.id,
         sessionId: session.id,
         taskId: task.id,
-        title: session.title,
+        title,
+        reason: fallback ? AI_FALLBACK_REASON : '',
         workflow: 'open'
       }
     };
