@@ -34,7 +34,7 @@ export async function projects(args, ctx) {
     }
     return {
       status: out.length ? 'readable' : 'empty',
-      notice: '项目来自高校就业网/公众号；平台仅用于研究岗位要求和薪资，不在这里登记岗位或投递。',
+      notice: '项目来自高校就业网/公众号；平台岗位由用户确认后入库，用 career_platform_jobs 查询，不代投递。',
       count: out.length,
       projects: out.slice(0, Math.min(100, Number(args.limit) || 50))
     };

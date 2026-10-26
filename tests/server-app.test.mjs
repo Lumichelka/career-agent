@@ -153,3 +153,31 @@ test('CLI 启动：npm start 行为不变（owner、首登文件、日志、健�
   assert.equal(health.status, 'ready');
   assert.equal(health.port, port, '日志中的端口应与实际监听一致');
 });
+
+test('平台岗位：清单接口鉴权、空库可读；未读页面不写入', async t => {
+  const app = await startApp(t);
+  const reg = await fetch(app.origin + '/api/auth/register', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'x-career-token': app.token},
+    body: JSON.stringify({name: 'platform-user', password: 'correct-horse-battery'})
+  });
+  assert.equal(reg.status, 200);
+  const cookie = (reg.headers.getSetCookie?.() || [reg.headers.get('set-cookie')]).filter(Boolean).join('; ');
+  const headers = {'Content-Type': 'application/json', 'x-career-token': app.token, cookie};
+
+  let res = await fetch(app.origin + '/api/platform/jobs', {method: 'POST', headers, body: JSON.stringify({q: '数据'})});
+  assert.equal(res.status, 200);
+  let data = await res.json();
+  assert.equal(data.status, 'empty');
+  assert.equal(data.jobs.length, 0);
+  assert.equal(data.platforms.length, 7, '接口带 7 个平台名，供筛选');
+
+  res = await fetch(app.origin + '/api/platform/jobsSave', {method: 'POST', headers, body: JSON.stringify({platform: 'boss', idempotencyKey: 'platform-save-1'})});
+  assert.equal(res.status, 200);
+  data = await res.json();
+  assert.equal(data.status, 'needs_read', '没读过页面时不能凭空入库');
+  assert.equal(data.code, 'PLATFORM_NOT_READ');
+
+  const anonymous = await fetch(app.origin + '/api/platform/jobs', {method: 'POST', headers: {'Content-Type': 'application/json', 'x-career-token': app.token}, body: '{}'});
+  assert.ok([401, 403].includes(anonymous.status), '平台岗位属于个人数据，未登录或没有任务身份时不可读');
+});

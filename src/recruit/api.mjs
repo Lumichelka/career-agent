@@ -10,6 +10,7 @@ import {fetchText} from './fetch.mjs';
 import {verifyEvent} from './verify.mjs';
 import {parseRenderedText} from './browser.mjs';
 import {WeChatStore} from '../wechat/store.mjs';
+import {listPlatformJobs} from './platform-jobs-service.mjs';
 import {sourceCheckEnabled} from '../source-check/config.mjs';
 
 const MAX_DAYS = 180;
@@ -73,6 +74,15 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
         day.events.push(e);
       }
       return {json: {month, days, stats: {events: events.length, projects: events.reduce((n, e) => n + (e.projects?.length || 0), 0)}}};
+    }
+    if (pathname === 'platform-jobs') {
+      return {json: listPlatformJobs({
+        dir,
+        q: url.searchParams.get('q') || '',
+        city: url.searchParams.get('city') || '',
+        platform: url.searchParams.get('platform') || '',
+        limit: Number(url.searchParams.get('limit')) || 50
+      })};
     }
     if (pathname.startsWith('projects/')) {
       const id = pathname.split('/')[1];
@@ -234,4 +244,3 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
 
   return null;
 }
-

@@ -2,7 +2,7 @@ import {chromium} from 'playwright';
 import {join} from 'node:path';
 import {spawn} from 'node:child_process';
 import {mkdir} from 'node:fs/promises';
-import {PLATFORM_SITES, PLATFORM_IDS, siteById, isPlatformId} from './sites.mjs';
+import {PLATFORM_SITES, PLATFORM_IDS, siteById, isPlatformId, siteUrlAllowed} from './sites.mjs';
 import {ocrImage} from './ocr.mjs';
 
 export const PLATFORMS = PLATFORM_SITES;
@@ -13,16 +13,10 @@ export function validatePlatform(id) {
   return siteById(id);
 }
 
-function hostMatches(host, domain) {
-  return host === domain || host.endsWith('.' + domain);
-}
-
+// 白名单实现放在 sites.mjs，岗位入库模块也要用同一份判断，避免两处漂移。
 export function allowedPlatformUrl(id, raw) {
-  const site = validatePlatform(id);
-  try {
-    const u = new URL(raw);
-    return u.protocol === 'https:' && hostMatches(u.hostname, site.domain) && !u.username && !u.password;
-  } catch { return false; }
+  validatePlatform(id);
+  return siteUrlAllowed(id, raw);
 }
 
 export function searchUrl(id, query) {
@@ -45,6 +39,25 @@ export class PlatformBrowser {
     this.states = new Map();
     this.locks = new Map();
     this.lastScreenshots = new Map();
+    // 最近一次真实读取的页面快照：平台岗位入库只以这份快照为准，避免模型自报岗位。
+    this.lastReads = new Map();
+  }
+
+  recordRead(id, snapshot) {
+    validatePlatform(id);
+    this.lastReads.set(id, {
+      url: String(snapshot?.url || ''),
+      title: String(snapshot?.title || ''),
+      text: String(snapshot?.text || ''),
+      links: (Array.isArray(snapshot?.links) ? snapshot.links : []).slice(0, 300).map(link => ({title: String(link?.title || ''), url: String(link?.url || '')})),
+      at: String(snapshot?.at || new Date().toISOString()),
+      status: String(snapshot?.status || '')
+    });
+  }
+
+  lastRead(id) {
+    validatePlatform(id);
+    return this.lastReads.get(id) || null;
   }
 
   async serial(id, fn) {
@@ -267,20 +280,24 @@ export class PlatformBrowser {
     const sources = data.links.filter(a => allowedPlatformUrl(id, a.url) && site.detail.test(new URL(a.url).pathname)).slice(0, 25);
     const detailPage = site.detail.test(new URL(url).pathname);
     if (detailPage || sources.length) {
+      const readAt = new Date().toISOString();
+      this.recordRead(id, {url, title: data.title, text: data.text, links: data.links, at: readAt, status: 'readable'});
       return {
         platform: id, name: site.name, status: 'readable',
         message: '以下为浏览器实际显示的文字；页面可读不等于登录已确认，关键信息请核对。',
-        url, title: data.title, text: data.text, sources, readAt: new Date().toISOString()
+        url, title: data.title, text: data.text, sources, readAt
       };
     }
     // 没有详情链接、正文又很短：典型的前端渲染未完成/风控页，切换到截图 OCR。
     if (data.text.trim().length < 200) {
       return this.#fallback(id, site, s, '页面正文过少，可能未渲染完成', data);
     }
+    const readAt = new Date().toISOString();
+    this.recordRead(id, {url, title: data.title, text: data.text, links: data.links, at: readAt, status: 'unconfirmed'});
     return {
       platform: id, name: site.name, status: 'unconfirmed',
       message: '页面可读，但没有识别到明确的' + site.readHint + '；已保留文字供核对。',
-      url, title: data.title, text: data.text, sources, readAt: new Date().toISOString()
+      url, title: data.title, text: data.text, sources, readAt
     };
   }
 

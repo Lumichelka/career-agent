@@ -91,6 +91,10 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .project-form{border:1px dashed #cfdcd2;border-radius:9px;padding:8px;margin-top:8px;display:grid;gap:6px}
 .project-form input,.bulk-form textarea{padding:6px 8px;border:1px solid #d7e1d9;border-radius:7px;font:12px inherit;width:100%}
 .bulk-form{border:1px dashed #cfdcd2;border-radius:9px;padding:8px;margin-top:8px;display:grid;gap:6px}
+.job-card{display:flex;justify-content:space-between;gap:10px;border:1px solid var(--line);border-left:3px solid #9fc7b0;border-radius:10px;padding:9px 11px;margin:7px 0;background:#fff}
+.job-card .job-title{font-size:13px;font-weight:600}
+.job-card .job-meta{font-size:11.5px;color:var(--muted);line-height:1.65;margin-top:2px}
+.job-card .job-side{display:flex;flex-direction:column;gap:4px;align-items:flex-end;font-size:10.5px;color:var(--muted);white-space:nowrap}
 @media(max-width:720px){.cal-cell{min-height:78px;padding:4px}.cal-chip{font-size:9px}.cal-head{font-size:9px}}
 @media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}.ev{grid-template-columns:1fr}.ev .side{flex-direction:row;align-items:center}.ev time{font-size:12px}main{padding:16px 12px 70px}}
 dialog#manual-dialog{border:1px solid var(--line);border-radius:16px;padding:0;width:min(680px,92vw);max-height:88vh;overflow:auto;background:#fff;color:var(--ink);box-shadow:0 24px 70px #1f3a2e33}
@@ -178,6 +182,18 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
     <div class="note">点击日期查看活动；一场双选会可以添加多个招聘项目。已暂停冲突/通勤规划，只保留活动与项目清单。</div>
   </section>
 
+  <section class="panel" id="platform-jobs-panel">
+    <h2>平台岗位 <span id="pj-count" class="hint"></span></h2>
+    <div class="toolbar" style="margin-bottom:8px">
+      <input id="pj-q" type="text" placeholder="岗位/单位关键词">
+      <input id="pj-city" type="text" placeholder="城市（如 成都）">
+      <select id="pj-platform"><option value="">全部平台</option></select>
+      <button id="pj-search">筛选</button>
+    </div>
+    <div id="platform-jobs" class="empty">正在读取平台岗位…</div>
+    <div class="note">平台岗位来自本人登录后的只读浏览；入库前要你在任务卡确认，智能体不代投递。可按岗位/城市/平台筛选，点来源回原页面核对。</div>
+  </section>
+
   <section class="panel">
     <h2>运行记录</h2>
     <div id="runs" class="empty">暂无记录</div>
@@ -239,8 +255,29 @@ let calendar=null,selectedDate='';
 function renderStats(stats,cal){
   el('#stats').innerHTML=[
     ['收录活动',stats?.total??0],['未来活动',stats?.upcoming??0],
-    ['本月活动',cal?.stats?.events??0],['招聘项目',cal?.stats?.projects??0]
+    ['本月活动',cal?.stats?.events??0],['招聘项目',cal?.stats?.projects??0],['平台岗位',stats?.platformProjects??0]
   ].map(([k,v])=>`<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('');
+}
+
+let platformNames={};
+function renderPlatformJobs(data){
+  const list=data?.jobs||[];
+  platformNames=Object.fromEntries((data?.platforms||[]).map(p=>[p.id,p.name]));
+  el('#pj-count').textContent=(data?.count||0)+' 个';
+  const sel=el('#pj-platform');
+  if(sel&&sel.options.length<=1&&data?.platforms)sel.innerHTML='<option value="">全部平台</option>'+data.platforms.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
+  if(!list.length){el('#platform-jobs').className='empty';el('#platform-jobs').textContent='还没有平台岗位。先在对话里让我读取平台搜索页，再在任务卡确认入库。';return}
+  el('#platform-jobs').className='';
+  el('#platform-jobs').innerHTML=list.map(j=>'<article class="job-card"><div><div class="job-title">'+esc([j.company,j.title].filter(Boolean).join(' · ')||'未填岗位')+'</div><div class="job-meta">'+esc([j.city,j.positions,j.requirements].filter(Boolean).join(' · ')||'页面未提供更多摘要')+'</div><div class="job-meta">来源：'+(j.sourceUrl?'<a href="'+esc(j.sourceUrl)+'" target="_blank" rel="noopener noreferrer">'+esc(platformNames[j.platform]||j.platform||'平台')+' ↗</a>':'—')+' · 抓取 '+esc(shortStamp(j.fetchedAt||j.createdAt))+' · 置信度 '+esc((Number(j.confidence)||0).toFixed(2))+'</div></div><div class="job-side">'+esc(j.city||'')+'</div></article>').join('');
+}
+async function loadPlatformJobs(){
+  const params=new URLSearchParams();
+  const q=el('#pj-q')?.value.trim()||'',city=el('#pj-city')?.value.trim()||'',platform=el('#pj-platform')?.value||'';
+  if(q)params.set('q',q);
+  if(city)params.set('city',city);
+  if(platform)params.set('platform',platform);
+  try{renderPlatformJobs(await api('platform-jobs?'+params.toString()))}
+  catch(e){el('#platform-jobs').className='empty';el('#platform-jobs').textContent=e.message}
 }
 
 function renderSources(sources,wechat){
@@ -341,6 +378,7 @@ async function loadAll(){
     const s=await api('sources');
     catalog=s.catalog||{};sourceManual=s.manualReads||{};renderSources(s.sources,s.wechat);renderRuns(s.runs);loadWechatArticles();window.__stats=s.stats;
     await loadCalendar(el('#cal-month').value||monthNow());
+    await loadPlatformJobs();
   }catch(e){toast(e.message)}
 }
 
@@ -359,6 +397,8 @@ async function collect(ids,label){
 
 el('#collect-all').onclick=()=>collect([],'采集');
 el('#refresh').onclick=()=>loadAll();
+el('#pj-search').onclick=()=>loadPlatformJobs();
+for(const id of ['#pj-q','#pj-city'])el(id).addEventListener('keydown',e=>{if(e.key==='Enter')loadPlatformJobs()});
 async function startSourceCheck(sourceId,button,url){
   if(button)button.disabled=true;
   try{
