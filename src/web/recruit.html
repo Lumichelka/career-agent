@@ -33,7 +33,7 @@ main{max-width:1080px;margin:0 auto;padding:22px 20px 80px}
 .source{border:1px solid var(--line);border-radius:12px;padding:12px 13px;background:#fcfdfb}
 #wx-articles .article{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin:6px 0;background:#fcfdfb}#wx-articles .article b{font-size:12.5px}#wx-articles .article .meta{font-size:10.5px;color:var(--muted);margin-top:3px}
 .src-table{grid-column:1/-1;width:100%;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
-.src-head,.src-row{display:grid;grid-template-columns:minmax(150px,1.5fr) 92px 82px 52px 78px 145px;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #eef2ec;font-size:11.5px}
+.src-head,.src-row{display:grid;grid-template-columns:minmax(150px,1.5fr) 92px 82px 150px 78px 145px;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid #eef2ec;font-size:11.5px}
 .src-head{background:#f5f8f3;color:#7b8b80;font-size:10px;letter-spacing:.5px}
 .src-row:last-child{border-bottom:0}
 .src-name b{font-size:12.5px}
@@ -256,6 +256,15 @@ function renderSources(sources,wechat){
     const st=s.last_status||'待采集';
     return '<span class="badge '+(/^(ok|connected)$/.test(st)?'ok':'off')+'">'+esc(st)+'</span>';
   };
+  const freshCell=s=>{
+    const f=s.lastFetched??0, c=s.lastCreated??0, u=s.lastUpdated??0;
+    let html='<div>抓 '+f+' · 新 '+c+' · 更 '+u+'</div>';
+    if(s.lastAttempt) html+='<div class="src-sub">尝试 '+esc(shortStamp(s.lastAttempt))+'</div>';
+    if(s.lastSuccess) html+='<div class="src-sub">成功 '+esc(shortStamp(s.lastSuccess))+'</div>';
+    html+='<div class="src-sub">'+esc(ageText(s.dataAgeMinutes))+'</div>';
+    if(s.stale) html+='<div><span class="flag">数据超 24h</span></div>';
+    return html;
+  };
   const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b><div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.lastAnalysis?' · 最近分析 '+esc(String(a.lastAnalysis).slice(0,10)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions"><a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
   const group={};
   for(const s of sources)(group[s.category] ||= []).push(s);
@@ -264,7 +273,7 @@ function renderSources(sources,wechat){
     for(const s of list){
       const proj=catalog[s.id]?.capabilities?.projects||'none';
       const note=(s.last_error||catalog[s.id]?.note||s.note||'').slice(0,140);
-      rows.push('<div class="src-row"><div class="src-name"><b>'+esc(s.name)+'</b>'+statusBadge(s)+'<div class="src-sub" title="'+esc(note)+'">'+esc(note||(s.school+' · '+(s.channel||'')))+'</div>'+manualLine(s)+'</div><div>'+esc(s.channel||s.mode)+'</div><div>'+esc(s.school)+'</div><div>'+(s.last_count||0)+' 条</div><div>'+esc(proj==='none'?'—':proj)+'</div><div class="src-actions">'+(catalog[s.id]?.sourceCheck?'<button data-source-check="'+esc(s.id)+'" title="用应用内浏览器读取列表与一场活动详情各一次，不调用采集器">来源校对</button>':'')+'<button data-collect="'+esc(s.id)+'" '+(s.enabled?'':'disabled')+'>采集</button><a href="'+esc(s.list_url)+'" target="_blank" rel="noopener noreferrer">原站 ↗</a></div></div>');
+      rows.push('<div class="src-row"><div class="src-name"><b>'+esc(s.name)+'</b>'+statusBadge(s)+'<div class="src-sub" title="'+esc(note)+'">'+esc(note||(s.school+' · '+(s.channel||'')))+'</div>'+manualLine(s)+'</div><div>'+esc(s.channel||s.mode)+'</div><div>'+esc(s.school)+'</div><div>'+freshCell(s)+'</div><div>'+esc(proj==='none'?'—':proj)+'</div><div class="src-actions">'+(catalog[s.id]?.sourceCheck?'<button data-source-check="'+esc(s.id)+'" title="用应用内浏览器读取列表与一场活动详情各一次，不调用采集器">来源校对</button>':'')+'<button data-collect="'+esc(s.id)+'" '+(s.enabled?'':'disabled')+'>采集</button><a href="'+esc(s.list_url)+'" target="_blank" rel="noopener noreferrer">原站 ↗</a></div></div>');
       const key=s.school||'';
       if(wxBySchool.has(key)&&!shown.has(key)){shown.add(key);rows.push(...wxBySchool.get(key).map(accountRow));}
     }
@@ -272,13 +281,25 @@ function renderSources(sources,wechat){
   const rest=[];for(const [school,list] of wxBySchool)if(!shown.has(school))rest.push(...list);
   if(rest.length){rows.push('<div class="src-cat">公众号</div>');rows.push(...rest.map(accountRow));}
   const sel=el('#ms-source');if(sel&&sel.options.length<=1)sel.innerHTML='<option value="">选择信息源</option>'+sources.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.name)+'</option>').join('');
-  el('#sources').innerHTML='<div class="src-table"><div class="src-head"><span>来源 / 状态</span><span>方式</span><span>学校</span><span>最近</span><span>项目</span><span>操作</span></div>'+rows.join('')+'</div>';
+  el('#sources').innerHTML='<div class="src-table"><div class="src-head"><span>来源 / 状态</span><span>方式</span><span>学校</span><span>新鲜度</span><span>项目</span><span>操作</span></div>'+rows.join('')+'</div>';
 }
 function fmtTime(iso){
   const d=new Date(iso);const p=n=>String(n).padStart(2,'0');
   return p(d.getHours())+':'+p(d.getMinutes());
 }
 function fmtDate(day){return day}
+function shortStamp(iso){
+  if(!iso)return '';
+  const d=new Date(iso);const p=n=>String(n).padStart(2,'0');
+  return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+function ageText(min){
+  if(min===null||min===undefined)return '从未成功采集';
+  if(min<1)return '刚刚刷新';
+  if(min<60)return min+' 分钟前';
+  if(min<1440)return Math.floor(min/60)+' 小时前';
+  return Math.floor(min/1440)+' 天前';
+}
 
 function mapFor(e){const q=[e.venue,e.school,e.city].filter(Boolean).join(' ');return 'https://uri.amap.com/search?keyword='+encodeURIComponent(q||e.title||'招聘会');}
 function shiftMonth(delta){const [y,m]=calendar.month.split('-').map(Number);const d=new Date(Date.UTC(y,m-1+delta,1));loadCalendar(d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1));}

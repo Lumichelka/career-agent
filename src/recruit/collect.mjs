@@ -239,7 +239,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     result.durationMs = Date.now() - t0;
     if (store) {
       try {
-        store.markSource(source.id, {status: result.status, error: result.message, count: result.fetched});
+        store.markSource(source.id, {status: result.status, error: result.message, count: result.fetched, fetched: result.fetched, created: result.created, updated: result.updated});
         store.recordRun({id: randomUUID(), sourceId: source.id, startedAt, finishedAt: new Date().toISOString(), status: result.status, fetched: result.fetched, created: result.created, updated: result.updated, message: result.message + (result.projects ? `；项目 ${result.projects}` : '')});
       } catch { /* 记录失败不掩盖采集结果 */ }
       store.close();

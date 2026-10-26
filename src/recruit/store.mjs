@@ -62,6 +62,11 @@ const MIGRATIONS = [
   ['interview_type', "TEXT DEFAULT ''"]
 ];
 
+// 采集结果里「成功」指源可访问并完成解析（哪怕 0 条或项目阶段失败）；失败/禁用不更新最近成功。
+function isSuccessful(status) {
+  return ['ok', 'empty', 'list_only'].includes(String(status || ''));
+}
+
 export class RecruitStore {
   constructor(file) {
     mkdirSync(dirname(file), {recursive: true});
@@ -100,6 +105,14 @@ export class RecruitStore {
     this.db.exec("UPDATE event_projects SET first_seen_at=created_at WHERE first_seen_at IS NULL");
     this.db.exec("UPDATE event_projects SET last_seen_at=updated_at WHERE last_seen_at IS NULL");
     this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_source ON event_projects(event_id, source_id, source_key)');
+    const scols = new Set(this.db.prepare('PRAGMA table_info(sources)').all().map(r => r.name));
+    const sMig = [
+      ['last_attempt', 'TEXT'], ['last_success', 'TEXT'],
+      ['last_fetched', 'INTEGER DEFAULT 0'], ['last_created', 'INTEGER DEFAULT 0'], ['last_updated', 'INTEGER DEFAULT 0']
+    ];
+    for (const [name, ddl] of sMig) {
+      if (!scols.has(name)) this.db.exec(`ALTER TABLE sources ADD COLUMN ${name} ${ddl}`);
+    }
   }
 
   syncSources(sources) {
@@ -118,8 +131,35 @@ export class RecruitStore {
     }
   }
 
+  // 来源状态 + 派生新鲜度：最近尝试/成功时间、抓取/新增/更新数、数据年龄、是否超 24h 需刷新。
   sourceStates() {
-    return this.db.prepare('SELECT * FROM sources ORDER BY category, school').all();
+    const rows = this.db.prepare('SELECT * FROM sources ORDER BY category, school').all();
+    const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    const activeToday = this.db.prepare(
+      "SELECT source_id, cross_sources FROM events WHERE substr(start_at, 1, 10)=? AND status NOT IN ('cancelled','archived')"
+    ).all(today);
+    const withEventsToday = new Set();
+    for (const r of activeToday) {
+      if (r.source_id) withEventsToday.add(r.source_id);
+      for (const sid of String(r.cross_sources || '').split(',')) if (sid) withEventsToday.add(sid);
+    }
+    const now = Date.now();
+    return rows.map(row => {
+      const lastSuccessMs = row.last_success ? Date.parse(row.last_success) : NaN;
+      const dataAgeMinutes = Number.isFinite(lastSuccessMs) ? Math.max(0, Math.floor((now - lastSuccessMs) / 60000)) : null;
+      const stale = withEventsToday.has(row.id) && (dataAgeMinutes === null || dataAgeMinutes > 24 * 60);
+      return {
+        ...row,
+        lastAttempt: row.last_attempt || '',
+        lastSuccess: row.last_success || '',
+        lastFetched: Number(row.last_fetched) || 0,
+        lastCreated: Number(row.last_created) || 0,
+        lastUpdated: Number(row.last_updated) || 0,
+        hasEventsToday: withEventsToday.has(row.id),
+        stale,
+        dataAgeMinutes
+      };
+    });
   }
 
   recordManualRead({sourceId, taskId = '', sessionId = '', status = 'succeeded', reason = ''}) {
@@ -140,9 +180,15 @@ export class RecruitStore {
     }]));
   }
 
-  markSource(id, {status, error = '', count = 0}) {
-    this.db.prepare('UPDATE sources SET last_run=?, last_status=?, last_error=?, last_count=? WHERE id=?')
-      .run(new Date().toISOString(), status, error, count, id);
+  markSource(id, {status, error = '', count = 0, fetched, created = 0, updated = 0}) {
+    const now = new Date().toISOString();
+    const f = Number(fetched ?? count) || 0;
+    this.db.prepare('UPDATE sources SET last_run=?, last_status=?, last_error=?, last_count=?, last_attempt=? WHERE id=?')
+      .run(now, status, error, f, now, id);
+    if (isSuccessful(status)) {
+      this.db.prepare('UPDATE sources SET last_success=?, last_fetched=?, last_created=?, last_updated=? WHERE id=?')
+        .run(now, f, Number(created) || 0, Number(updated) || 0, id);
+    }
   }
 
   saveRaw({url, sourceId, title, text}) {
