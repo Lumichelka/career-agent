@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS confirmations(
   payload_json TEXT NOT NULL DEFAULT '',
   task_id TEXT NOT NULL DEFAULT '',
   decision_reason TEXT NOT NULL DEFAULT '',
+  actor_type TEXT NOT NULL DEFAULT '',
+  actor_ref TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
   consumed_at TEXT,
@@ -79,7 +81,10 @@ CREATE TABLE IF NOT EXISTS audit_meta(
 const CONFIRMATION_COLUMNS = [
   ['payload_json', "TEXT NOT NULL DEFAULT ''"],
   ['task_id', "TEXT NOT NULL DEFAULT ''"],
-  ['decision_reason', "TEXT NOT NULL DEFAULT ''"]
+  ['decision_reason', "TEXT NOT NULL DEFAULT ''"],
+  // #38：入站转发发起的敏感写，确认后落库的审计要能认出 forwarded_client + client id。
+  ['actor_type', "TEXT NOT NULL DEFAULT ''"],
+  ['actor_ref', "TEXT NOT NULL DEFAULT ''"]
 ];
 
 export function ensureConfirmationColumns(db) {

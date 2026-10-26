@@ -286,11 +286,11 @@ export function platformTools() {
   return TOOLS.filter(t => t.handler.startsWith('platform.'));
 }
 
-// 入站 /mcp 暴露的工具：注册表里除平台工具以外的本地只读工具。
+// 入站 /mcp 暴露的本地工具：注册表里除平台工具以外的全部工具（含写，#38）。
 // 平台工具是任务内的登录型浏览器操作，靠内部任务桥与 taskId 鉴权；入站连接没有任务，因此不暴露。
-// 写工具在入站确认链路（#30/#38）接好前不暴露：入站调用没有本应用的 confirm_id 身份，不能绕过确认直接写库。
+// 写工具照常暴露：敏感写走本应用确认（返回 confirm_required），自动写在写网关里记审计，入站身份不会绕过任一道。
 export function inboundTools() {
-  return TOOLS.filter(t => !t.handler.startsWith('platform.') && t.permission !== 'write');
+  return TOOLS.filter(t => !t.handler.startsWith('platform.'));
 }
 
 export function toolNames() {
