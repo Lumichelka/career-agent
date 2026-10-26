@@ -274,6 +274,8 @@ test('首验回归：来源校对全链路（两次浏览器读取 + 抽取 + �
   assert.equal(task.state, 'succeeded', '任务卡成功：' + JSON.stringify(task.error));
   assert.equal(task.counts.batches, 1);
   assert.equal(task.counts.writes, 4, '1 场活动 + 3 个单位');
+  assert.equal(task.undo.available, true, '任务卡应显示可撤销写入');
+  assert.equal(task.undo.rows, 4, '可撤销行数等于本批写入行数');
   assert.equal('calls' in task, false, '调用记录不能进任务记录');
 
   // 1) 入口与浏览器边界：只读列表 + 一场详情各一次，各截图一次；不翻页、不并发。

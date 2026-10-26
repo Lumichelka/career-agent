@@ -97,6 +97,18 @@ export async function readSourcePages({source, evidenceDir, signal} = {}) {
     }
 
     const detail = await readPage(page, detailHref, {signal});
+    // 详情页默认停在「招聘会详情」；「参会企业」是同一页内的页签，点开才能看到单位列表。
+    // 这不算翻页/批量：仍是一次详情读取、一张截图，只是把单位列表滚进截图。
+    const participantTab = page.getByText('参会企业', {exact: true}).first();
+    if (await participantTab.count().catch(() => 0)) {
+      await participantTab.click({timeout: 10000}).catch(() => {});
+      await page.waitForTimeout(1200);
+      await page.evaluate(() => {
+        const tab = [...document.querySelectorAll('*')].find(node => node.textContent?.trim() === '参会企业');
+        tab?.scrollIntoView({block: 'start'});
+      }).catch(() => {});
+      await page.waitForTimeout(400);
+    }
     await page.screenshot({path: detailFile});
     const detailAt = new Date().toISOString();
 

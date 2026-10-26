@@ -11,6 +11,7 @@ import {SOURCES, sourceById} from '../recruit/sources/index.mjs';
 import {createWriteGateway} from '../writes/gateway.mjs';
 import {bulkWriteRows} from '../recruit/bulk.mjs';
 import {createVisionExtractor, normalizeExtraction} from './extract.mjs';
+import {summarizeTaskUndo} from '../writes/undo.mjs';
 import {SourceCheckBlockedError, readSourcePages} from './browser.mjs';
 import {fallbackReviewCall, parseReviewIssues, REVIEW_MAX_RAW} from './review.mjs';
 
@@ -336,6 +337,7 @@ export function createSourceCheckService({dataDir, taskManager, browserReader = 
       sessionId: session.id,
       title: '来源校对 · ' + source.school + ' · ' + (source.kind || '双选会'),
       sourceName: source.school,
+      describeUndo: ({task}) => summarizeTaskUndo({dir: userDataDir(dataDir, user.id), userId: user.id, taskId: task.id}),
       onCreate: task => resolveCreated(task),
       execute: async ({task, signal, emit, addEvidence, setPhase}) => {
         let result = null;
