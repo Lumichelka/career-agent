@@ -22,7 +22,7 @@ export const SOURCE_CHECK_NOTES = '浏览器截图读取（非采集器）';
 export const SOURCE_CHECK_REASON = '采集器已禁用（robots 限制），改用应用内浏览器读取';
 export const SOURCE_CHECK_STATUS = '采集器已禁用，改用应用内浏览器读取；不会调用采集器，也不会向目标站发直连请求。';
 export const SOURCE_CHECK_ACTOR = 'model_api';
-const EVIDENCE_FILES = /^(01-list\.png|02-detail\.png|screenshots\.json|extraction\.json|review\.json|action\.jsonl|action-\d{3}\.png)$/;
+const EVIDENCE_FILES = /^(01-list\.png|02-detail\.png|screenshots\.json|extraction\.json|review\.json|action\.jsonl|action-\d{3}\.png|wechat-[a-z0-9-]+\.json)$/;
 
 export function resolveSource(sourceId) {
   const key = SOURCE_CHECK_ALIASES[String(sourceId || '').trim()];

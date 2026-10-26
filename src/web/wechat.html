@@ -163,12 +163,20 @@ function renderAccounts() {
     (st.demoArticles ? ' · 演示 ' + st.demoArticles : '');
   if (!state.accounts.length) { $('#account-list').innerHTML = '<div class="empty">还没有公众号</div>'; return; }
   $('#account-list').innerHTML = state.accounts.map(a => `<div class="account ${state.selectedAccount === a.id ? 'selected' : ''}" data-account="${esc(a.id)}">
-    <b>${esc(a.name)}</b><div class="meta">${esc(a.school || '未填学校')} · ${a.articles} 篇 · 招聘 ${a.recruitmentArticles || 0}</div>
+    <b>${esc(a.name)}</b>${a.biz ? `<button data-operator-account="${esc(a.id)}" title="用应用内浏览器打开文章列表；登录/验证由你人工接管">AI 采集</button>` : ''}<div class="meta">${esc(a.school || '未填学校')} · ${a.articles} 篇 · 招聘 ${a.recruitmentArticles || 0}</div>
     <div class="meta">${a.biz ? 'biz ' + esc(a.biz.slice(0, 12)) : 'biz 待识别'} · ${a.feedUrl ? '已订阅' + (a.lastSyncAt ? '（' + esc(fmt(a.lastSyncAt)) + '）' : '') : '未订阅'}${a.lastSyncStatus === 'error' ? ' · 同步失败' : ''}</div>
     ${a.feedUrl ? `<div class="row" style="margin-top:6px"><button data-sync-account="${esc(a.id)}">同步</button></div>` : ''}</div>`).join('');
   document.querySelectorAll('[data-account]').forEach(el => el.onclick = e => {
-    if (e.target.closest('[data-sync-account]')) return;
+    if (e.target.closest('[data-sync-account]') || e.target.closest('[data-operator-account]')) return;
     state.selectedAccount = el.dataset.account; renderAccounts(); renderArticles();
+  });
+  document.querySelectorAll('[data-operator-account]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    b.disabled = true;
+    try {
+      const d = await api('wechat', 'operator/start', {accountId: b.dataset.operatorAccount});
+      location.href = '/chat?session=' + encodeURIComponent(d.sessionId) + '&workflow=open';
+    } catch (err) { toast(err.message); b.disabled = false; }
   });
   document.querySelectorAll('[data-sync-account]').forEach(b => b.onclick = async e => {
     e.stopPropagation();

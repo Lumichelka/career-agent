@@ -4,8 +4,9 @@ import {mkdtemp, rm, mkdir, writeFile, readdir, readFile} from 'node:fs/promises
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {existsSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 import {createApp} from '../src/server/app.mjs';
+import {readFeed} from '../src/recruit/feed.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {resolveSource, resolveSourceCheckTarget, SOURCE_CHECK_NOTES} from '../src/source-check/pipeline.mjs';
 import {normalizeSourceCheckUrl, sourceCheckEnabled, sourceCheckConfig, selectDetailHref} from '../src/source-check/config.mjs';
@@ -606,6 +607,47 @@ test('operator HTTP：非法步骤/私网地址返回 400，不排队任务；�
   const other = await register(app, 'operator-other-user');
   const continueOther = await postJson(app, '/api/source-check/operator/continue', other.cookie, {taskId: '99999999-9999-4999-8999-999999999999'}, 404);
   assert.equal(continueOther.code, 'OPERATOR_NOT_WAITING');
+});
+
+test('operator HTTP：公众号 AI 采集默认西财校招，读文章写入并在 feed 查到证据', {timeout: 60000}, async t => {
+  const page = fakeOperatorPage({title: '公众号文章列表', text: '西南财经大学公众号'});
+  const capture = {};
+  const jobfair = readFileSync(new URL('./fixtures/wechat-xicai-article.txt', import.meta.url), 'utf8');
+  const articleUrl = 'https://mp.weixin.qq.com/s?__biz=MzM5MDAxMzM4MQ%3D%3D&mid=2650000009&idx=1&sn=jobfair-http';
+  const readers = {
+    list: async () => [{title: '西南财经大学2027届秋季双选会邀请函', url: articleUrl}],
+    article: async () => ({title: '西南财经大学2027届秋季双选会邀请函', nickname: '西财校招', publishedAt: '2026-11-10', text: jobfair})
+  };
+  const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}, wechatOperator: {readers}});
+  const user = await register(app, 'wechat-operator-http-user');
+  const started = await postJson(app, '/api/wechat/operator/start', user.cookie, {});
+  assert.equal(started.ok, true);
+  assert.equal(started.mode, 'wechat_operator');
+  assert.match(started.accountName, /西财校招/);
+  assert.match(started.sessionId, /^[a-f0-9-]{36}$/);
+  assert.match(started.taskId, /^[a-f0-9-]{36}$/);
+
+  const finished = await waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', user.cookie);
+    return listed.tasks.find(task => task.id === started.taskId && task.state === 'succeeded') || null;
+  });
+  assert.equal(finished.operator.actions.length, 4, '打开列表 + 读列表 + 打开正文 + 读正文');
+  assert.equal(finished.counts.writes, 7, '1 场活动 + 6 个单位');
+  assert.equal(capture.options.profileDir, join(app.dataDir, 'users', user.user.id, 'profile'));
+  assert.equal(capture.closed, true);
+
+  const tenant = join(app.dataDir, 'users', user.user.id, '.data');
+  const rs = RecruitStore.open(join(tenant, 'recruit.db'));
+  try {
+    const events = rs.listEvents({limit: 10, withProjects: true});
+    assert.equal(events.length, 1);
+    assert.equal(events[0].sourceUrl, articleUrl);
+    assert.equal(events[0].projects.length, 6);
+    const feed = readFeed({db: rs.db, dataDir: tenant, userId: user.user.id, types: ['event', 'project']});
+    assert.equal(feed.entries.length, 7);
+    assert.ok(feed.entries.every(entry => entry.record.source_url === articleUrl));
+    assert.ok(feed.entries.every(entry => entry.record.evidence_ref && entry.record.evidence_available));
+  } finally { rs.close(); }
 });
 
 // ---- 任意 URL 端到端 ----
