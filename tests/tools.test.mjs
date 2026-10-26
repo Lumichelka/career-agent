@@ -18,7 +18,12 @@ test('注册表：名称唯一、字段完整、处理器都有实现', () => {
     assert.ok(HANDLERS[tool.handler], tool.name + ' 没有处理器');
     assert.ok(Number(tool.timeoutMs) > 0);
   }
-  assert.equal(platformTools().length, 3);
+  assert.equal(platformTools().length, 5);
+  const jobSave = getTool('career_platform_jobs_save');
+  assert.equal(jobSave.permission, 'write');
+  assert.equal(jobSave.sensitivity, 'sensitive');
+  assert.equal(jobSave.writeDomain, 'recruit');
+  assert.equal(getTool('career_platform_jobs').permission, 'read');
 });
 
 test('模型工具集不暴露权限与处理器', () => {

@@ -111,3 +111,12 @@ export function siteById(id) {
 export function isPlatformId(id) {
   return Object.hasOwn(PLATFORM_SITES, id);
 }
+
+// 只允许本站 https 域名、且不带账号密码。浏览器读取与岗位入库共用这一条白名单。
+export function siteUrlAllowed(id, raw) {
+  const site = siteById(id);
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'https:' && (u.hostname === site.domain || u.hostname.endsWith('.' + site.domain)) && !u.username && !u.password;
+  } catch { return false; }
+}

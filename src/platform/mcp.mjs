@@ -18,7 +18,7 @@ function createServer() {
       name: t.name,
       description: t.description,
       inputSchema: t.parameters,
-      annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: t.handler !== 'platform.status'}
+      annotations: {readOnlyHint: t.permission !== 'write', destructiveHint: false, openWorldHint: t.handler !== 'platform.status'}
     }))
   }));
 
