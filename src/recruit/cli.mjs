@@ -14,6 +14,7 @@ import {runCollection, collectSource} from './collect.mjs';
 import {RecruitStore} from './store.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
+import {verifyEvent} from './verify.mjs';
 import {resolveDataDir} from '../config/paths.mjs';
 
 const argv = process.argv.slice(2);
@@ -98,12 +99,12 @@ if (command === 'sources') {
   let ok = 0, bad = 0;
   for (const e of events) {
     if (!e.sourceUrl) continue;
-    const res = await fetchText(e.sourceUrl, {timeout: 15000, retries: 0});
-    const hit = e.title.replace(/\s+/g, '').slice(0, 12);
-    const pass = res.ok && res.text.replace(/\s+/g, '').includes(hit);
-    store.setVerified(e.id, pass ? 1 : 0, pass ? '来源页面仍包含该活动' : '来源页面已变化');
-    if (pass) ok++; else bad++;
-    console.log(`${pass ? '✔' : '✘'} ${fmt(e.startAt)} ${e.school} ${e.title.slice(0, 30)}`);
+    let source;
+    try { source = sourceById(e.sourceId); } catch { source = {id: e.sourceId || 'unknown', listUrl: e.sourceUrl}; }
+    const r = await verifyEvent(source, e);
+    store.setVerified(e.id, r.ok ? 1 : 0, r.reason);
+    if (r.ok) ok++; else bad++;
+    console.log(`${r.ok ? '✔' : '✘'} ${fmt(e.startAt)} ${e.school} ${e.title.slice(0, 30)}  ${r.reason}`);
   }
   console.log(`\n复核完成：${ok} 条仍然有效，${bad} 条需人工确认。`);
   store.close();

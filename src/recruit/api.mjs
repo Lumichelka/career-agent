@@ -7,6 +7,7 @@ import {runCollection, htmlToText, normalize} from './collect.mjs';
 import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
+import {verifyEvent} from './verify.mjs';
 import {parseRenderedText} from './browser.mjs';
 import {WeChatStore} from '../wechat/store.mjs';
 import {sourceCheckEnabled} from '../source-check/config.mjs';
@@ -212,16 +213,11 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
       const event = withStore(dir, store => store.getEvent(id));
       if (!event) return {status: 404, json: {error: '没有这条记录'}};
       if (!event.sourceUrl) return {status: 400, json: {error: '这条记录没有来源链接，无法复核'}};
-      const res = await fetchText(event.sourceUrl, {timeout: 20000, retries: 0});
-      if (!res.ok) {
-        withStore(dir, store => store.setVerified(id, 0, '复核失败：' + res.message));
-        return {json: {ok: false, message: '来源链接打不开：' + res.message}};
-      }
-      const text = htmlToText(res.text).replace(/\s+/g, '');
-      const hit = event.title.replace(/\s+/g, '').slice(0, 12);
-      const ok = hit.length >= 4 && text.includes(hit);
-      withStore(dir, store => store.setVerified(id, ok ? 1 : 0, ok ? '来源页面仍包含该活动' : '来源页面已变化，未找到活动标题'));
-      return {json: {ok, message: ok ? '已复核：来源页面仍包含该活动' : '来源页面已变化，请点开链接人工确认'}};
+      let source;
+      try { source = sourceById(event.sourceId); } catch { source = {id: event.sourceId || 'unknown', listUrl: event.sourceUrl}; }
+      const r = await verifyEvent(source, event);
+      withStore(dir, store => store.setVerified(id, r.ok ? 1 : 0, r.reason));
+      return {json: {ok: r.ok, category: r.category, message: r.ok ? '已复核：' + r.reason : r.reason}};
     }
 
     if (pathname === 'probe') {
