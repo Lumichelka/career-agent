@@ -14,8 +14,9 @@ import {createVisionExtractor, normalizeExtraction} from './extract.mjs';
 import {summarizeTaskUndo} from '../writes/undo.mjs';
 import {SourceCheckBlockedError, readSourcePages} from './browser.mjs';
 import {fallbackReviewCall, parseReviewIssues, REVIEW_MAX_RAW} from './review.mjs';
+import {sourceCheckEnabled, normalizeSourceCheckUrl} from './config.mjs';
 
-// 首个验收只覆盖西南财大双选会；'swufe' 是入口约定的别名。
+// 'swufe' 是首验约定的别名，归一化到真实源 id；来源校对已泛化到任意已开放源与任意 URL。
 export const SOURCE_CHECK_ALIASES = {swufe: 'swufe-xjh', 'swufe-xjh': 'swufe-xjh'};
 export const SOURCE_CHECK_NOTES = '浏览器截图读取（非采集器）';
 export const SOURCE_CHECK_REASON = '采集器已禁用（robots 限制），改用应用内浏览器读取';
@@ -25,13 +26,46 @@ const EVIDENCE_FILES = /^(01-list\.png|02-detail\.png|screenshots\.json|extracti
 
 export function resolveSource(sourceId) {
   const key = SOURCE_CHECK_ALIASES[String(sourceId || '').trim()];
-  if (!key) return null;
+  const id = key || String(sourceId || '').trim();
+  if (!id) return null;
   try {
-    const source = sourceById(key);
-    return source && source.id === key ? source : null;
+    const source = sourceById(id);
+    return source && sourceCheckEnabled(source) ? source : null;
   } catch {
     return null;
   }
+}
+
+// 来源校对目标解析：要么是任意 URL（合成一个 manual 源），要么是已开放来源校对的已知源。
+// 只接受 http/https；未知源 / 非法 URL 返回 {error}，由调用方映射成 400。
+export function resolveSourceCheckTarget({sourceId, url} = {}) {
+  const rawUrl = String(url || '').trim();
+  if (rawUrl) {
+    const normalized = normalizeSourceCheckUrl(rawUrl);
+    if (!normalized) {
+      return {error: {code: 'INVALID_URL', message: '来源校对只接受 http/https 链接；请粘贴活动/招聘会的列表页地址。'}};
+    }
+    let host = '';
+    try { host = new URL(normalized).hostname; } catch { /* 归一化已保证可解析 */ }
+    return {
+      kind: 'url',
+      source: {
+        id: 'manual',
+        name: host || '任意网页',
+        school: '',
+        city: '',
+        kind: '',
+        listUrl: normalized,
+        arbitrary: true,
+        sourceCheck: {enabled: true}
+      }
+    };
+  }
+  const source = resolveSource(sourceId);
+  if (!source) {
+    return {error: {code: 'UNSUPPORTED_SOURCE', message: '这个来源还不支持来源校对。'}};
+  }
+  return {kind: 'source', source};
 }
 
 export function userDataDir(dataDir, userId) {
@@ -316,14 +350,16 @@ export function createSourceCheckService({dataDir, taskManager, browserReader = 
   if (!dataDir) throw new Error('来源校对服务需要 dataDir');
   if (!taskManager) throw new Error('来源校对服务需要任务管理器');
 
-  async function start({user, models = {}, sourceId}) {
-    const source = resolveSource(sourceId);
-    if (!source) {
-      return {status: 400, json: {error: '这个来源还不支持来源校对；目前支持西南财大双选会。', code: 'UNSUPPORTED_SOURCE'}};
+  async function start({user, models = {}, sourceId, url}) {
+    const target = resolveSourceCheckTarget({sourceId, url});
+    if (target.error) {
+      return {status: 400, json: {error: target.error.message, code: target.error.code}};
     }
+    const source = target.source;
+    const sourceLabel = source.school || source.name || '来源校对';
     const session = {
       id: randomUUID(),
-      title: '来源校对 · ' + source.school,
+      title: '来源校对 · ' + sourceLabel,
       memory: '',
       messages: [],
       artifacts: [],
@@ -337,8 +373,8 @@ export function createSourceCheckService({dataDir, taskManager, browserReader = 
     const run = taskManager.run({
       userId: user.id,
       sessionId: session.id,
-      title: '来源校对 · ' + source.school + ' · ' + (source.kind || '双选会'),
-      sourceName: source.school,
+      title: '来源校对 · ' + sourceLabel + ' · ' + (source.kind || '活动'),
+      sourceName: sourceLabel,
       describeUndo: ({task}) => summarizeTaskUndo({dir: userDataDir(dataDir, user.id), userId: user.id, taskId: task.id}),
       onCreate: task => resolveCreated(task),
       execute: async ({task, signal, emit, addEvidence, setPhase}) => {

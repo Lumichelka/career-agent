@@ -11,5 +11,6 @@ export default {
   capabilities: {list: 'browser', detail: 'none', projects: 'none'},
   enabled: false,
   listUrl: 'https://www.ncss.cn/',
+  sourceCheck: {enabled: true},
   note: "全国双选会平台，需登录；作为可选平台源，不计入高校覆盖率。"
 };

@@ -550,7 +550,7 @@ const server = http.createServer(async (req, res) => {
 
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
       if (url.pathname === '/api/source-check/start') {
-        const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId});
+        const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId, url: body.url});
         return send(res, out.json, out.status || 200);
       }
       // 清空审计：必须原样输入指定短语；只删本人的审计与确认记录，幂等行保留到 TTL。

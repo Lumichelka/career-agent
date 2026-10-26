@@ -11,5 +11,6 @@ export default {
   capabilities: {list: 'browser', detail: 'none', projects: 'none'},
   enabled: false,
   listUrl: 'https://www.iguopin.com/',
+  sourceCheck: {enabled: true},
   note: "央国企校招聚合，前端渲染/需登录；作为可选平台源。"
 };
