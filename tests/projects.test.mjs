@@ -9,6 +9,8 @@ import {handleRecruit} from '../src/recruit/api.mjs';
 import {callTool} from '../src/tools/execute.mjs';
 import {savePlatformJobs, listPlatformJobs} from '../src/recruit/platform-jobs-service.mjs';
 import {acceptConfirmation, listConfirmations} from '../src/writes/confirmations.mjs';
+import {projectCardMeta} from '../src/web/recruit-cards.js';
+import {readFileSync} from 'node:fs';
 
 function baseEvent(id = 'a'.repeat(24)) {
   return {
@@ -311,6 +313,35 @@ test('平台岗位入库：没读过页面、没有可识别岗位、链接不�
 
     assert.equal(listPlatformJobs({dir}).jobs.length, 0);
   });
+});
+
+test('招聘项目卡：渲染 requirements 与 notes，缺失岗位/要求标「未公布」', () => {
+  const full = projectCardMeta({
+    positions: '薪资 7000-8000；招聘 5 人',
+    requirements: '学历 本科；专业 会计',
+    notes: '来自双选会详情页'
+  });
+  assert.equal(full.positions, '薪资 7000-8000；招聘 5 人');
+  assert.equal(full.requirements, '学历 本科；专业 会计');
+  assert.match(full.notes, /来自双选会详情页/);
+  assert.equal(full.published, true);
+  assert.ok(full.details.some(item => item.label === '要求' && item.value.includes('本科')));
+
+  const empty = projectCardMeta({positions: '', requirements: '', notes: '单位信息：行业：教育'});
+  assert.equal(empty.published, false);
+  assert.match(empty.notes, /单位信息：行业：教育/);
+  assert.match(empty.notes, /岗位未公布/);
+  assert.match(empty.notes, /要求未公布/);
+
+  const partial = projectCardMeta({positions: '数据分析', requirements: ''});
+  assert.match(partial.notes, /要求未公布/);
+  assert.ok(!partial.notes.includes('岗位未公布'));
+});
+
+test('数据页引用项目卡 helper，不再只渲染 positions/applyMode/applyUrl', () => {
+  const html = readFileSync(new URL('../src/web/recruit.html', import.meta.url), 'utf8');
+  assert.match(html, /projectCardMeta/);
+  assert.match(html, /requirements/);
 });
 
 test('API：平台岗位按岗位/城市筛选，来源字段随行返回', async () => {

@@ -40,7 +40,7 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   if (method === 'GET') {
     if (pathname === 'sources') {
       const data = withStore(dir, store => ({sources: store.sourceStates(), runs: store.recentRuns(10), stats: store.stats(), manualReads: store.manualReads()}));
-      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', sourceCheck: sourceCheckEnabled(s), capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: true}}]));
+      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', sourceCheck: sourceCheckEnabled(s), loginRequired: s.loginRequired === true, manualConfirm: s.manualConfirm === true, collectMode: s.collectMode || 'auto', capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: true}}]));
       let wechat = {accounts: [], stats: {accounts: 0, articles: 0}};
       try {
         const ws = WeChatStore.open(join(dir, 'wechat.db'));

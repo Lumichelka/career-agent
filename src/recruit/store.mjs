@@ -15,7 +15,8 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources(
   id TEXT PRIMARY KEY, name TEXT, school TEXT, city TEXT, category TEXT, channel TEXT,
   list_url TEXT, mode TEXT, enabled INTEGER, note TEXT, orphaned INTEGER DEFAULT 0,
-  last_run TEXT, last_status TEXT, last_error TEXT, last_count INTEGER DEFAULT 0
+  last_run TEXT, last_status TEXT, last_error TEXT, last_count INTEGER DEFAULT 0,
+  failure_streak INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS events(
   id TEXT PRIMARY KEY, source_id TEXT, school TEXT, city TEXT, kind TEXT,
@@ -52,8 +53,8 @@ CREATE TABLE IF NOT EXISTS source_manual_reads(
 CREATE INDEX IF NOT EXISTS idx_events_start ON events(start_at);
 CREATE INDEX IF NOT EXISTS idx_events_school ON events(school);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
--- 平台岗位没有 event_id，普通唯一索引挡不住重复；单独用部分唯一索引按来源键去重。
-CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_platform ON event_projects(source_id, source_key) WHERE event_id IS NULL;
+-- 平台岗位的部分唯一索引不在这里建：旧库可能还没有 source_id/source_key 列，
+-- 必须等 migrateProjects() 补列之后再建（见下方 migrateProjects）。
 `;
 
 // 旧库升级：只加列，不改历史数据。
@@ -102,7 +103,8 @@ export class RecruitStore {
     const scols = new Set(this.db.prepare('PRAGMA table_info(sources)').all().map(r => r.name));
     const sMig = [
       ['last_attempt', 'TEXT'], ['last_success', 'TEXT'],
-      ['last_fetched', 'INTEGER DEFAULT 0'], ['last_created', 'INTEGER DEFAULT 0'], ['last_updated', 'INTEGER DEFAULT 0']
+      ['last_fetched', 'INTEGER DEFAULT 0'], ['last_created', 'INTEGER DEFAULT 0'], ['last_updated', 'INTEGER DEFAULT 0'],
+      ['failure_streak', 'INTEGER DEFAULT 0']
     ];
     for (const [name, ddl] of sMig) {
       if (!scols.has(name)) this.db.exec(`ALTER TABLE sources ADD COLUMN ${name} ${ddl}`);
@@ -208,6 +210,7 @@ export class RecruitStore {
         lastFetched: Number(row.last_fetched) || 0,
         lastCreated: Number(row.last_created) || 0,
         lastUpdated: Number(row.last_updated) || 0,
+        failureStreak: Number(row.failure_streak) || 0,
         hasEventsToday: withEventsToday.has(row.id),
         stale,
         dataAgeMinutes
@@ -239,8 +242,11 @@ export class RecruitStore {
     this.db.prepare('UPDATE sources SET last_run=?, last_status=?, last_error=?, last_count=?, last_attempt=? WHERE id=?')
       .run(now, status, error, f, now, id);
     if (isSuccessful(status)) {
-      this.db.prepare('UPDATE sources SET last_success=?, last_fetched=?, last_created=?, last_updated=? WHERE id=?')
+      this.db.prepare('UPDATE sources SET last_success=?, last_fetched=?, last_created=?, last_updated=?, failure_streak=0 WHERE id=?')
         .run(now, f, Number(created) || 0, Number(updated) || 0, id);
+    } else {
+      // 连续失败：成功（ok/empty/list_only）清零，其余每次 +1；供来源卡与告警判断。
+      this.db.prepare('UPDATE sources SET failure_streak=COALESCE(failure_streak,0)+1 WHERE id=?').run(id);
     }
   }
 
@@ -381,23 +387,27 @@ export class RecruitStore {
   }
 
   // 来源同步：按 sourceKey 幂等；手工项目（source_id 为空）永不删除。
+  // 每次增改/软删除都返回 changes，供写网关在同一事务里写审计。
   syncProjects(eventId, sourceId, projects) {
     if (!eventId || !sourceId) throw new Error('项目和来源必填');
     const now = new Date().toISOString();
     const seen = [];
-    const result = {created: 0, updated: 0, kept: 0, removed: 0, total: 0};
+    const changes = [];
+    const result = {created: 0, updated: 0, kept: 0, removed: 0, total: 0, changes};
     for (const p of (projects || []).slice(0, 500)) {
       const company = String(p.company || '').trim().slice(0, 120);
       const title = String(p.title || '').trim().slice(0, 200);
       if (!company && !title) continue;
       const sourceKey = String(p.sourceKey || createHash('sha1').update([sourceId, company, title, p.sourceUrl || ''].join('|')).digest('hex').slice(0, 32));
-      const existing = this.db.prepare('SELECT id FROM event_projects WHERE event_id=? AND source_id=? AND source_key=?').get(eventId, sourceId, sourceKey);
+      const existing = this.db.prepare('SELECT * FROM event_projects WHERE event_id=? AND source_id=? AND source_key=?').get(eventId, sourceId, sourceKey);
       if (existing) {
         this.db.prepare(`UPDATE event_projects SET company=?,title=?,positions=?,requirements=?,apply_mode=?,apply_url=?,source_url=?,notes=?,confidence=?,raw_text=?,status='active',missing_runs=0,last_seen_at=?,updated_at=? WHERE id=?`)
           .run(company, title, String(p.positions || '').slice(0, 2000), String(p.requirements || '').slice(0, 4000),
             String(p.applyMode || '').slice(0, 60), String(p.applyUrl || '').slice(0, 500), String(p.sourceUrl || '').slice(0, 500),
             String(p.notes || '').slice(0, 2000), Number.isFinite(Number(p.confidence)) ? Number(p.confidence) : 0.8,
             String(p.rawText || '').slice(0, 4000), now, now, existing.id);
+        const saved = this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(existing.id);
+        changes.push({action: 'update', entity: 'event_projects', entityId: existing.id, oldValues: rowToProject(existing), newValues: rowToProject(saved), note: '来源项目同步'});
         result.updated++;
       } else {
         const id = randomUUID();
@@ -407,6 +417,8 @@ export class RecruitStore {
             String(p.applyMode || '').slice(0, 60), String(p.applyUrl || '').slice(0, 500), String(p.sourceUrl || '').slice(0, 500),
             String(p.notes || '').slice(0, 2000), sourceId, sourceKey, 'active',
             Number.isFinite(Number(p.confidence)) ? Number(p.confidence) : 0.8, now, String(p.rawText || '').slice(0, 4000), now, now);
+        const saved = this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(id);
+        changes.push({action: 'create', entity: 'event_projects', entityId: id, oldValues: null, newValues: rowToProject(saved), note: '来源项目同步'});
         result.created++;
       }
       seen.push(sourceKey);
@@ -416,9 +428,15 @@ export class RecruitStore {
       const key = this.db.prepare('SELECT source_key FROM event_projects WHERE id=?').get(row.id)?.source_key;
       if (seen.includes(key)) continue;
       const missing = (Number(row.missing_runs) || 0) + 1;
-      this.db.prepare('UPDATE event_projects SET missing_runs=?,status=?,last_seen_at=? WHERE id=?')
-        .run(missing, missing >= 3 ? 'removed' : 'active', now, row.id);
-      if (missing >= 3) result.removed++;
+      if (missing >= 3) {
+        const before = this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(row.id);
+        this.db.prepare('UPDATE event_projects SET missing_runs=?,status=?,last_seen_at=? WHERE id=?').run(missing, 'removed', now, row.id);
+        const after = this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(row.id);
+        changes.push({action: 'delete', entity: 'event_projects', entityId: row.id, oldValues: rowToProject(before), newValues: rowToProject(after), note: '连续 3 次未出现，软删除'});
+        result.removed++;
+      } else {
+        this.db.prepare('UPDATE event_projects SET missing_runs=?,status=?,last_seen_at=? WHERE id=?').run(missing, 'active', now, row.id);
+      }
     }
     result.total = seen.length;
     return result;
@@ -485,8 +503,8 @@ export class RecruitStore {
 
 // 平台岗位落库：调用方负责事务（写网关）或直接传 RecruitStore 的连接。
 // 来源键幂等；已存在则更新并恢复 active，历史 first_seen_at 保留。
-export function savePlatformJobRows({db, payload}) {
-  const normalized = normalizePlatformJobs(payload || {});
+export function savePlatformJobRows({db, payload, normalized: preset}) {
+  const normalized = preset || normalizePlatformJobs(payload || {});
   if (normalized.error) throw new Error(normalized.error);
   const sourceId = 'platform:' + normalized.platform;
   const now = new Date().toISOString();

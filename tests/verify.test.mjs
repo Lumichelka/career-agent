@@ -31,7 +31,7 @@ function eventFor(source, over = {}) {
 }
 
 const fetchOk = text => async () => ({ok: true, status: 200, text});
-const fetchFail = msg => async () => ({ok: false, status: 0, reason: 'dns_failed', message: msg});
+const fetchFail = (msg, status = 0, reason = 'dns_failed') => async () => ({ok: false, status, reason, message: msg});
 
 test('默认详情页：正文包含标题 → ok', async () => {
   const src = detailSource;
@@ -60,13 +60,36 @@ test('默认详情页：JS 壳（几乎无可见文字）→ 无法字符串校�
   assert.equal(r.reason, '详情页为 JS 渲染，无法字符串校验，请用浏览器人工确认');
 });
 
-test('默认详情页：链接打不开 → 真失效', async () => {
+test('默认详情页：404/410 才是真失效', async () => {
   const src = detailSource;
   const event = eventFor(src);
-  const r = await verifyEvent(src, event, {fetchText: fetchFail('域名解析失败：站点可能已迁移')});
-  assert.equal(r.ok, false);
-  assert.equal(r.category, VERIFY_CATEGORY.GONE);
-  assert.match(r.reason, /^来源链接已失效/);
+  for (const [status, reason] of [[404, 'http_error'], [410, 'http_error']]) {
+    const r = await verifyEvent(src, event, {fetchText: fetchFail('HTTP ' + status, status, reason)});
+    assert.equal(r.ok, false);
+    assert.equal(r.category, VERIFY_CATEGORY.GONE, status + ' 才可判 GONE');
+    assert.match(r.reason, /^来源链接已失效/);
+  }
+});
+
+test('默认详情页：超时/429/5xx/DNS/网络错误是可重试的 transient，不误判 GONE', async () => {
+  const src = detailSource;
+  const event = eventFor(src);
+  const cases = [
+    {status: 0, reason: 'timeout', message: '请求超时：站点响应慢'},
+    {status: 429, reason: 'rate_limited', message: 'HTTP 429：too many requests'},
+    {status: 502, reason: 'server_error', message: 'HTTP 502：bad gateway'},
+    {status: 503, reason: 'server_error', message: 'HTTP 503：unavailable'},
+    {status: 0, reason: 'dns_failed', message: '域名解析失败：站点可能已迁移'},
+    {status: 0, reason: 'network_error', message: '网络错误：socket hang up'},
+    {status: 0, reason: 'refused', message: '连接被拒绝'}
+  ];
+  for (const item of cases) {
+    const r = await verifyEvent(src, event, {fetchText: fetchFail(item.message, item.status, item.reason)});
+    assert.equal(r.ok, false, item.reason);
+    assert.equal(r.category, VERIFY_CATEGORY.TRANSIENT_ERROR, item.reason + ' 不能判 GONE');
+    assert.equal(r.retryable, true);
+    assert.match(r.reason, /可重试/);
+  }
 });
 
 test('上财：走 JSON 列表接口，按 URL 命中 → ok；未命中 → 页面变化', async () => {
@@ -174,7 +197,10 @@ test('四类失败原因经 setVerified 写入库后 notes 可区分', async () 
 
     const detail = makeEvent(detailSource);
     store.upsertEvent(detail);
-    assert.equal((await verify(detailSource, detail, fetchFail('连接被拒绝'))).notes, '来源链接已失效：连接被拒绝');
+    assert.equal((await verify(detailSource, detail, fetchFail('HTTP 404', 404, 'http_error'))).notes, '来源链接已失效：HTTP 404');
+    const transient = await verify(detailSource, detail, fetchFail('请求超时：站点响应慢', 0, 'timeout'));
+    assert.match(transient.notes, /可重试/);
+    assert.equal(transient.verified, false);
     assert.equal((await verify(detailSource, detail, fetchOk('<div>其它活动</div>' + '内容'.repeat(200)))).notes, '来源页面已变化：未找到该活动');
     assert.equal((await verify(detailSource, detail, fetchOk('<div id="app"></div>'))).notes, '详情页为 JS 渲染，无法字符串校验，请用浏览器人工确认');
 

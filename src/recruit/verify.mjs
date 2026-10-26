@@ -4,8 +4,9 @@
 //   - 默认（详情页字符串匹配）：抓详情页，正文含标题 = 有效；否则区分 JS 壳 / 页面变化 / 真失效。
 //   - list-json：swjtu/sufe/sicau/swpu-jobfair 的详情页是 JS 渲染，改走各自 JSON 列表接口，按事件 URL 匹配。
 //   - list-level：uestc 多场共用一个列表 URL（无独立详情 URL），只能做列表级复核。
-// 四种失败原因（写入 setVerified 的 notes）互不混淆：
-//   page_changed 页面变化 / js_shell JS 壳无法字符串校验 / no_detail_url 无独立详情 URL / gone 真失效。
+// 失败原因（写入 setVerified 的 notes）互不混淆：
+//   page_changed 页面变化 / js_shell JS 壳无法字符串校验 / no_detail_url 无独立详情 URL /
+//   gone 确认不存在（仅 404/410） / transient_error 暂时不可访问（超时/429/5xx/网络/DNS，可重试）。
 import {fetchText as defaultFetchText} from './fetch.mjs';
 import {htmlToText} from './collect.mjs';
 
@@ -14,7 +15,8 @@ export const VERIFY_CATEGORY = {
   PAGE_CHANGED: 'page_changed',
   JS_SHELL: 'js_shell',
   NO_DETAIL_URL: 'no_detail_url',
-  GONE: 'gone'
+  GONE: 'gone',
+  TRANSIENT_ERROR: 'transient_error'
 };
 
 const REASON = {
@@ -23,8 +25,19 @@ const REASON = {
   ok_no_detail: '无独立详情 URL，列表级复核仍包含该活动',
   page_changed: '来源页面已变化：未找到该活动',
   js_shell: '详情页为 JS 渲染，无法字符串校验，请用浏览器人工确认',
-  no_detail_url: '无独立详情 URL，列表级复核未找到该活动'
+  no_detail_url: '无独立详情 URL，列表级复核未找到该活动',
+  transient_error: '来源暂时无法访问（可重试）'
 };
+
+// 只有 404/410 能确认「活动已不存在」；超时、429、5xx、DNS/网络错误都不能当 GONE。
+function failureOutcome(res) {
+  const status = Number(res?.status) || 0;
+  if (status === 404 || status === 410) {
+    return {ok: false, category: VERIFY_CATEGORY.GONE, retryable: false, reason: '来源链接已失效' + (res?.message ? '：' + res.message : '')};
+  }
+  const detail = res?.message || res?.reason || '';
+  return {ok: false, category: VERIFY_CATEGORY.TRANSIENT_ERROR, retryable: true, reason: REASON.transient_error + (detail ? '：' + detail : '')};
+}
 
 // 按源适配的列表级校验配置；未列出的源走默认详情页策略。
 const LIST_VERIFY = {
@@ -102,8 +115,8 @@ function matchEvent(event, items, spec) {
 async function verifyList(source, event, spec, fetchText) {
   const got = await fetchListItems(source, event, spec, fetchText);
   if (!got.ok) {
-    const detail = got.res ? (got.res.message || got.res.reason || got.reason || '') : (got.reason || '');
-    return {ok: false, category: VERIFY_CATEGORY.GONE, reason: '来源链接已失效' + (detail ? '：' + detail : '')};
+    if (got.res) return failureOutcome(got.res);
+    return {ok: false, category: VERIFY_CATEGORY.PAGE_CHANGED, reason: REASON.page_changed};
   }
   if (matchEvent(event, got.items, spec)) {
     const reason = spec.kind === 'list-level' ? REASON.ok_no_detail : REASON.ok_list;
@@ -117,9 +130,7 @@ async function verifyList(source, event, spec, fetchText) {
 
 async function verifyDetail(source, event, fetchText) {
   const res = await fetchText(event.sourceUrl, {timeout: 15000, retries: 0});
-  if (!res.ok) {
-    return {ok: false, category: VERIFY_CATEGORY.GONE, reason: '来源链接已失效：' + (res.message || res.reason || '')};
-  }
+  if (!res.ok) return failureOutcome(res);
   const text = htmlToText(res.text);
   const hit = titleHit(event.title);
   if (hit.length >= 4 && text.replace(/\s+/g, '').includes(hit)) {

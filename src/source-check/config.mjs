@@ -23,7 +23,49 @@ export function sourceCheckEnabled(source) {
 }
 
 // 只接受 http/https：拒绝 javascript:/data:/file:/以及没有协议的裸地址，防止把非页面 URL 塞进浏览器。
-export function normalizeSourceCheckUrl(url) {
+// 默认还拒绝本机/私网/链路本地地址：来源校对由服务端浏览器发起，不能让任意 URL 变成 SSRF 跳板。
+// 确需校对局域网页面时显式设置 CAREER_ALLOW_PRIVATE_SOURCE_URLS=1（或传 allowPrivate），并自行承担风险。
+export function privateSourceUrlsAllowed(env = process.env) {
+  return /^(1|true|yes)$/i.test(String(env?.CAREER_ALLOW_PRIVATE_SOURCE_URLS || '').trim());
+}
+
+function privateIPv4(value) {
+  const parts = String(value).split('.').map(Number);
+  if (parts.length !== 4 || parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = parts;
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
+  if (a === 169 && b === 254) return true; // link-local
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmark
+  if (a >= 224) return true; // multicast + reserved
+  return false;
+}
+
+// 主机名级判断：localhost/*.local、私网 IPv4、IPv6 loopback/ULA/link-local、IPv4-mapped IPv6。
+// 只做字面判断，不在此处做 DNS 解析；解析后的私网拦截由浏览器侧/网络策略另行兜底。
+export function isPrivateSourceHost(hostname) {
+  const h = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!h) return true;
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (/^(0x[0-9a-f]+|\d+)$/.test(h)) return true; // 十进制/十六进制整数形式常被解析成 127.x/私网
+  if (h === '::' || h === '::1') return true;
+  if (/^f[cd][0-9a-f]{0,2}:/.test(h) || h.startsWith('fe80:')) return true; // ULA fc00::/7 + link-local fe80::/10
+  if (h.startsWith('::ffff:')) {
+    const rest = h.slice(7);
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(rest)) return privateIPv4(rest);
+    const mapped = rest.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mapped) {
+      const n = (parseInt(mapped[1], 16) << 16) | parseInt(mapped[2], 16);
+      return privateIPv4([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.'));
+    }
+  }
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) return privateIPv4(h);
+  return false;
+}
+
+export function normalizeSourceCheckUrl(url, {allowPrivate = privateSourceUrlsAllowed()} = {}) {
   const raw = String(url || '').trim();
   if (!raw || raw.length > 2000) return null;
   if (!/^https?:\/\//i.test(raw)) return null;
@@ -34,6 +76,7 @@ export function normalizeSourceCheckUrl(url) {
     return null;
   }
   if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+  if (!allowPrivate && isPrivateSourceHost(parsed.hostname)) return null;
   return parsed.href;
 }
 

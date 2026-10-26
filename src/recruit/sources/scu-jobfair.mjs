@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {DAY, parseDateText, parseTimeRange, strip} from './common.mjs';
 import {fetchText} from '../fetch.mjs';
 
@@ -69,6 +70,13 @@ export function parseCorporationDetail(html) {
   return {jobs, email};
 }
 
+// 岗位键只由岗位内容决定：岗位重排/插队不会把旧键指向另一个岗位。
+function jobSourceKey(corp, job) {
+  const base = String(corp.sourceKey || corp.company || '');
+  const hash = createHash('sha1').update(JSON.stringify(job ?? {})).digest('hex').slice(0, 16);
+  return (base ? base + '#' : '') + hash;
+}
+
 // 单位（列表行）+ 详情 → 1..N 个项目：有职位按职位拆，读不到退回单位级并标「未公布」。
 export function mergeCorporationDetail(corp, detail = {}) {
   const jobs = Array.isArray(detail.jobs) ? detail.jobs : [];
@@ -89,7 +97,7 @@ export function mergeCorporationDetail(corp, detail = {}) {
       confidence: corp.confidence ?? 0.8
     }];
   }
-  return jobs.map((j, i) => {
+  return jobs.map(j => {
     const positions = [j.name, j.type ? '类型 ' + j.type : '', j.salary ? '薪资 ' + j.salary : '', j.count ? '招聘 ' + j.count + ' 人' : '', j.duties].filter(Boolean).join('；');
     const requirements = [
       j.degree ? '学历 ' + j.degree : '',
@@ -104,7 +112,7 @@ export function mergeCorporationDetail(corp, detail = {}) {
       applyMode,
       applyUrl,
       sourceUrl: corp.sourceUrl || '',
-      sourceKey: (corp.sourceKey || corp.company || '') + '#' + i,
+      sourceKey: jobSourceKey(corp, j),
       notes: corp.notes || '',
       confidence: 0.8,
       rawText: JSON.stringify(j).slice(0, 1000)
@@ -173,14 +181,22 @@ export default {
     }
     if (!corporations.length) return {status: 'none', message: '接口可访问，但没有参会单位', projects: []};
     const projects = [];
-    for (const corp of corporations.slice(0, detailLimit)) {
+    for (const [index, corp] of corporations.entries()) {
       let detail = {jobs: [], email: ''};
-      try {
-        const res = await fetch(corp.sourceUrl, {timeout: 15000, retries: 0});
-        if (res.ok) detail = parseCorporationDetail(res.text);
-      } catch { /* 详情页失败 → 未公布 */ }
+      // 详情抓取有成本：只对前 detailLimit 个单位抓；其余退回单位级「未公布」，不丢单位。
+      if (index < detailLimit) {
+        try {
+          const res = await fetch(corp.sourceUrl, {timeout: 15000, retries: 0});
+          if (res.ok) detail = parseCorporationDetail(res.text);
+        } catch { /* 详情页失败 → 未公布 */ }
+      }
       projects.push(...mergeCorporationDetail(corp, detail));
     }
-    return {status: 'ok', message: `读取到 ${projects.length} 个招聘项目`, projects};
+    const fallback = Math.max(0, corporations.length - detailLimit);
+    return {
+      status: 'ok',
+      message: `读取到 ${projects.length} 个招聘项目` + (fallback ? `（${fallback} 个单位未抓详情，已按单位级「未公布」保留）` : ''),
+      projects
+    };
   }
 };

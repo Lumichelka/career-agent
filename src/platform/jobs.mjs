@@ -2,6 +2,7 @@
 // 原则：只整理页面已经写出的标题/城市/薪资/学历；识别不到就留空，不猜单位、不补城市、不编薪资、不代投递。
 import {createHash} from 'node:crypto';
 import {siteById, isPlatformId, siteUrlAllowed} from './sites.mjs';
+import {canonicalHttpUrl} from '../lib/url.mjs';
 
 // 常见城市只用于识别页面上已写出的地点；不在表里的城市一律留空，不猜。
 const CITY_NAMES = ['北京', '上海', '天津', '重庆', '广州', '深圳', '成都', '杭州', '南京', '武汉', '西安', '苏州', '长沙', '郑州', '东莞', '佛山', '合肥', '青岛', '沈阳', '大连', '厦门', '福州', '济南', '昆明', '哈尔滨', '长春', '石家庄', '南昌', '贵阳', '南宁', '太原', '兰州', '乌鲁木齐', '呼和浩特', '海口', '银川', '西宁', '拉萨', '无锡', '宁波', '温州', '常州', '徐州', '烟台', '珠海', '中山', '惠州', '嘉兴', '绍兴', '台州', '金华', '泉州', '保定', '廊坊', '洛阳', '香港', '澳门'];
@@ -68,13 +69,6 @@ function companyFromText(text) {
   return ROLE_WORD.test(name) ? '' : name;
 }
 
-function canonicalUrl(raw) {
-  try {
-    const u = new URL(raw);
-    return u.origin + u.pathname.replace(/\/+$/, '');
-  } catch { return String(raw || ''); }
-}
-
 function normalizeCapturedAt(value) {
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : new Date().toISOString();
@@ -113,7 +107,7 @@ function parseCandidate(raw, {fromPageTitle = false, defaultCity = '', text = ''
 
 function makeJob({platform, parsed, url, confidence, capturedAt, rawText}) {
   const {company, title, city, salary, requirements} = parsed;
-  const sourceKey = createHash('sha1').update([platform, canonicalUrl(url), company, title].join('|')).digest('hex').slice(0, 32);
+  const sourceKey = createHash('sha1').update([platform, canonicalHttpUrl(url), company, title].join('|')).digest('hex').slice(0, 32);
   return {
     platform,
     company,
@@ -145,7 +139,7 @@ export function extractPlatformJobs({platform, url = '', pageTitle = '', text = 
   const pageDetail = pageAllowed && site.detail.test(new URL(pageUrl).pathname);
   const jobs = [], seen = new Set();
   const push = job => {
-    const key = canonicalUrl(job.sourceUrl) + '|' + job.title;
+    const key = canonicalHttpUrl(job.sourceUrl) + '|' + job.title;
     if (seen.has(key)) return;
     seen.add(key);
     jobs.push(job);
@@ -165,7 +159,7 @@ export function extractPlatformJobs({platform, url = '', pageTitle = '', text = 
     if (!site.detail.test(pathname)) continue;
     const parsed = parseCandidate(link?.title, {defaultCity});
     if (!parsed) continue;
-    const confidence = pageDetail && canonicalUrl(linkUrl) === canonicalUrl(pageUrl) ? 0.7 : 0.6;
+    const confidence = pageDetail && canonicalHttpUrl(linkUrl) === canonicalHttpUrl(pageUrl) ? 0.7 : 0.6;
     push(makeJob({platform, parsed, url: linkUrl, confidence, capturedAt: captured, rawText: link?.title || ''}));
   }
 

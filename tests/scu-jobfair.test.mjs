@@ -44,7 +44,18 @@ test('川大双选会：详情合并为「一个岗位一个项目」', () => {
   assert.equal(projects[0].applyMode, '邮箱投递');
   assert.equal(projects[0].applyUrl, 'mailto:xhzhaopin@xhgroup.cn');
   assert.equal(projects[1].title, '培训管理');
-  assert.equal(projects[1].sourceKey, 'abc#1');
+  assert.match(projects[0].sourceKey, /^abc#[a-f0-9]{16}$/, '岗位键是稳定 hash，不是数组下标');
+  assert.notEqual(projects[0].sourceKey, projects[1].sourceKey);
+});
+
+test('川大双选会：岗位顺序变化不改变 sourceKey（不会把 A 的内容写进 B）', () => {
+  const corp = {company: '安徽新华教育集团有限公司', sourceUrl: 'https://jy.scu.edu.cn/index/index/jobfaircorporationinfo.html?data=abc', sourceKey: 'abc', applyMode: '现场', notes: ''};
+  const detail = parseCorporationDetail(detailHtml);
+  const forward = mergeCorporationDetail(corp, detail);
+  const reversed = mergeCorporationDetail(corp, {jobs: [...detail.jobs].reverse(), email: detail.email});
+  const byTitle = list => Object.fromEntries(list.map(p => [p.title, p.sourceKey]));
+  assert.deepEqual(byTitle(forward), byTitle(reversed), '键只由岗位内容决定');
+  assert.equal(forward[0].sourceKey.split('#')[0], 'abc');
 });
 
 test('川大双选会：详情读不到时留空并标「未公布」', () => {
@@ -85,6 +96,31 @@ test('川大双选会：fetchProjects 抓列表 + 逐单位抓详情', async () 
   // 详情抓取只针对列表里的两个单位，且邮箱投递作为投递方式
   assert.equal(got.projects[0].applyMode, '邮箱投递');
   assert.equal(got.projects[0].applyUrl, 'mailto:xhzhaopin@xhgroup.cn');
+});
+
+test('川大双选会：超出 detailLimit 的单位退回单位级「未公布」，不静默丢弃', async () => {
+  const html3 = html.replace('</ul>', '<li><a href="/index/index/jobfaircorporationinfo.html?data=ghi"> 中国工商银行&nbsp;【行业：金融业；性质：国有企业 】 </a></li>\n</ul>');
+  const calls = [];
+  const fetch = async (url, opts = {}) => {
+    calls.push({url, method: opts.method || 'GET'});
+    if (opts.method === 'POST') return {ok: true, status: 200, text: html3};
+    if (new URL(url).searchParams.get('data') === 'abc') return {ok: true, status: 200, text: detailHtml};
+    throw new Error('超出 detailLimit 的单位不应再抓详情页');
+  };
+  const item = {url: 'https://jy.scu.edu.cn/index/index/jobfairdetail.html?data=xyz'};
+  const got = await source.fetchProjects(item, undefined, {fetchText: fetch, base: 'http://mock', detailLimit: 1});
+  assert.equal(got.status, 'ok');
+  assert.deepEqual(calls.filter(c => c.method === 'GET').map(c => new URL(c.url).searchParams.get('data')), ['abc'], '只对前 detailLimit 个单位抓详情');
+  const byCompany = got.projects.reduce((acc, p) => { (acc[p.company] ||= []).push(p); return acc; }, {});
+  assert.equal(byCompany['浙江吉利控股集团有限公司'].length, 2);
+  assert.equal(byCompany['宇树科技股份有限公司'].length, 1);
+  assert.equal(byCompany['中国工商银行'].length, 1);
+  for (const company of ['宇树科技股份有限公司', '中国工商银行']) {
+    const project = byCompany[company][0];
+    assert.equal(project.title, '');
+    assert.match(project.notes, /岗位\/要求未公布/);
+    assert.ok(project.sourceKey, '退回单位级也要有稳定键');
+  }
 });
 
 test('川大双选会：声明项目能力', () => {

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {WeChatStore} from '../src/wechat/store.mjs';
 import {handleWechat, bizOf} from '../src/wechat/api.mjs';
 import {analyzeArticle} from '../src/wechat/analyze.mjs';
@@ -213,7 +215,7 @@ test('API：导入真实招聘文章自动产出带来源活动/项目，并去�
     const body = '四川大学秋季双选会将于2026年11月20日14:00在体育馆举行。\n浙江吉利控股集团有限公司 招聘 数据分析\n宇树科技股份有限公司 招聘 算法工程师';
     const failFetch = async () => ({ok: false, message: '需要粘贴正文', title: '四川大学秋季双选会通知', nickname: '四川大学就业指导中心', biz: 'ApiScu', link: 'https://mp.weixin.qq.com/s?__biz=ApiScu&mid=1&idx=1&sn=import'});
     const first = await handleWechat({
-      method: 'POST', pathname: 'articles/import', dir,
+      method: 'POST', pathname: 'articles/import', dir, userId: 'user-api',
       body: {url: 'https://mp.weixin.qq.com/s?__biz=ApiScu&mid=1&idx=1&sn=import', text: body},
       deps: {fetchArticle: failFetch}
     });
@@ -242,6 +244,9 @@ test('API：导入真实招聘文章自动产出带来源活动/项目，并去�
       const events = rs.listEvents({limit: 10, withProjects: true});
       assert.equal(events.length, 1);
       assert.equal(events[0].projects.length, first.json.publish.projects.length);
+      const audits = rs.db.prepare('SELECT * FROM write_audit').all();
+      assert.equal(audits.length, 1 + first.json.publish.projects.length, '导入自动发布要走审计');
+      assert.ok(audits.every(row => row.user_id === 'user-api'));
     } finally { rs.close(); }
   });
 });
@@ -329,6 +334,182 @@ test('API：从来源页 URL 发现公众号并自动订阅', async () => {
       assert.equal(account.feedUrl, url);
       assert.equal(account.biz, 'SwpuMatrix');
     } finally { reopened.close(); }
+  });
+});
+
+test('旧库种子冲突：legacy 别名行 + canonical 行同时存在时安全合并，不撞 name UNIQUE', async () => {
+  await withDir(async dir => {
+    const file = join(dir, 'wechat.db');
+    let store = WeChatStore.open(file);
+    const canonical = store.listAccounts().find(a => a.name === '西财校招');
+    store.db.prepare('DELETE FROM wechat_accounts WHERE id=?').run(canonical.id);
+    const legacyId = 'legacy-xicai';
+    const now = new Date().toISOString();
+    store.db.prepare(`INSERT INTO wechat_accounts(id,name,school,category,biz,created_at,updated_at,alias_biz,alias_names,feed_url)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run(legacyId, '西财就业', '西南财经大学', '财经强校', 'MjM5MDAxMzM4MQ==', now, now, '["MzA4ODgzNjg2NQ=="]', '[]', 'https://schools.test/xicai');
+    store.db.prepare(`INSERT INTO wechat_accounts(id,name,school,category,biz,created_at,updated_at,alias_biz,alias_names,feed_url)
+      VALUES(?,?,?,?,?,?,?,?,?,?)`).run('canonical-xicai', '西财校招', '西南财经大学', '财经强校', 'MjM5MDAxMzM4MQ==', now, now, '[]', '[]', '');
+    store.db.prepare('INSERT INTO wechat_articles(id,account_id,title,url,content,created_at) VALUES(?,?,?,?,?,?)')
+      .run('legacy-article', legacyId, '西财旧文', 'https://mp.weixin.qq.com/s?__biz=MjA&mid=1&idx=1&sn=legacy', '旧正文', now);
+    store.close();
+
+    // 重新打开会跑 seed()：旧别名行不能因为改名撞 UNIQUE 而让整个库打不开。
+    store = WeChatStore.open(file);
+    try {
+      const rows = store.listAccounts().filter(a => a.school === '西南财经大学');
+      assert.equal(rows.length, 1, '同一学校只保留一个合并后的账号');
+      const merged = rows[0];
+      assert.equal(merged.name, '西财校招');
+      assert.ok(merged.aliasNames.includes('西财就业'), '旧名保留为别名');
+      assert.equal(merged.feedUrl, 'https://schools.test/xicai', '订阅地址不因合并丢失');
+      assert.equal(store.getArticle('legacy-article').accountId, merged.id, '旧文章改挂到合并后的账号');
+      const duplicate = store.db.prepare('SELECT name, COUNT(*) c FROM wechat_accounts GROUP BY name HAVING c > 1').all();
+      assert.deepEqual(duplicate, []);
+    } finally { store.close(); }
+  });
+});
+
+test('发布：force 不再绕过「至少 1 单位 / 合法开始时间 / 非未发现招聘」门禁', async () => {
+  await withDir(async dir => {
+    const store = WeChatStore.open(join(dir, 'wechat.db'));
+    const account = store.listAccounts().find(a => a.name === '四川大学就业指导中心');
+    const article = store.saveArticle({
+      accountId: account.id, title: '四川大学秋季双选会通知',
+      url: 'https://mp.weixin.qq.com/s?__biz=ForceGate&mid=1&idx=1&sn=force',
+      content: '四川大学秋季双选会通知正文'
+    });
+    store.saveAnalysis(article.id, {hasRecruitment: 'no', draft: {startAt: '2026-11-20T14:00:00+08:00'}, projects: [{company: '甲公司', title: '数据分析'}], warnings: []});
+    let out = await publishArticle({dir, articleId: article.id, force: true});
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'not_recruitment');
+
+    const noStart = store.saveArticle({
+      accountId: account.id, title: '没有开始时间的推文',
+      url: 'https://mp.weixin.qq.com/s?__biz=ForceGate&mid=2&idx=1&sn=nostart',
+      content: '只有单位名单，没有时间'
+    });
+    store.saveAnalysis(noStart.id, {hasRecruitment: 'yes', draft: {}, projects: [{company: '乙公司', title: '产品经理'}], warnings: []});
+    out = await publishArticle({dir, articleId: noStart.id, force: true});
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'invalid_start_at');
+
+    const noProjects = store.saveArticle({
+      accountId: account.id, title: '只有时间没有单位',
+      url: 'https://mp.weixin.qq.com/s?__biz=ForceGate&mid=3&idx=1&sn=noproj',
+      content: '双选会 2026年11月20日 14:00'
+    });
+    store.saveAnalysis(noProjects.id, {hasRecruitment: 'yes', draft: {startAt: '2026-11-20T14:00:00+08:00'}, projects: [], warnings: []});
+    out = await publishArticle({dir, articleId: noProjects.id, force: true});
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'no_projects');
+    store.close();
+
+    const rs = RecruitStore.open(join(dir, 'recruit.db'));
+    try { assert.equal(rs.listEvents({limit: 10}).length, 0, '被门禁挡下时一行都不写'); } finally { rs.close(); }
+  });
+});
+
+test('自动发布写审计：事件与项目同一批次，重放不重复写', async () => {
+  await withDir(async dir => {
+    const store = WeChatStore.open(join(dir, 'wechat.db'));
+    const account = store.listAccounts().find(a => a.name === '四川大学就业指导中心');
+    const article = store.saveArticle({
+      accountId: account.id, title: '四川大学秋季双选会通知',
+      url: 'https://mp.weixin.qq.com/s?__biz=AuditScu&mid=1&idx=1&sn=audit',
+      content: '四川大学秋季双选会将于2026年11月20日14:00在体育馆举行。\n浙江吉利控股集团有限公司 招聘 数据分析\n宇树科技股份有限公司 招聘 算法工程师'
+    });
+    store.close();
+
+    const first = await publishArticle({dir, articleId: article.id, audit: {userId: 'user-a', actorType: 'model'}});
+    assert.equal(first.ok, true);
+    assert.ok(first.batchId, '自动发布要产生审计批次');
+    assert.equal(first.duplicate, false);
+
+    const rs = RecruitStore.open(join(dir, 'recruit.db'));
+    let audits, idem;
+    try {
+      audits = rs.db.prepare('SELECT * FROM write_audit ORDER BY seq').all();
+      idem = rs.db.prepare('SELECT * FROM idempotency').all();
+    } finally { rs.close(); }
+    assert.equal(audits.length, 1 + first.projects.length, '事件 1 行 + 每个项目 1 行');
+    assert.ok(audits.every(row => row.user_id === 'user-a'));
+    assert.ok(audits.every(row => row.batch_id === first.batchId));
+    assert.ok(audits.every(row => row.tool === 'career_wechat_publish'));
+    assert.ok(audits.some(row => row.entity === 'events' && row.action === 'create'));
+    assert.ok(audits.filter(row => row.entity === 'event_projects').length >= 1);
+    assert.equal(idem.length, 1);
+    assert.equal(idem[0].status, 'completed');
+
+    const again = await publishArticle({dir, articleId: article.id, audit: {userId: 'user-a', actorType: 'model'}});
+    assert.equal(again.ok, true);
+    assert.equal(again.duplicate, true);
+    assert.equal(again.event.id, first.event.id);
+    const rs2 = RecruitStore.open(join(dir, 'recruit.db'));
+    try { assert.equal(rs2.db.prepare('SELECT COUNT(*) c FROM write_audit').get().c, audits.length, '重放不新增审计'); } finally { rs2.close(); }
+  });
+});
+
+test('purge-demo：示例活动软删除并写审计，不物理 DELETE；重复执行不重复审计', async () => {
+  await withDir(async dir => {
+    const rs = RecruitStore.open(join(dir, 'recruit.db'));
+    try {
+      const at = new Date().toISOString();
+      rs.upsertEvent({id: 'demo'.padEnd(24, '0'), sourceId: 'manual', school: '演示大学', city: '成都', kind: '双选会', title: '演示活动', startAt: '2026-11-01T09:00:00+08:00', sourceUrl: 'https://example.com/demo', fetchedAt: at});
+      rs.upsertEvent({id: 'real'.padEnd(24, '0'), sourceId: 'manual', school: '真实大学', city: '成都', kind: '双选会', title: '真实活动', startAt: '2026-11-02T09:00:00+08:00', sourceUrl: 'https://school.edu.cn/real', fetchedAt: at});
+    } finally { rs.close(); }
+
+    const out = await handleWechat({method: 'POST', pathname: 'purge-demo', dir, userId: 'user-a'});
+    assert.equal(out.json.removedEvents, 1);
+    assert.ok(out.json.auditBatchId);
+
+    const check = RecruitStore.open(join(dir, 'recruit.db'));
+    try {
+      const demo = check.getEvent('demo'.padEnd(24, '0'));
+      assert.equal(demo.status, 'archived', '演示活动是软删除');
+      assert.match(demo.notes, /软删除/);
+      assert.equal(check.listEvents({limit: 10}).length, 1, '默认列表只剩真实活动');
+      const audits = check.db.prepare('SELECT * FROM write_audit').all();
+      assert.equal(audits.length, 1);
+      assert.equal(audits[0].action, 'delete');
+      assert.equal(audits[0].entity, 'events');
+      assert.equal(audits[0].user_id, 'user-a');
+      assert.equal(audits[0].tool, 'wechat_purge_demo');
+    } finally { check.close(); }
+
+    const again = await handleWechat({method: 'POST', pathname: 'purge-demo', dir, userId: 'user-a'});
+    assert.equal(again.json.removedEvents, 0);
+    const final = RecruitStore.open(join(dir, 'recruit.db'));
+    try { assert.equal(final.db.prepare('SELECT COUNT(*) c FROM write_audit').get().c, 1, '重复清理不重复审计'); } finally { final.close(); }
+  });
+});
+
+test('账号未配置订阅页：同步返回可诊断的 disabled，账号仍可配置 feedUrl', async () => {
+  await withDir(async dir => {
+    const account = (await handleWechat({method: 'GET', pathname: 'accounts', dir})).json.accounts.find(a => a.name === '中山大学就业');
+    assert.equal(account.subscribed, false);
+    assert.equal(account.feedUrl, '');
+    const out = await handleWechat({method: 'POST', pathname: 'accounts/' + account.id + '/sync', body: {}, dir});
+    assert.equal(out.json.status, 'disabled');
+    assert.match(out.json.message, /未配置/);
+    const saved = await handleWechat({method: 'POST', pathname: 'accounts/' + account.id + '/subscribe', body: {feedUrl: 'https://schools.test/zhongda'}, dir});
+    assert.equal(saved.json.account.subscribed, true);
+    assert.equal(saved.json.account.feedUrl, 'https://schools.test/zhongda');
+  });
+});
+
+test('CLI：subscribe 能配置 feedUrl（9 个空账号的配置入口）', async () => {
+  await withDir(async dir => {
+    let store = WeChatStore.open(join(dir, 'wechat.db'));
+    const account = store.listAccounts().find(a => a.name === '中山大学就业');
+    store.close();
+    const cli = join(fileURLToPath(new URL('..', import.meta.url)), 'src', 'wechat', 'cli.mjs');
+    const out = execFileSync(process.execPath, [cli, 'subscribe', '--account', account.id, '--feed', 'https://schools.test/zhongda', '--data', dir], {encoding: 'utf8'});
+    assert.match(out, /已保存订阅页/);
+    store = WeChatStore.open(join(dir, 'wechat.db'));
+    try {
+      assert.equal(store.getAccount(account.id).feedUrl, 'https://schools.test/zhongda');
+      assert.ok(store.listSubscribed().some(a => a.id === account.id));
+    } finally { store.close(); }
   });
 });
 

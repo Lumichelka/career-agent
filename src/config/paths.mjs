@@ -3,6 +3,7 @@
 import os from 'node:os';
 import {join, resolve} from 'node:path';
 import {mkdir, cp, writeFile, access} from 'node:fs/promises';
+import {readFileSync, existsSync} from 'node:fs';
 
 export function resolveDataDir({env = process.env, platform = process.platform, home = os.homedir()} = {}) {
   if (env.CAREER_DATA_DIR) return resolve(env.CAREER_DATA_DIR);
@@ -13,6 +14,19 @@ export function resolveDataDir({env = process.env, platform = process.platform, 
 
 export function legacyDataDir(root) {
   return join(root, '.data');
+}
+
+// 命令行默认写入网页里 owner 账号的数据目录；只有一个账号且目录已存在时才下钻。
+// 三个 CLI 共用，避免各自复制一份判断逻辑。
+export function defaultUserDataDir({base = resolveDataDir(), readFile = readFileSync, exists = existsSync} = {}) {
+  try {
+    const accounts = JSON.parse(readFile(join(base, 'accounts.json'), 'utf8'));
+    if (Array.isArray(accounts) && accounts.length === 1 && accounts[0]?.id) {
+      const dir = join(base, 'users', accounts[0].id, '.data');
+      if (exists(dir)) return dir;
+    }
+  } catch { /* 还没初始化过账号 */ }
+  return base;
 }
 
 async function exists(path) {

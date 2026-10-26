@@ -2,19 +2,13 @@
 // 不补造单位/城市/薪资，不写投递方式；同一来源键重复出现时只保留一条。
 import {createHash} from 'node:crypto';
 import {isPlatformId, siteUrlAllowed} from '../platform/sites.mjs';
+import {canonicalHttpUrl} from '../lib/url.mjs';
 
 const JOB_LIMIT = 50;
 const JOB_FIELDS = {company: 120, title: 200, positions: 2000, requirements: 4000, city: 20, sourceUrl: 500, sourceKey: 200, notes: 2000};
 
 function text(value, max) {
   return String(value ?? '').trim().slice(0, max);
-}
-
-function canonicalUrl(raw) {
-  try {
-    const u = new URL(raw);
-    return u.origin + u.pathname.replace(/\/+$/, '');
-  } catch { return String(raw || ''); }
 }
 
 function normalizeAt(value) {
@@ -69,7 +63,7 @@ export function normalizePlatformJobs(payload = {}) {
     const title = text(raw.title, JOB_FIELDS.title);
     if (!company && !title) { skipped++; continue; }
     const sourceKey = text(raw.sourceKey, JOB_FIELDS.sourceKey)
-      || createHash('sha1').update([platform, canonicalUrl(sourceUrl), company, title].join('|')).digest('hex').slice(0, 32);
+      || createHash('sha1').update([platform, canonicalHttpUrl(sourceUrl), company, title].join('|')).digest('hex').slice(0, 32);
     if (seen.has(sourceKey)) { skipped++; continue; }
     seen.add(sourceKey);
     jobs.push({
