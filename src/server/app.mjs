@@ -110,7 +110,10 @@ const operatorService = createOperatorService({
   dataDir,
   taskManager,
   ...(sourceCheck?.operator?.launch ? {launch: sourceCheck.operator.launch} : {}),
-  ...(sourceCheck?.operator?.maxActiveMs ? {maxActiveMs: sourceCheck.operator.maxActiveMs} : {})
+  ...(sourceCheck?.operator?.maxActiveMs ? {maxActiveMs: sourceCheck.operator.maxActiveMs} : {}),
+  // 兜底写完动作后复用同一套视觉抽取/复核：测试注入假实现，live 用用户自己的模型 API。
+  ...(sourceCheck.extractor ? {extractor: sourceCheck.extractor} : {}),
+  ...(sourceCheck.reviewer ? {reviewer: sourceCheck.reviewer} : {})
 });
 
 // 公众号 AI 操作员（#59）：连同账号解析一起挂到同一个 operator 任务上。
@@ -639,7 +642,7 @@ const server = http.createServer(async (req, res) => {
 
       // 来源操作（AI 采集）入口：打开应用内可见 profile，任务在后台运行/等待人工接管。
       if (url.pathname === '/api/source-check/operator/start') {
-        const out = await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps, playbook: body.playbook});
+        const out = await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps, playbook: body.playbook, models: models.snapshot()});
         return send(res, out.json, out.status || 200);
       }
       if (url.pathname === '/api/source-check/operator/continue') {
@@ -658,7 +661,7 @@ const server = http.createServer(async (req, res) => {
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
       if (url.pathname === '/api/source-check/start') {
         const out = body.mode === 'operator'
-          ? await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps, playbook: body.playbook})
+          ? await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps, playbook: body.playbook, models: models.snapshot()})
           : await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId, url: body.url});
         return send(res, out.json, out.status || 200);
       }

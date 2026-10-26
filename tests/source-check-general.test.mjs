@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, rm, mkdir, writeFile, readdir, readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join, basename} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {existsSync, readFileSync} from 'node:fs';
 import {createApp} from '../src/server/app.mjs';
 import {readFeed} from '../src/recruit/feed.mjs';
+import {callTool} from '../src/tools/execute.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {resolveSource, resolveSourceCheckTarget, SOURCE_CHECK_NOTES} from '../src/source-check/pipeline.mjs';
 import {normalizeSourceCheckUrl, sourceCheckEnabled, sourceCheckConfig, selectDetailHref} from '../src/source-check/config.mjs';
@@ -825,13 +826,23 @@ test('playbook：UIBE/SWUFE/WeChat 各一份，front matter 含入口/domains/�
   assert.equal(steps[0].url, pb.entry[0], 'playbook 入口成为第一步 goto');
   assert.equal(steps.at(-1).action, 'screenshot');
   assert.ok(steps.length >= 2);
+  assert.ok(!steps.some(step => step.action === 'click'), '没有 detailSelector 的 playbook 不生成点击步骤');
   assert.doesNotThrow(() => normalizeOperatorSteps(steps, {source: {listUrl: steps[0].url}}), 'playbook 生成的动作必须能过 operator 校验');
+
+  // 西南财大兜底要截到「列表 + 详情」：入口 → 点开第一场详情 → 关键截图。
+  const swufe = await loadPlaybook('swufe-xjh');
+  assert.match(swufe.detailSelector, /jobfair-show/, 'swufe playbook 要有详情选择器');
+  const swufeSteps = playbookSteps(swufe);
+  assert.deepEqual(swufeSteps.map(step => step.action), ['goto', 'click', 'screenshot']);
+  assert.equal(swufeSteps[1].target, swufe.detailSelector);
+  assert.doesNotThrow(() => normalizeOperatorSteps(swufeSteps, {source: {listUrl: swufe.entry[0]}}));
 });
 
 test('AI 兜底入口：operator start 接受 sourceId+playbook，用 playbook 入口生成步骤并标明是兜底', {timeout: 60000}, async t => {
   const page = fakeOperatorPage();
   const capture = {};
-  const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}});
+  // 兜底跑完动作后会复用 source-check 的视觉抽取/写入；这里注入假视觉，不调模型 API。
+  const app = await startApp(t, {extractor: fakeExtractor(), operator: {launch: fakeOperatorLauncher(page, capture)}});
   const user = await register(app, 'ai-fallback-user');
 
   const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'uibe-career', playbook: 'uibe-career'});
@@ -901,7 +912,7 @@ test('来源卡 AI 兜底能力：有 playbook 的源与公众号账号标记 ai
 test('AI 兜底也能用于公众号账号：wechat:<id> 用 wechat playbook 的入口生成步骤', {timeout: 30000}, async t => {
   const page = fakeOperatorPage();
   const capture = {};
-  const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}});
+  const app = await startApp(t, {extractor: fakeExtractor(), operator: {launch: fakeOperatorLauncher(page, capture)}});
   const user = await register(app, 'ai-fallback-wechat');
 
   const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {sourceId: 'wechat:abc-123', playbook: 'wechat'});
@@ -941,4 +952,219 @@ test('不自动切换：确定性来源被阻断/失败后不会自动启动 AI 
   const listed = await getJson(app, '/api/tasks', user.cookie);
   assert.equal(listed.tasks.length, 1, '阻断后不能自动排队 AI 兜底任务');
   assert.equal(listed.tasks.filter(task => String(task.title).includes('AI 兜底')).length, 0);
+});
+
+// ---- SWUFE 对照：source-check 与手动 AI 兜底（#60）----
+
+const SWUFE_DETAIL_URL = 'https://job3.swufe.edu.cn/jobfair/jobfair-show-123.htm';
+const SWUFE_DETAIL_SELECTOR = 'a[href*="/jobfair/jobfair-show-"]';
+const SWUFE_FIXTURE = JSON.parse(await readFile(new URL('./fixtures/swufe/extraction.json', import.meta.url), 'utf8'));
+
+// 假浏览器：source-check 固定两页；假视觉用同一份 SWUFE fixture，两条路径的输入完全一样。
+function swufeReader() {
+  const calls = [];
+  const reader = async ({source, evidenceDir}) => {
+    calls.push({kind: 'list', url: source.listUrl});
+    await mkdir(evidenceDir, {recursive: true});
+    const at = new Date().toISOString();
+    await writeFile(join(evidenceDir, '01-list.png'), PNG);
+    calls.push({kind: 'detail', url: SWUFE_DETAIL_URL});
+    await writeFile(join(evidenceDir, '02-detail.png'), PNG);
+    return {
+      screenshots: [
+        {id: 'list', kind: 'screenshot', file: join(evidenceDir, '01-list.png'), url: source.listUrl, title: '双选会列表', at, viewport: {width: 1366, height: 900}},
+        {id: 'detail', kind: 'screenshot', file: join(evidenceDir, '02-detail.png'), url: SWUFE_DETAIL_URL, title: SWUFE_FIXTURE.events[0].title, at, viewport: {width: 1366, height: 900}}
+      ]
+    };
+  };
+  reader.calls = calls;
+  return reader;
+}
+
+function swufeExtractor() {
+  const calls = [];
+  const extractor = async ({screenshots, source}) => {
+    calls.push({source: source?.id || '', files: screenshots.map(shot => basename(shot.file))});
+    return JSON.parse(JSON.stringify(SWUFE_FIXTURE));
+  };
+  extractor.calls = calls;
+  return extractor;
+}
+
+function feedConfig(app, user) {
+  return {recruitDir: join(app.dataDir, 'users', user.id, '.data'), dataDir: app.dataDir, userId: user.id};
+}
+
+async function waitTask(app, cookie, taskId, states) {
+  return waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', cookie);
+    const task = listed.tasks.find(item => item.id === taskId);
+    return task && states.includes(task.state) ? task : null;
+  });
+}
+
+function feedEvent(feed) {
+  return feed.entries.find(entry => entry.type === 'event') || null;
+}
+
+function feedCompanies(feed) {
+  return feed.entries.filter(entry => entry.type === 'project').map(entry => entry.record.company).sort();
+}
+
+test('SWUFE 对照：source-check 与手动 AI 兜底写同一条记录，字段一致、feed 可见、不重复、可整任务撤销', {timeout: 90000}, async t => {
+  const title = SWUFE_FIXTURE.events[0].title;
+  const companies = SWUFE_FIXTURE.projects.map(project => project.company);
+  const reader = swufeReader();
+  const extractor = swufeExtractor();
+  const page = fakeOperatorPage({
+    title,
+    onAfter: {[SWUFE_DETAIL_SELECTOR]: async target => target.setUrl(SWUFE_DETAIL_URL)}
+  });
+  const capture = {};
+  const app = await startApp(t, {browserReader: reader, extractor, operator: {launch: fakeOperatorLauncher(page, capture)}});
+  const member = await register(app, 'swufe-compare');
+  const config = feedConfig(app, member.user);
+
+  // 1) 确定性 source-check：写入 1 场活动 + 3 个单位，feed 记录带 source_url/evidence_ref/operation_id。
+  const first = await postJson(app, '/api/source-check/start', member.cookie, {sourceId: 'swufe'});
+  assert.equal(first.sourceId, 'swufe-xjh');
+  const firstTask = await waitTask(app, member.cookie, first.taskId, ['succeeded', 'failed', 'blocked']);
+  assert.equal(firstTask.state, 'succeeded', 'source-check 应成功：' + JSON.stringify(firstTask.error));
+  assert.equal(firstTask.counts.writes, 4, '1 场活动 + 3 个单位');
+  assert.deepEqual(reader.calls.map(call => call.kind), ['list', 'detail'], 'source-check 固定读列表 + 详情两页');
+  assert.deepEqual(extractor.calls[0].files, ['01-list.png', '02-detail.png']);
+
+  const afterSourceCheck = await callTool('career_feed', {}, {config});
+  assert.equal(afterSourceCheck.entries.length, 4, 'feed 能看到 1 场活动 + 3 个单位');
+  const eventBefore = feedEvent(afterSourceCheck);
+  assert.ok(eventBefore, 'feed 必须有活动条目');
+  assert.equal(eventBefore.record.title, title);
+  assert.equal(eventBefore.record.school, '西南财经大学');
+  assert.equal(eventBefore.record.city, '成都');
+  assert.equal(eventBefore.record.kind, '双选会');
+  assert.equal(eventBefore.record.source_url, SWUFE_DETAIL_URL);
+  assert.equal(eventBefore.record.operation_id, first.taskId);
+  assert.equal(eventBefore.record.evidence_ref, 'artifact:02-detail.png');
+  assert.equal(eventBefore.record.evidence_available, true);
+  assert.deepEqual(feedCompanies(afterSourceCheck), [...companies].sort());
+
+  // 2) 用户手动点「AI 兜底」：playbook 入口 + 打开详情页 + 截图；抽取/写入复用同一套写网关。
+  const fallback = await postJson(app, '/api/source-check/operator/start', member.cookie, {sourceId: 'swufe-xjh', playbook: 'swufe-xjh'});
+  assert.equal(fallback.fallback, true, '响应要标明这是手动兜底');
+  assert.equal(fallback.playbook, 'swufe-xjh');
+  assert.match(fallback.title, /AI 兜底/);
+  assert.match(fallback.title, /西南财经大学/);
+  const fallbackTask = await waitTask(app, member.cookie, fallback.taskId, ['succeeded', 'failed']);
+  assert.equal(fallbackTask.state, 'succeeded', 'AI 兜底应成功：' + JSON.stringify(fallbackTask.error));
+  assert.equal(capture.options.options.headless, false, '兜底仍然用可见窗口');
+  assert.equal(fallbackTask.counts.writes, 4, '兜底写入同一条活动 + 三个单位');
+  assert.equal(fallbackTask.undo.available, true, '兜底任务可整任务撤销');
+  assert.equal(fallbackTask.undo.rows, 4);
+
+  const actions = fallbackTask.operator.actions.map(item => item.action);
+  assert.equal(actions[0], 'goto', 'playbook 入口是第一步');
+  assert.ok(actions.includes('click'), '兜底要打开详情页');
+  const goes = page.calls.filter(call => call.action === 'goto').map(call => call.url);
+  assert.equal(goes[0], 'https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm');
+
+  // 兜底的证据落在同一个任务目录：动作日志/每步截图 + 抽取 JSON + screenshots.json。
+  const fallbackEvidence = join(app.dataDir, 'users', member.user.id, 'tasks', fallback.taskId, 'evidence');
+  for (const file of ['action.jsonl', 'screenshots.json', 'extraction.json']) {
+    assert.ok(existsSync(join(fallbackEvidence, file)), '兜底证据必须落盘：' + file);
+  }
+  const fallbackExtraction = JSON.parse(await readFile(join(fallbackEvidence, 'extraction.json'), 'utf8'));
+  assert.equal(fallbackExtraction.events.length, 1);
+  assert.equal(fallbackExtraction.events[0].title, title, '两条路径的标题一致');
+  assert.equal(fallbackExtraction.events[0].sourceUrl, SWUFE_DETAIL_URL, '两条路径的来源一致');
+  assert.deepEqual(fallbackExtraction.projects.map(project => project.company), companies, '两条路径的单位一致');
+  const fallbackShots = JSON.parse(await readFile(join(fallbackEvidence, 'screenshots.json'), 'utf8'));
+  assert.deepEqual(fallbackShots.map(shot => shot.id), ['list', 'detail']);
+  assert.equal(fallbackShots[1].url, SWUFE_DETAIL_URL);
+  assert.equal(extractor.calls.length, 2, '两条路径各抽取一次');
+  assert.deepEqual(extractor.calls[1].files, ['action-001.png', 'action-003.png'], '兜底用 operator 的列表 + 详情动作截图抽取');
+
+  // 3) 对照：同一条活动不被写成两条记录；字段一致，只有证据指针/操作 id 指向兜底任务。
+  const afterFallback = await callTool('career_feed', {}, {config});
+  assert.equal(afterFallback.entries.length, 4, '两条路径写同一场活动不产生重复记录');
+  const eventAfter = feedEvent(afterFallback);
+  assert.equal(eventAfter.id, eventBefore.id, '同一场活动仍是同一条记录');
+  assert.equal(eventAfter.op, 'upsert');
+  for (const field of ['title', 'school', 'city', 'kind', 'venue', 'start_at', 'source_id', 'source_url']) {
+    assert.equal(eventAfter.record[field], eventBefore.record[field], field + ' 两条路径必须一致');
+  }
+  assert.deepEqual(feedCompanies(afterFallback), [...companies].sort(), '单位集合保持一致');
+  assert.equal(eventAfter.record.operation_id, fallback.taskId, '操作 id 指向兜底任务');
+  assert.match(eventAfter.record.evidence_ref, /^artifact:action-\d{3}\.png$/, '证据指向兜底的详情截图');
+  assert.equal(eventAfter.record.evidence_available, true);
+
+  const store = RecruitStore.open(join(config.recruitDir, 'recruit.db'));
+  let rows;
+  try {
+    rows = {
+      events: store.db.prepare('SELECT * FROM events').all(),
+      projects: store.db.prepare('SELECT * FROM event_projects').all(),
+      audits: store.db.prepare('SELECT * FROM write_audit ORDER BY seq').all()
+    };
+  } finally { store.close(); }
+  assert.equal(rows.events.length, 1, '不重复写同一场活动');
+  assert.equal(rows.projects.length, 3, '不重复写同一个单位');
+  assert.equal(rows.audits.length, 8, '两条路径各写 4 行，各留 4 条审计');
+  assert.equal(rows.audits.filter(row => row.task_id === first.taskId).length, 4);
+  assert.equal(rows.audits.filter(row => row.task_id === fallback.taskId).length, 4);
+  assert.ok(rows.audits.filter(row => row.task_id === fallback.taskId).every(row => row.action === 'update'), '兜底更新已有记录而不是新建');
+
+  // 4) 整任务撤销兜底：回到 source-check 写下的值，活动仍在。
+  const undoFallback = await postJson(app, '/api/audit/undo/task', member.cookie, {taskId: fallback.taskId});
+  assert.equal(undoFallback.ok, true);
+  assert.equal(undoFallback.counts.rows, 4);
+  assert.equal(undoFallback.counts.undone, 4);
+  assert.equal(undoFallback.counts.conflicts, 0);
+  assert.equal(undoFallback.task.state, 'undone');
+  const afterFallbackUndo = await callTool('career_feed', {}, {config});
+  assert.equal(afterFallbackUndo.entries.length, 4, '撤销兜底后 source-check 的记录仍在');
+  assert.equal(feedEvent(afterFallbackUndo).record.source_url, SWUFE_DETAIL_URL);
+
+  // 5) 再撤销 source-check：两条路径的记录都清空，整库回到对照前。
+  const undoFirst = await postJson(app, '/api/audit/undo/task', member.cookie, {taskId: first.taskId});
+  assert.equal(undoFirst.counts.rows, 4);
+  assert.equal(undoFirst.counts.undone, 4);
+  const afterAllUndo = await callTool('career_feed', {}, {config});
+  assert.equal(afterAllUndo.entries.length, 0, '撤销两条任务后没有任何记录残留');
+});
+
+test('AI 兜底遇到登录会暂停且不写记录：用户继续/取消前库里保持原样', {timeout: 60000}, async t => {
+  const page = fakeOperatorPage({loginAfterGoto: true});
+  const app = await startApp(t, {extractor: fakeExtractor(), operator: {launch: fakeOperatorLauncher(page, {})}});
+  const member = await register(app, 'swufe-fallback-waiting');
+  const config = feedConfig(app, member.user);
+
+  const started = await postJson(app, '/api/source-check/operator/start', member.cookie, {sourceId: 'swufe-xjh', playbook: 'swufe-xjh'});
+  const waiting = await waitTask(app, member.cookie, started.taskId, ['waiting_login']);
+  assert.equal(waiting.state, 'waiting_login');
+  assert.equal(waiting.operator.waiting.kind, 'login');
+  assert.equal(waiting.counts.writes, 0, '暂停在登录时不能写记录');
+  assert.equal((await callTool('career_feed', {}, {config})).entries.length, 0, '暂停在登录时 feed 必须为空');
+
+  await postJson(app, '/api/tasks/stop', member.cookie, {taskId: started.taskId});
+  const cancelled = await waitTask(app, member.cookie, started.taskId, ['cancelled']);
+  assert.equal(cancelled.state, 'cancelled');
+  assert.equal((await callTool('career_feed', {}, {config})).entries.length, 0, '取消后也不能留下半条记录');
+});
+
+test('AI 兜底截图不足时失败关闭：不猜着写库，给出可执行的恢复建议', {timeout: 60000}, async t => {
+  const page = fakeOperatorPage();
+  const app = await startApp(t, {extractor: fakeExtractor(), operator: {launch: fakeOperatorLauncher(page, {})}});
+  const member = await register(app, 'swufe-fallback-shots');
+  const config = feedConfig(app, member.user);
+
+  const started = await postJson(app, '/api/source-check/operator/start', member.cookie, {
+    sourceId: 'swufe-xjh',
+    playbook: 'swufe-xjh',
+    steps: [{action: 'goto', url: 'https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm'}]
+  });
+  const finished = await waitTask(app, member.cookie, started.taskId, ['failed']);
+  assert.equal(finished.state, 'failed');
+  assert.equal(finished.error.code, 'OPERATOR_SCREENSHOTS_MISSING');
+  assert.match(finished.error.recovery, /重试|手动导入/);
+  assert.equal((await callTool('career_feed', {}, {config})).entries.length, 0, '截图不足不能写任何记录');
 });

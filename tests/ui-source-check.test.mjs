@@ -261,8 +261,13 @@ test('来源卡「AI 兜底」：手动入口、明示不是自动采集、阻�
   const pageModel = operatorPage({loginAfterGoto: false});
   const capture = {};
   const blockedReader = async () => { throw new SourceCheckBlockedError('来源页需要登录或验证，已停止读取。'); };
+  // 兜底跑完动作后复用 source-check 的视觉抽取/写入；UI 测试同样不调模型 API。
+  const fakeExtractor = async () => ({
+    events: [{title: '西南财经大学2026届秋季双选会', startAt: '2026-11-05T09:00:00+08:00', school: '西南财经大学', city: '成都', kind: '双选会'}],
+    projects: [{eventRef: 0, company: '中国银行四川省分行', title: '管理培训生'}]
+  });
   const dir = await mkdtemp(join(tmpdir(), 'zx-ui-ai-fallback-'));
-  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0, sourceCheck: {browserReader: blockedReader, operator: {launch: operatorLauncher(pageModel, capture)}}});
+  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0, sourceCheck: {browserReader: blockedReader, extractor: fakeExtractor, operator: {launch: operatorLauncher(pageModel, capture)}}});
   t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
 
   const browser = await launchBrowser(t, app.port);

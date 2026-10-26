@@ -85,6 +85,9 @@ export function parsePlaybook(text, {file = ''} = {}) {
     entry: stringList(data.entry),
     domains: stringList(data.domains),
     successMarkers: stringList(data.successMarkers),
+    // 可选：详情页入口选择器。源卡片上的「AI 兜底」据此在列表页打开一场详情，
+    // 截图才能覆盖「列表 + 详情」，与 source-check 固定两页的口径对齐。
+    detailSelector: String(data.detailSelector ?? '').trim(),
     forbiddenActions: stringList(data.forbiddenActions),
     extractHints: stringList(data.extractHints),
     file: file ? basename(file) : '',
@@ -135,11 +138,13 @@ export function playbookMatchesSource(playbook, sourceId) {
   return playbook.id === key || playbook.sourceIds.includes(key) || playbook.aliases.includes(key);
 }
 
-// 入口 → operator 步骤：先按顺序打开每个入口，再补一张带标签的关键截图。
-// 只生成固定动作，不在这里注入任意 Playwright/JS。
+// 入口 → operator 步骤：先按顺序打开每个入口，有详情选择器就点开第一场详情，
+// 最后补一张带标签的关键截图。只生成固定动作，不在这里注入任意 Playwright/JS。
 export function playbookSteps(playbook) {
   const steps = [];
   for (const url of (playbook?.entry || [])) steps.push({action: 'goto', url, label: 'playbook 入口'});
+  const detailSelector = String(playbook?.detailSelector || '').trim();
+  if (detailSelector) steps.push({action: 'click', target: detailSelector, label: '打开详情页', text: '查看详情'});
   steps.push({action: 'screenshot', label: String(playbook?.title || 'playbook 关键截图')});
   return steps;
 }

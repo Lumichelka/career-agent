@@ -11,7 +11,8 @@ import {chromium} from 'playwright';
 import {isPrivateSourceHost} from './config.mjs';
 import {detectBlock} from './browser.mjs';
 import {operatorProfileDir} from '../config/paths.mjs';
-import {resolveSourceCheckTarget, evidenceDirFor, userDataDir, recordManualRead} from './pipeline.mjs';
+import {resolveSourceCheckTarget, evidenceDirFor, userDataDir, recordManualRead, runExtractionAndWrite} from './pipeline.mjs';
+import {summarizeTaskUndo} from '../writes/undo.mjs';
 import {loadPlaybook, playbookMatchesSource, playbookSteps, AI_FALLBACK_NOTE} from './playbook.mjs';
 
 export {operatorProfileDir};
@@ -372,6 +373,9 @@ export async function executeOperatorPlan({
       // 每步收尾：截图 + action.jsonl + 任务证据 + 时间线事件；暂停前也要先落这一步。
       const recordStep = async ({result, reason = '', startedAt = new Date().toISOString(), started = now()}) => {
         const shot = await takeStepScreenshot(page, evidenceDir, stepNo);
+        // 页面标题/地址留在截图上：兜底抽取要用「列表 + 详情」两张截图与详情 URL。
+        let pageTitle = '';
+        try { pageTitle = String(await page.title?.() || '').slice(0, 200); } catch { pageTitle = ''; }
         const entry = {
           step: stepNo,
           action: step.action,
@@ -385,7 +389,7 @@ export async function executeOperatorPlan({
         if (reason) entry.reason = reason;
         await appendFile(logFile, JSON.stringify(entry) + '\n', 'utf8');
         actions.push(entry);
-        if (shot) screenshots.push({step: stepNo, file: shot, url: operatorEvidenceUrl(taskId, shot)});
+        if (shot) screenshots.push({step: stepNo, file: shot, url: operatorEvidenceUrl(taskId, shot), pageUrl: entry.url, title: pageTitle});
 
         const resultText = result === 'paused' ? '暂停后继续' : result === 'blocked' ? '已拦截，等待人工处理' : result === 'rejected' ? '已拒绝危险动作' : '完成';
         const evidence = {
@@ -508,11 +512,34 @@ export async function executeOperatorPlan({
   }
 }
 
+// 兜底复用 operator 的动作截图：第一张是列表页，最后一张是详情页（playbook 的 detailSelector
+// 会先点开一场详情）。URL/标题取自动作日志，抽取口径与 source-check 的「列表 + 详情」一致。
+export function fallbackShots({actions = [], screenshots = [], evidenceDir = ''} = {}) {
+  const urlByStep = new Map((Array.isArray(actions) ? actions : []).map(item => [Number(item?.step), String(item?.url || '')]));
+  const usable = (Array.isArray(screenshots) ? screenshots : [])
+    .filter(item => item?.file)
+    .map(item => {
+      const step = Number(item.step) || 0;
+      return {
+        id: '',
+        file: join(String(evidenceDir), String(item.file)),
+        url: String(item.pageUrl || urlByStep.get(step) || ''),
+        title: String(item.title || ''),
+        at: new Date().toISOString(),
+        viewport: {width: 1366, height: 900}
+      };
+    });
+  if (usable.length < 2) return usable;
+  const list = {...usable[0], id: 'list'};
+  const detail = {...usable[usable.length - 1], id: 'detail'};
+  return [list, detail];
+}
+
 // 服务层：把 operator 执行体挂到既有 source-check 任务生命周期上。
 // - 任务仍是 TaskManager 的普通任务，复用任务卡/停止/证据/审计；
 // - 登录、异常、时间上限与危险动作由 waiters 暂停，HTTP 接口只负责把「继续/接受/拒绝」送回执行体；
 // - 服务重启后 waiters 不存在，任务会留在等待态，用户只能停止后重新发起（本票不做跨重启恢复）。
-export function createOperatorService({dataDir, taskManager, launch, maxActiveMs} = {}) {
+export function createOperatorService({dataDir, taskManager, launch, maxActiveMs, extractor = null, reviewer = null} = {}) {
   if (!dataDir) throw new Error('来源操作服务需要 dataDir');
   if (!taskManager) throw new Error('来源操作服务需要任务管理器');
   const waiters = new Map();
@@ -553,7 +580,7 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
   // 不带 playbook 时保持既有行为（任意 URL 或显式 steps），互不影响。
   // source/title/execute 只给进程内调用方（例如公众号操作）用；HTTP 入口仍然只接受
   // sourceId|url/playbook + 普通 JSON 步骤，不能从这里注入函数。
-  async function start({user, sourceId, url, steps, playbook: playbookId, source: sourceOverride = null, title: titleOverride = '', execute: executeOverride = null} = {}) {
+  async function start({user, sourceId, url, steps, playbook: playbookId, source: sourceOverride = null, title: titleOverride = '', execute: executeOverride = null, models = {}} = {}) {
     let fallback = null;
     if (playbookId) {
       fallback = await loadPlaybook(playbookId);
@@ -622,6 +649,10 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
       title,
       sourceName: fallback ? 'AI 兜底' : (executeOverride ? (source.name || '来源操作') : '来源操作'),
       onCreate: task => resolveCreated(task),
+      // 兜底写的是本地招聘库，任务卡要能显示「可撤销 N 条」；普通 operator 不写库。
+      ...(fallback ? {
+        describeUndo: ({task: finished}) => summarizeTaskUndo({dir: userDataDir(dataDir, user.id), userId: user.id, taskId: finished.id})
+      } : {}),
       execute: async ({task, signal, emit, addEvidence, setPhase, suspendTimeout}) => {
         let ok = false;
         try {
@@ -637,6 +668,26 @@ export function createOperatorService({dataDir, taskManager, launch, maxActiveMs
               profileDir, evidenceDir, taskId: task.id, steps: plan, source, launch, maxActiveMs,
               signal, emit, addEvidence, setPhase, askHuman: ask
             });
+          // 兜底不是「打开页面就算完成」：动作跑完后复用 source-check 的抽取/复核/写入尾段，
+          // 记录（含 source_url/证据/operation_id）落进同一个写网关与审计，可整任务撤销。
+          // 进程内自定义执行体（公众号操作）自己负责写入，不走这段。
+          if (fallback && typeof executeOverride !== 'function') {
+            const shots = fallbackShots({actions: out.actions, screenshots: out.screenshots, evidenceDir});
+            if (shots.length !== 2) {
+              throw new OperatorError('OPERATOR_SCREENSHOTS_MISSING',
+                '兜底需要列表页与详情页两张截图，实际只拿到 ' + shots.length + ' 张；请检查 playbook 入口与 detailSelector。',
+                '重新点击「AI 兜底」；仍失败就改用手动导入。');
+            }
+            const detail = shots.find(shot => shot.id === 'detail');
+            const written = await runExtractionAndWrite({
+              dataDir, userId: user.id, task, shots, models, extractor, reviewer,
+              source: {...source, detailUrl: detail?.url || source.listUrl},
+              actorRef: String(models?.label || ''), signal, emit, addEvidence, setPhase,
+              evidenceDir, addScreenshotEvidence: false, label: 'AI 兜底'
+            });
+            ok = true;
+            return {...out, extraction: written.extraction, write: written.write, screenshots: written.screenshots, review: written.review};
+          }
           ok = true;
           return out;
         } finally {
