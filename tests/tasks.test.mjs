@@ -333,6 +333,58 @@ test('任务卡：草稿可保存/丢弃，动作落盘且只对本人可见', a
   assert.equal(otherUser.ok, false, '跨用户不能改别人的草稿');
 });
 
+
+test('operator 任务：动作时间线入任务卡，登录暂停 waiting_login，人工续跑后从停点继续', {timeout: 20000}, async t => {
+  const {manager} = await managerFor(t);
+  const events = [];
+  const calls = [];
+  let resume;
+  const gate = new Promise(resolve => { resume = resolve; });
+  let loginSeen;
+  const seen = new Promise(resolve => { loginSeen = resolve; });
+
+  const running = manager.run({
+    userId: 'user-a', sessionId: 'session-1', title: '来源操作 · 公众号', sourceName: '来源操作',
+    emit: event => {
+      events.push(event);
+      if (event.type === 'task' && event.state === 'waiting_login') loginSeen();
+    },
+    execute: async ({emit}) => {
+      emit({type: 'operator_action', step: 1, total: 2, action: 'goto', target: 'https://mp.weixin.qq.com/', result: 'ok', screenshotRef: 'action-001.png', at: new Date().toISOString()});
+      emit({type: 'operator_waiting', state: 'waiting_login', kind: 'login', reason: '页面需要登录，请在本窗口登录后继续。', step: 2, total: 2});
+      await gate;
+      calls.push('resumed');
+      emit({type: 'operator_running', step: 2, total: 2});
+      emit({type: 'operator_action', step: 2, total: 2, action: 'screenshot', target: '文章列表', result: 'ok', screenshotRef: 'action-002.png', at: new Date().toISOString()});
+      return {ok: true};
+    }
+  });
+
+  await Promise.race([seen, wait(10000).then(() => { throw new Error('没有等到 waiting_login'); })]);
+  assert.deepEqual(calls, [], '暂停期间不能继续执行后续步骤');
+  const pending = await manager.summary('user-a');
+  assert.equal(pending.tasks[0].state, 'waiting_login');
+  assert.equal(pending.badge, 1, '等待登录要计入徽标');
+  assert.equal(pending.tasks[0].operator.state, 'waiting_login');
+  assert.equal(pending.tasks[0].operator.actions.length, 1);
+  assert.equal(pending.tasks[0].operator.actions[0].screenshotRef, 'action-001.png');
+  assert.equal(pending.tasks[0].operator.waiting.kind, 'login');
+
+  // 重新读取也要能拿到时间线（抽屉刷新不靠内存）。
+  const reloaded = new TaskManager({dataDir: manager.dataDir});
+  const persisted = await reloaded.summary('user-a');
+  assert.equal(persisted.tasks[0].operator.actions.length, 1);
+
+  resume();
+  const outcome = await running;
+  assert.deepEqual(calls, ['resumed']);
+  assert.equal(outcome.task.state, 'succeeded');
+  assert.equal(outcome.task.operator.state, 'succeeded');
+  assert.equal(outcome.task.operator.actions.length, 2);
+  assert.equal(outcome.task.operator.waiting, null);
+  assert.equal((await manager.summary('user-a')).badge, 0);
+});
+
 test('任务生命周期：等待用户登录/确认时进入 waiting_confirmation，徽标计入，确认后回到成功', async t => {
   const {manager} = await managerFor(t);
   const events = [];

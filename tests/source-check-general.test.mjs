@@ -4,11 +4,14 @@ import {mkdtemp, rm, mkdir, writeFile, readdir, readFile} from 'node:fs/promises
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {existsSync} from 'node:fs';
 import {createApp} from '../src/server/app.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {resolveSource, resolveSourceCheckTarget, SOURCE_CHECK_NOTES} from '../src/source-check/pipeline.mjs';
 import {normalizeSourceCheckUrl, sourceCheckEnabled, sourceCheckConfig, selectDetailHref} from '../src/source-check/config.mjs';
 import {buildExtractionPrompt, normalizeExtraction} from '../src/source-check/extract.mjs';
+import {operatorProfileDir} from '../src/config/paths.mjs';
+import {checkOperatorUrl, classifyDangerousAction, actionScreenshotName, OPERATOR_MAX_ACTIVE_MS, executeOperatorPlan, OPERATOR_LAUNCH_OPTIONS} from '../src/source-check/operator.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
@@ -118,6 +121,489 @@ test('抽取默认值跟随来源：任意源不硬套西南财大默认', () =>
   assert.equal(arbitrary.events[0].city, '');
   assert.equal(arbitrary.events[0].kind, '');
   assert.ok(!buildExtractionPrompt({name: '任意网页'} ).includes('西南财经大学'), '任意源 prompt 不硬编码西南财大');
+});
+
+// ---- operator 核心 ----
+
+test('operator profile：每个用户一个持久目录，放在 users/<id>/profile', () => {
+  const dir = operatorProfileDir('/data', 'user-a');
+  assert.equal(dir, join('/data', 'users', 'user-a', 'profile'));
+  assert.equal(operatorProfileDir('/data', 'user-a'), operatorProfileDir('/data', 'user-a'), '同一用户稳定复用');
+  assert.notEqual(operatorProfileDir('/data', 'user-a'), operatorProfileDir('/data', 'user-b'));
+  assert.throws(() => operatorProfileDir('/data', '../escape'), /无效的用户身份/);
+  assert.equal(OPERATOR_MAX_ACTIVE_MS, 10 * 60 * 1000, '单次操作硬上限 10 分钟');
+});
+
+test('operator URL 策略：只允许 http/https，拒绝特殊 scheme 与字面私网', () => {
+  assert.equal(checkOperatorUrl('https://career.uibe.edu.cn/zhaopin/').ok, true);
+  assert.equal(checkOperatorUrl('https://career.uibe.edu.cn/zhaopin/').url, 'https://career.uibe.edu.cn/zhaopin/');
+  assert.equal(checkOperatorUrl('http://job3.swufe.edu.cn/list').ok, true);
+  for (const url of [
+    'file:///C:/Windows/win.ini',
+    'chrome://settings',
+    'edge://version',
+    'about:blank',
+    'javascript:alert(1)',
+    'data:text/html,hi',
+    'blob:https://x/abc',
+    'view-source:https://x/',
+    'ftp://career.uibe.edu.cn/'
+  ]) {
+    const out = checkOperatorUrl(url);
+    assert.equal(out.ok, false, url + ' 必须拒绝');
+    assert.equal(out.code, 'OPERATOR_URL_BLOCKED');
+  }
+  for (const url of ['http://127.0.0.1:4189/', 'http://localhost:3000/', 'http://10.0.0.5/', 'http://192.168.1.10/', 'http://169.254.169.254/', 'http://[::1]/']) {
+    assert.equal(checkOperatorUrl(url).ok, false, url + ' 私网必须拒绝');
+  }
+  assert.equal(checkOperatorUrl('https://career.uibe.edu.cn/').ok, true, '公网不受影响');
+});
+
+test('operator 危险动作：投递/支付/删除/退出/提交表单命中硬确认，普通点击不命中', () => {
+  const cases = [
+    [{action: 'click', target: '#apply', text: '投递简历'}, 'apply'],
+    [{action: 'click', target: '#buy', text: '立即支付'}, 'payment'],
+    [{action: 'click', target: '#del', text: '删除这条记录'}, 'delete'],
+    [{action: 'click', target: '#logout', text: '退出登录'}, 'logout'],
+    [{action: 'submit', target: 'form#job', text: '提交表单'}, 'submit'],
+    [{action: 'click', target: '#send', text: '提交'}, 'submit']
+  ];
+  for (const [step, kind] of cases) {
+    const out = classifyDangerousAction(step);
+    assert.equal(out.dangerous, true, JSON.stringify(step) + ' 应命中硬确认');
+    assert.equal(out.kind, kind);
+    assert.ok(out.reason);
+  }
+  for (const step of [
+    {action: 'click', target: '#next', text: '下一页'},
+    {action: 'goto', url: 'https://career.uibe.edu.cn/list'},
+    {action: 'fill', target: '#q', value: '招聘'},
+    {action: 'evaluate', script: 'document.title'}
+  ]) {
+    assert.equal(classifyDangerousAction(step).dangerous, false, JSON.stringify(step) + ' 不应误报');
+  }
+});
+
+test('operator 每步截图文件名稳定：action-001.png 起，按步号补零', () => {
+  assert.equal(actionScreenshotName(1), 'action-001.png');
+  assert.equal(actionScreenshotName(42), 'action-042.png');
+  assert.match(actionScreenshotName(1), /^action-\d{3}\.png$/);
+});
+
+
+function fakeOperatorPage({loginAfterGoto = false, title = '招聘列表', text = '双选会列表', onAfter = {}} = {}) {
+  const calls = [];
+  const handlers = new Map();
+  let currentUrl = 'https://career.example.edu.cn/list';
+  const page = {
+    calls,
+    handlers,
+    url: () => currentUrl,
+    setUrl: value => { currentUrl = String(value); },
+    title: async () => (loginAfterGoto && currentUrl.includes('/login') ? '登录' : title),
+    goto: async url => {
+      calls.push({action: 'goto', url});
+      currentUrl = loginAfterGoto ? 'https://career.example.edu.cn/login?redirect=/list' : url;
+      return null;
+    },
+    click: async selector => {
+      calls.push({action: 'click', selector});
+      if (onAfter[selector]) await onAfter[selector](page);
+    },
+    fill: async (selector, value) => { calls.push({action: 'fill', selector, value}); },
+    press: async (selector, key) => { calls.push({action: 'press', selector, key}); },
+    evaluate: async script => {
+      // detectOperatorPause 用函数读取页面文本，不算计划里的一步。
+      if (typeof script !== 'function') calls.push({action: 'evaluate', script});
+      return text;
+    },
+    screenshot: async ({path}) => { calls.push({action: 'screenshot', path}); await writeFile(path, PNG); },
+    waitForTimeout: async ms => { calls.push({action: 'wait', ms}); await wait(ms); },
+    on: (name, handler) => { if (!handlers.has(name)) handlers.set(name, []); handlers.get(name).push(handler); return page; },
+    emit: async (name, value) => { for (const handler of handlers.get(name) || []) await handler(value); }
+  };
+  return page;
+}
+
+function fakeOperatorLauncher(page, capture) {
+  const context = {
+    pages: () => [page],
+    newPage: async () => page,
+    route: async () => {},
+    on: () => {},
+    close: async () => { capture.closed = true; }
+  };
+  const launch = async options => {
+    capture.options = options;
+    return context;
+  };
+  return launch;
+}
+
+test('operator 执行：persistent profile + 可见窗口 + 每步 action.jsonl/截图/证据', {timeout: 30000}, async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-operator-run-'));
+  t.after(() => rm(dir, {recursive: true, force: true}));
+  const page = fakeOperatorPage();
+  const capture = {};
+  const events = [];
+  const evidence = [];
+  const phases = [];
+  const evidenceDir = join(dir, 'evidence');
+  const out = await executeOperatorPlan({
+    profileDir: operatorProfileDir(dir, 'user-a'),
+    evidenceDir,
+    taskId: '11111111-1111-4111-8111-111111111111',
+    steps: [
+      {action: 'goto', url: 'https://career.example.edu.cn/list'},
+      {action: 'evaluate', script: 'document.title'},
+      {action: 'screenshot', label: '列表页'}
+    ],
+    launch: fakeOperatorLauncher(page, capture),
+    emit: event => events.push(event),
+    addEvidence: entry => evidence.push(entry),
+    setPhase: text => phases.push(text),
+    askHuman: async () => { throw new Error('普通步骤不应触发人工接管'); }
+  });
+
+  assert.equal(out.ok, true);
+  assert.equal(capture.closed, true, '任务收尾必须关闭浏览器上下文');
+  assert.equal(capture.options.profileDir, operatorProfileDir(dir, 'user-a'));
+  assert.equal(capture.options.options.headless, false, '必须可见窗口登录');
+  assert.equal(capture.options.options.acceptDownloads, false, '禁止下载');
+  assert.deepEqual(capture.options.options.permissions, ['clipboard-read', 'clipboard-write'], '允许剪贴板');
+  assert.equal(OPERATOR_LAUNCH_OPTIONS.headless, false);
+
+  const log = (await readFile(join(evidenceDir, 'action.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(log.length, 3, '每步一条动作记录');
+  assert.deepEqual(log.map(item => item.step), [1, 2, 3]);
+  assert.deepEqual(log.map(item => item.action), ['goto', 'evaluate', 'screenshot']);
+  for (const item of log) {
+    for (const key of ['step', 'action', 'target', 'url', 'startedAt', 'durationMs', 'result', 'screenshotRef']) {
+      assert.ok(Object.hasOwn(item, key), 'action.jsonl 缺字段：' + key);
+    }
+    assert.equal(item.result, 'ok');
+    assert.match(item.screenshotRef, /^action-\d{3}\.png$/);
+    assert.ok(Number.isFinite(Date.parse(item.startedAt)));
+    assert.ok(Number.isFinite(item.durationMs));
+    assert.equal(item.url, 'https://career.example.edu.cn/list');
+  }
+  const files = (await readdir(evidenceDir)).sort();
+  assert.deepEqual(files, ['action-001.png', 'action-002.png', 'action-003.png', 'action.jsonl']);
+  for (let step = 1; step <= 3; step += 1) {
+    assert.ok((await readFile(join(evidenceDir, actionScreenshotName(step)))).length > 0, '每步截图必须落盘');
+  }
+  assert.equal(evidence.length, 3, '每步都要进任务证据');
+  assert.match(evidence[0].url, /^\/api\/source-check\/evidence\?taskId=/);
+  assert.equal(events.filter(event => event.type === 'operator_action').length, 3);
+  assert.ok(phases.some(text => /步骤 1/.test(text)));
+});
+
+test('operator 人工接管：登录页暂停 waiting_login，处理后续跑且不重跑停点前的步骤', {timeout: 30000}, async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-operator-login-'));
+  t.after(() => rm(dir, {recursive: true, force: true}));
+  const page = fakeOperatorPage({loginAfterGoto: true});
+  const capture = {};
+  const human = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const running = executeOperatorPlan({
+    profileDir: operatorProfileDir(dir, 'user-a'),
+    evidenceDir: join(dir, 'evidence'),
+    taskId: '22222222-2222-4222-8222-222222222222',
+    steps: [
+      {action: 'goto', url: 'https://career.example.edu.cn/list'},
+      {action: 'evaluate', script: 'document.title'},
+      {action: 'screenshot', label: '登录后的列表'}
+    ],
+    launch: fakeOperatorLauncher(page, capture),
+    emit: () => {},
+    addEvidence: async () => {},
+    askHuman: async info => { human.push(info); await gate; return {action: 'resume'}; }
+  });
+
+  await waitFor(() => human.length > 0);
+  assert.equal(human[0].state, 'waiting_login');
+  assert.equal(human[0].kind, 'login');
+  assert.match(human[0].reason, /登录/);
+  assert.equal(page.calls.filter(call => call.action === 'goto').length, 1);
+  assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 0, '暂停期间不能继续后续步骤');
+  page.setUrl('https://career.example.edu.cn/list');
+  release();
+  const out = await running;
+  assert.equal(out.ok, true);
+  assert.equal(page.calls.filter(call => call.action === 'goto').length, 1, '续跑不重跑已完成的步骤');
+  assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 1);
+  const log = (await readFile(join(dir, 'evidence', 'action.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(log.length, 3);
+  assert.equal(log[0].result, 'paused');
+  assert.match(log[0].reason, /登录/);
+  assert.equal(log[1].result, 'ok');
+});
+
+test('operator 硬确认：投递命中等你确认；拒绝不点击，接受才点击', {timeout: 30000}, async t => {
+  for (const decision of ['reject', 'accept']) {
+    const dir = await mkdtemp(join(tmpdir(), 'zx-operator-confirm-'));
+    t.after(() => rm(dir, {recursive: true, force: true}));
+    const page = fakeOperatorPage();
+    const human = [];
+    const out = await executeOperatorPlan({
+      profileDir: operatorProfileDir(dir, 'user-a'),
+      evidenceDir: join(dir, 'evidence'),
+      taskId: '33333333-3333-4333-8333-333333333333',
+      steps: [
+        {action: 'click', target: '#apply', text: '投递简历'},
+        {action: 'evaluate', script: 'document.title'}
+      ],
+      launch: fakeOperatorLauncher(page, {}),
+      emit: () => {},
+      addEvidence: async () => {},
+      askHuman: async info => { human.push(info); return {action: 'resume', decision}; }
+    });
+    assert.equal(out.ok, true);
+    assert.equal(human.length, 1);
+    assert.equal(human[0].state, 'waiting_confirmation');
+    assert.equal(human[0].confirmKind, 'apply');
+    assert.match(human[0].reason, /投递|确认/);
+    const clickCalls = page.calls.filter(call => call.action === 'click');
+    if (decision === 'reject') {
+      assert.equal(clickCalls.length, 0, '拒绝后不能执行危险点击');
+      const log = (await readFile(join(dir, 'evidence', 'action.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+      assert.equal(log[0].result, 'rejected');
+    } else {
+      assert.equal(clickCalls.length, 1, '接受后才执行危险点击');
+    }
+    assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 1, '确认后继续执行计划');
+  }
+});
+
+test('operator 时间上限：单次到 10 分钟上限暂停 waiting_human，续跑后继续而不是判失败', {timeout: 30000}, async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-operator-timeout-'));
+  t.after(() => rm(dir, {recursive: true, force: true}));
+  const page = fakeOperatorPage();
+  const human = [];
+  const out = await executeOperatorPlan({
+    profileDir: operatorProfileDir(dir, 'user-a'),
+    evidenceDir: join(dir, 'evidence'),
+    taskId: '44444444-4444-4444-8444-444444444444',
+    maxActiveMs: 40,
+    steps: [
+      {action: 'wait', ms: 80},
+      {action: 'evaluate', script: 'document.title'}
+    ],
+    launch: fakeOperatorLauncher(page, {}),
+    emit: () => {},
+    addEvidence: async () => {},
+    askHuman: async info => { human.push(info); return {action: 'resume'}; }
+  });
+  assert.equal(out.ok, true);
+  assert.equal(human.length, 1);
+  assert.equal(human[0].state, 'waiting_human');
+  assert.equal(human[0].kind, 'timeout');
+  assert.match(human[0].reason, /10 分钟|上限/);
+  assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 1, '暂停后继续执行剩余步骤');
+});
+
+test('operator 禁止下载/上传：命中即暂停，人工处理后跳过该步并留证据', {timeout: 30000}, async t => {
+  for (const [selector, eventName, kind] of [['#upload', 'filechooser', 'upload'], ['#download', 'download', 'download']]) {
+    const dir = await mkdtemp(join(tmpdir(), 'zx-operator-policy-'));
+    t.after(() => rm(dir, {recursive: true, force: true}));
+    const page = fakeOperatorPage({
+      onAfter: {
+        [selector]: async target => target.emit(eventName, eventName === 'download'
+          ? {suggestedFilename: () => 'x.pdf', cancel: async () => {}}
+          : {setFiles: async () => {}})
+      }
+    });
+    const human = [];
+    const out = await executeOperatorPlan({
+      profileDir: operatorProfileDir(dir, 'user-a'),
+      evidenceDir: join(dir, 'evidence'),
+      taskId: '55555555-5555-4555-8555-555555555555',
+      steps: [{action: 'click', target: selector, text: '普通按钮'}, {action: 'evaluate', script: 'document.title'}],
+      launch: fakeOperatorLauncher(page, {}),
+      emit: () => {},
+      addEvidence: async () => {},
+      askHuman: async info => { human.push(info); return {action: 'resume'}; }
+    });
+    assert.equal(out.ok, true);
+    assert.equal(human.length, 1, selector + ' 应触发一次人工接管');
+    assert.equal(human[0].state, 'waiting_human');
+    assert.equal(human[0].kind, 'policy');
+    assert.match(human[0].reason, new RegExp(kind === 'upload' ? '上传' : '下载'));
+    const log = (await readFile(join(dir, 'evidence', 'action.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(log[0].result, 'blocked');
+    assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 1);
+  }
+});
+
+test('operator 任意 Playwright：程序内注入的步骤可以直接拿 page 执行', {timeout: 30000}, async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-operator-playwright-'));
+  t.after(() => rm(dir, {recursive: true, force: true}));
+  const page = fakeOperatorPage();
+  const out = await executeOperatorPlan({
+    profileDir: operatorProfileDir(dir, 'user-a'),
+    evidenceDir: join(dir, 'evidence'),
+    taskId: '66666666-6666-4666-8666-666666666666',
+    steps: [{action: 'playwright', label: '自定义 Playwright', perform: async ({page: target}) => { await target.click('#custom'); }}],
+    launch: fakeOperatorLauncher(page, {}),
+    emit: () => {},
+    addEvidence: async () => {},
+    askHuman: async () => { throw new Error('普通自定义步骤不应暂停'); }
+  });
+  assert.equal(out.ok, true);
+  assert.deepEqual(page.calls.filter(call => call.action === 'click'), [{action: 'click', selector: '#custom'}]);
+  const log = (await readFile(join(dir, 'evidence', 'action.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(log[0].action, 'playwright');
+  assert.equal(log[0].result, 'ok');
+});
+
+// ---- operator HTTP 任务 ----
+
+test('operator HTTP：AI 采集打开可见 profile，登录暂停后点继续从停点续跑，动作/截图可取证', {timeout: 60000}, async t => {
+  const page = fakeOperatorPage({loginAfterGoto: true});
+  const capture = {};
+  const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}});
+  const user = await register(app, 'operator-http-user');
+  const listUrl = 'https://mp.weixin.qq.com/s/example';
+  const loginUrl = 'https://mp.weixin.qq.com/login';
+
+  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {
+    url: listUrl,
+    steps: [
+      {action: 'goto', url: listUrl},
+      {action: 'evaluate', script: 'document.title'},
+      {action: 'screenshot', label: '文章列表'}
+    ]
+  });
+  assert.equal(started.ok, true);
+  assert.match(started.taskId, /^[a-f0-9-]{36}$/);
+  assert.match(started.sessionId, /^[a-f0-9-]{36}$/);
+  assert.match(started.title, /来源操作/);
+  assert.equal(started.mode, 'operator');
+
+  const waiting = await waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', user.cookie);
+    return listed.tasks[0]?.state === 'waiting_login' ? listed : null;
+  });
+  assert.equal(waiting.badge, 1, '等待登录要计入顶栏徽标');
+  const task = waiting.tasks[0];
+  assert.equal(task.operator.waiting.kind, 'login');
+  assert.match(task.operator.waiting.reason, /登录/);
+  assert.equal(task.operator.actions.length, 1);
+  assert.equal(task.operator.actions[0].result, 'paused');
+  assert.equal(task.operator.actions[0].action, 'goto');
+  assert.equal(task.operator.actions[0].screenshotRef, 'action-001.png');
+
+  // profile 是应用自己的 per-user 持久目录，启动参数可见、禁下载、允许剪贴板。
+  const profileDir = join(app.dataDir, 'users', user.user.id, 'profile');
+  assert.equal(capture.options.profileDir, profileDir);
+  assert.ok(existsSync(profileDir), 'persistent profile 目录必须存在');
+  assert.equal(capture.options.options.headless, false);
+  assert.equal(capture.options.options.acceptDownloads, false);
+  assert.deepEqual(capture.options.options.permissions, ['clipboard-read', 'clipboard-write']);
+
+  // 动作日志与每步截图走任务证据接口，只对本人开放。
+  const logResponse = await fetch(app.origin + '/api/source-check/evidence?taskId=' + task.id + '&file=action.jsonl', {headers: {'x-career-token': app.token, cookie: user.cookie}});
+  assert.equal(logResponse.status, 200);
+  assert.match(logResponse.headers.get('content-type'), /application\/json/);
+  const log = (await logResponse.text()).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(log.length, 1);
+  assert.equal(log[0].step, 1);
+  for (const key of ['step', 'action', 'target', 'url', 'startedAt', 'durationMs', 'result', 'screenshotRef']) assert.ok(Object.hasOwn(log[0], key));
+  const shotResponse = await fetch(app.origin + '/api/source-check/evidence?taskId=' + task.id + '&file=action-001.png', {headers: {'x-career-token': app.token, cookie: user.cookie}});
+  assert.equal(shotResponse.status, 200);
+  assert.equal(shotResponse.headers.get('content-type'), 'image/png');
+
+  // 用户点「已登录，继续」：不重跑第 1 步，从停点继续到计划完成。
+  page.setUrl(listUrl);
+  const resumed = await postJson(app, '/api/source-check/operator/continue', user.cookie, {taskId: task.id});
+  assert.equal(resumed.ok, true);
+  const finished = await waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', user.cookie);
+    return listed.tasks[0]?.state === 'succeeded' ? listed.tasks[0] : null;
+  });
+  assert.equal(finished.operator.state, 'succeeded');
+  assert.equal(finished.operator.actions.length, 3);
+  assert.deepEqual(finished.operator.actions.map(item => item.action), ['goto', 'evaluate', 'screenshot']);
+  assert.equal(page.calls.filter(call => call.action === 'goto').length, 1, '续跑不重跑登录前的步骤');
+  assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 1);
+  assert.equal(capture.closed, true, '任务完成后关闭浏览器上下文');
+  assert.equal((await getJson(app, '/api/tasks', user.cookie)).badge, 0);
+});
+
+test('operator HTTP：危险动作硬确认可拒绝/接受；等待中可停止任务', {timeout: 60000}, async t => {
+  const page = fakeOperatorPage();
+  const capture = {};
+  const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(page, capture)}});
+  const user = await register(app, 'operator-confirm-user');
+
+  const started = await postJson(app, '/api/source-check/operator/start', user.cookie, {
+    url: 'https://career.uibe.edu.cn/zhaopin/',
+    steps: [
+      {action: 'click', target: '#apply', text: '投递简历'},
+      {action: 'evaluate', script: 'document.title'}
+    ]
+  });
+  const pending = await waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', user.cookie);
+    return listed.tasks[0]?.state === 'waiting_confirmation' ? listed.tasks[0] : null;
+  });
+  assert.equal(pending.operator.waiting.kind, 'confirm');
+  assert.equal(pending.operator.waiting.confirmKind, 'apply');
+  assert.match(pending.operator.waiting.reason, /投递|确认/);
+
+  await postJson(app, '/api/source-check/operator/confirm', user.cookie, {taskId: started.taskId, decision: 'reject'});
+  const finished = await waitFor(async () => {
+    const listed = await getJson(app, '/api/tasks', user.cookie);
+    return listed.tasks[0]?.state === 'succeeded' ? listed.tasks[0] : null;
+  });
+  assert.equal(page.calls.filter(call => call.action === 'click').length, 0, '拒绝后不执行危险点击');
+  assert.equal(finished.operator.actions[0].result, 'rejected');
+  assert.equal(page.calls.filter(call => call.action === 'evaluate').length, 1, '拒绝后继续计划');
+
+  // 第二条任务：等待登录时停止，任务取消且浏览器关闭。
+  const page2 = fakeOperatorPage({loginAfterGoto: true});
+  const capture2 = {};
+  const app2 = await startApp(t, {operator: {launch: fakeOperatorLauncher(page2, capture2)}});
+  const user2 = await register(app2, 'operator-stop-user');
+  await postJson(app2, '/api/source-check/operator/start', user2.cookie, {
+    url: 'https://mp.weixin.qq.com/s/x',
+    steps: [{action: 'goto', url: 'https://mp.weixin.qq.com/s/x'}, {action: 'screenshot', label: '列表'}]
+  });
+  const paused = await waitFor(async () => {
+    const listed = await getJson(app2, '/api/tasks', user2.cookie);
+    return listed.tasks[0]?.state === 'waiting_login' ? listed.tasks[0] : null;
+  });
+  const stopped = await postJson(app2, '/api/tasks/stop', user2.cookie, {taskId: paused.id});
+  assert.equal(stopped.ok, true);
+  const cancelled = await waitFor(async () => {
+    const listed = await getJson(app2, '/api/tasks', user2.cookie);
+    return listed.tasks[0]?.state === 'cancelled' ? listed.tasks[0] : null;
+  });
+  assert.equal(cancelled.state, 'cancelled');
+  assert.equal(capture2.closed, true, '停止后必须关闭浏览器上下文');
+});
+
+test('operator HTTP：非法步骤/私网地址返回 400，不排队任务；跨用户不能续跑别人任务', {timeout: 30000}, async t => {
+  const app = await startApp(t, {operator: {launch: fakeOperatorLauncher(fakeOperatorPage(), {})}});
+  const user = await register(app, 'operator-invalid-user');
+  const badStep = await postJson(app, '/api/source-check/operator/start', user.cookie, {
+    url: 'https://career.uibe.edu.cn/',
+    steps: [{action: 'goto', url: 'file:///C:/Windows/win.ini'}]
+  }, 400);
+  assert.equal(badStep.code, 'INVALID_OPERATOR_STEP');
+  const privateUrl = await postJson(app, '/api/source-check/operator/start', user.cookie, {url: 'http://127.0.0.1:4189/'}, 400);
+  assert.equal(privateUrl.code, 'INVALID_URL');
+  const unknownAction = await postJson(app, '/api/source-check/operator/start', user.cookie, {
+    url: 'https://career.uibe.edu.cn/',
+    steps: [{action: 'drag', target: '#x'}]
+  }, 400);
+  assert.equal(unknownAction.code, 'INVALID_OPERATOR_STEP');
+  assert.equal((await getJson(app, '/api/tasks', user.cookie)).tasks.length, 0, '非法请求不产生任务');
+
+  const other = await register(app, 'operator-other-user');
+  const continueOther = await postJson(app, '/api/source-check/operator/continue', other.cookie, {taskId: '99999999-9999-4999-8999-999999999999'}, 404);
+  assert.equal(continueOther.code, 'OPERATOR_NOT_WAITING');
 });
 
 // ---- 任意 URL 端到端 ----

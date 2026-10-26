@@ -16,6 +16,16 @@ export function legacyDataDir(root) {
   return join(root, '.data');
 }
 
+// 应用内浏览器的 per-user 持久 profile：登录态只存在这里，不提取 cookie/密码。
+// 目录必须在 users/<id> 下，拒绝用路径片段逃逸到其他用户或数据目录之外。
+export function operatorProfileDir(dataDir, userId) {
+  if (!dataDir) throw new Error('operator profile 需要 dataDir');
+  if (!userId || /[\\/]/.test(String(userId)) || String(userId) === '.' || String(userId) === '..') {
+    throw new Error('无效的用户身份');
+  }
+  return join(String(dataDir), 'users', String(userId), 'profile');
+}
+
 // 命令行默认写入网页里 owner 账号的数据目录；只有一个账号且目录已存在时才下钻。
 // 三个 CLI 共用，避免各自复制一份判断逻辑。
 export function defaultUserDataDir({base = resolveDataDir(), readFile = readFileSync, exists = existsSync} = {}) {
