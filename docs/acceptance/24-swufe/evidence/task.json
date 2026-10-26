@@ -1,7 +1,7 @@
 {
-  "id": "0d986efe-4d0e-4573-a6f9-e9203cd205f4",
-  "userId": "cf09f3c1-c327-4139-829b-581061bccae0",
-  "sessionId": "78ddf4bc-c7b3-476b-8543-73421eaa5767",
+  "id": "1af5e208-cd2f-4a69-af63-06056e95d89b",
+  "userId": "7b8c1684-aba8-4f7c-aa5c-a591556be94d",
+  "sessionId": "426f4499-11d2-42c9-bca7-f6235423a3e4",
   "title": "来源校对 · 西南财经大学 · 双选会",
   "sourceName": "西南财经大学",
   "state": "succeeded",
@@ -17,52 +17,52 @@
   "plan": null,
   "evidence": [
     {
-      "id": "61657700-b43b-4eaf-8c2e-113a8946dd59",
+      "id": "95fa0338-0d62-4e14-91dc-319125eaeb97",
       "kind": "note",
       "label": "采集器已禁用（robots 限制），改用应用内浏览器读取",
       "detail": "明确不调用采集器，也不向目标站发 fetchText / HTTP 抓取；只由应用内浏览器打开两次页面。",
       "url": "",
-      "at": "2026-10-26T03:07:15.986Z"
+      "at": "2026-10-26T03:31:07.953Z"
     },
     {
-      "id": "70d23c99-ffb7-4cda-b7f9-dfaac02af381",
+      "id": "4e63c002-8c46-428b-b87c-0df5f32a85d9",
       "kind": "screenshot",
       "label": "截图 1 · 列表页：现场双选会-西财智慧就业系统",
-      "detail": "URL https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm · 2026-10-26T03:07:18.707Z · 视口 1366×900",
-      "url": "/api/source-check/evidence?taskId=0d986efe-4d0e-4573-a6f9-e9203cd205f4&file=01-list.png",
-      "at": "2026-10-26T03:07:22.254Z"
+      "detail": "URL https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm · 2026-10-26T03:31:10.634Z · 视口 1366×900",
+      "url": "/api/source-check/evidence?taskId=1af5e208-cd2f-4a69-af63-06056e95d89b&file=01-list.png",
+      "at": "2026-10-26T03:31:14.217Z"
     },
     {
-      "id": "8141960f-1796-4208-be83-34f1e447b6b2",
+      "id": "f0e24cab-7f08-4e04-a0c6-d5b7ef728468",
       "kind": "screenshot",
       "label": "截图 2 · 活动详情：西南财经大学2026年秋季大型双选会-现场双选会-西财智慧就业系统",
-      "detail": "URL https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm · 2026-10-26T03:07:21.881Z · 视口 1366×900",
-      "url": "/api/source-check/evidence?taskId=0d986efe-4d0e-4573-a6f9-e9203cd205f4&file=02-detail.png",
-      "at": "2026-10-26T03:07:22.256Z"
+      "detail": "URL https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm · 2026-10-26T03:31:13.832Z · 视口 1366×900",
+      "url": "/api/source-check/evidence?taskId=1af5e208-cd2f-4a69-af63-06056e95d89b&file=02-detail.png",
+      "at": "2026-10-26T03:31:14.219Z"
     },
     {
-      "id": "061c5fbc-a5f5-4eff-b20b-7682978da976",
+      "id": "26082b8d-3b00-4ee1-b65f-3e27f253b436",
       "kind": "extraction",
       "label": "抽取 JSON（联系方式已剔除）",
       "detail": "活动 3 · 单位 10",
-      "url": "/api/source-check/evidence?taskId=0d986efe-4d0e-4573-a6f9-e9203cd205f4&file=extraction.json",
-      "at": "2026-10-26T03:07:47.611Z"
+      "url": "/api/source-check/evidence?taskId=1af5e208-cd2f-4a69-af63-06056e95d89b&file=extraction.json",
+      "at": "2026-10-26T03:31:23.755Z"
     },
     {
-      "id": "27745406-d332-4d99-8fcd-4993e79e7324",
+      "id": "54128563-a521-489d-b11f-bbac05bbe218",
       "kind": "external_call",
       "label": "外部调用：claude-review · review（只读）",
-      "detail": "{\"requestId\":\"e02d876b-d2c2-4877-9785-1f3a4ae8f2c8\",\"status\":\"ok\",\"code\":\"\",\"era\":\"modern\",\"durationMs\":30023,\"retryable\":true,\"idempotency\":\"read_only\"}",
+      "detail": "{\"requestId\":\"ca4ef1e5-1c22-461f-8f06-30bb686c1c98\",\"status\":\"ok\",\"code\":\"\",\"era\":\"modern\",\"durationMs\":38055,\"retryable\":true,\"idempotency\":\"read_only\"}",
       "url": "",
-      "at": "2026-10-26T03:08:17.640Z"
+      "at": "2026-10-26T03:32:01.816Z"
     },
     {
-      "id": "b83e8c0d-37ca-4b2d-bf17-b135a8c3c1e4",
+      "id": "2afdeac3-ff85-4e8a-a094-2eae404ded19",
       "kind": "review",
-      "label": "外部 Agent 复核：5 个问题",
-      "detail": "projects[4] · company：公司名疑似截断：'四川百品众合餐饮发展集团有限公' 缺少'司'字\nprojects[8] · company：公司名疑似截断：'中国人民财产保险股份有限公司达' 缺少后续字符\nevents[1] · sourceUrl：与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误\nevents[2] · sourceUrl：与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误\nevents[0] · venue：地点'西南财经大学柳林校区柳林体育馆'中'柳林'重复，疑似笔误",
-      "url": "/api/source-check/evidence?taskId=0d986efe-4d0e-4573-a6f9-e9203cd205f4&file=review.json",
-      "at": "2026-10-26T03:08:17.642Z"
+      "label": "外部 Agent 复核：3 个问题",
+      "detail": "events[0] · sourceUrl：三个事件标题与日期各不相同，却共用同一详情页链接 https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm，疑似 sourceUrl 未按各事件详情页分别填写\nprojects[4] · company：公司名“四川百品众合餐饮发展集团有限公”疑似截断，缺少末尾“司”字\nprojects[8] · company：公司名“中国人民财产保险股份有限公司达”疑似截断不完整，缺少后续机构名称",
+      "url": "/api/source-check/evidence?taskId=1af5e208-cd2f-4a69-af63-06056e95d89b&file=review.json",
+      "at": "2026-10-26T03:32:01.817Z"
     }
   ],
   "drafts": [],
@@ -81,58 +81,46 @@
     "allUndone": false,
     "undoneBatches": 0,
     "pendingBatches": 1,
-    "updatedAt": "2026-10-26T03:08:17.730Z"
+    "updatedAt": "2026-10-26T03:32:01.903Z"
   },
   "fallback": null,
   "review": {
     "status": "issues",
-    "count": 5,
+    "count": 3,
     "issues": [
+      {
+        "row": "events[0]",
+        "field": "sourceUrl",
+        "issue": "三个事件标题与日期各不相同，却共用同一详情页链接 https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm，疑似 sourceUrl 未按各事件详情页分别填写",
+        "severity": "high"
+      },
       {
         "row": "projects[4]",
         "field": "company",
-        "issue": "公司名疑似截断：'四川百品众合餐饮发展集团有限公' 缺少'司'字",
+        "issue": "公司名“四川百品众合餐饮发展集团有限公”疑似截断，缺少末尾“司”字",
         "severity": "high"
       },
       {
         "row": "projects[8]",
         "field": "company",
-        "issue": "公司名疑似截断：'中国人民财产保险股份有限公司达' 缺少后续字符",
+        "issue": "公司名“中国人民财产保险股份有限公司达”疑似截断不完整，缺少后续机构名称",
         "severity": "high"
-      },
-      {
-        "row": "events[1]",
-        "field": "sourceUrl",
-        "issue": "与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误",
-        "severity": "medium"
-      },
-      {
-        "row": "events[2]",
-        "field": "sourceUrl",
-        "issue": "与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误",
-        "severity": "medium"
-      },
-      {
-        "row": "events[0]",
-        "field": "venue",
-        "issue": "地点'西南财经大学柳林校区柳林体育馆'中'柳林'重复，疑似笔误",
-        "severity": "low"
       }
     ],
     "raw": "",
     "agentLeg": "passed",
     "attempted": true,
     "agent": {
-      "id": "01a1762d-2e9f-7b5e-baa8-fe2cb9a738d6",
+      "id": "01a17643-08f6-7d8e-b5c8-2b35a27d4694",
       "name": "claude-review"
     },
     "tool": "review",
     "error": null,
-    "at": "2026-10-26T03:08:17.641Z"
+    "at": "2026-10-26T03:32:01.816Z"
   },
-  "createdAt": "2026-10-26T03:07:15.972Z",
-  "startedAt": "2026-10-26T03:07:15.981Z",
-  "updatedAt": "2026-10-26T03:08:17.723Z",
-  "finishedAt": "2026-10-26T03:08:17.723Z",
-  "durationMs": 61749
+  "createdAt": "2026-10-26T03:31:07.945Z",
+  "startedAt": "2026-10-26T03:31:07.950Z",
+  "updatedAt": "2026-10-26T03:32:01.898Z",
+  "finishedAt": "2026-10-26T03:32:01.898Z",
+  "durationMs": 53952
 }

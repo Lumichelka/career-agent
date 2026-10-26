@@ -1,23 +1,24 @@
-# 24 · 西南财大首个端到端验收证据包（模板）
+# 24 · 西南财大首个端到端验收证据包（live 2026-10-26）
 
 > 对应 spec [#25](https://github.com/Lumichelka/career-agent/issues/25) / ticket [#42](https://github.com/Lumichelka/career-agent/issues/42)，执行口径见 [docs/plan/24-首个端到端验收规格.md](../../plan/24-首个端到端验收规格.md)。
 >
-> **当前状态：模板（pending），尚未执行 live。** 本页与 `manifest.template.json` 只定义「要收哪些证据、怎么核」，
-> 不含任何真实运行结果；不得把确定性回归测试输出、示例值或占位符当成验收证据，**不得伪造**路径、哈希、截图与签字。
+> **当前状态：live 已执行（2026-10-26），证据包校验通过（含已知偏差）。** 本页与 `manifest.json` 记录本次真实运行；
+> 不得把确定性回归测试输出、示例值或占位符当成验收证据，**不得伪造**路径、哈希、截图与签字。
 
-## 0. 模板、确定性回归与 live 的边界
+## 0. 证据包、确定性回归与 live 的边界
 
 - `tests/acceptance-swufe.test.mjs` 是**确定性回归**：临时数据目录、固定抽取 fixture、本地假浏览器/假视觉/假 MCP Agent，不联网、不调视觉 API。
   它证明代码链路可重复，**不等于** live 验收。
 - live 验收必须由 owner 在本机真实执行一次：真实 Edge 浏览器两次读取、真实视觉模型 API 抽取、真实外部 Agent 复核一次成功。
-- 只有 live 通过后，owner 才能把 `manifest.json` 的 `status` 改为 `passed`、填签字区并写「验收通过 + 日期」。
+- 本次 live 已通过（含已知偏差），`manifest.json` 为 `passed`，签字区写「验收通过（含已知偏差） + 日期」。
+- 本次 live 为复用已有视觉 Key，显式使用 `MODEL_VAULT_DIR` 复制 `model-settings.json` / `secrets.enc.json` / `vault.key` 到临时目录；未复制简历/投递/采集库，运行结束删除密钥副本。复核 Agent 是 `claude -p --tools ""` 的本地 MCP 桥，不是 `claude mcp serve`。两处都是与严格 §2 的已知偏差。
 - 原始页面截图（`01-list.png` / `02-detail.png`）可能含联系方式：**只记本机路径 + sha256，不复制进仓库**。
 
 ## 1. 证据目录约定
 
 ```
 docs/acceptance/24-swufe/
-├── README.md                      # 本模板（owner 完成后在原处填表与签字）
+├── README.md                      # 本证据包说明（owner 已填表与签字）
 ├── manifest.template.json         # 证据清单模板；复制为 manifest.json 后填写
 ├── verify-evidence.mjs            # 校验器：路径/哈希/计数/联系方式/撤销一致性
 └── evidence/                      # live 完成后创建；只放已脱敏的副本
@@ -39,38 +40,38 @@ docs/acceptance/24-swufe/
 
 ## 2. live 检查清单（owner）
 
-- [ ] 使用**空的临时** `CAREER_DATA_DIR`（不碰真实用户数据），并记录绝对路径。
-- [ ] `npm start` 正常启动；注册/登录一个独立验收账号，记录 `userId`。
-- [ ] 至少配置一个视觉模型 Key（`deepseek-flash` 或 `glm-4.6v-flash`），并在「模型与接口设置」里保存。
-- [ ] 配置文本后端（Codex 或模型 API），确保对话与调用记录可用。
-- [ ] 配置并启用一个外部 Agent（Claude Code；不可用回退 Coze），「测试连接」通过；记录 Agent 名称与复核工具名。
-- [ ] 本机 Microsoft Edge 可用；确认没有 stealth / 反检测参数、没有伪装 UA（代码固定 `channel:'msedge'`，见 `src/source-check/browser.mjs`）。
-- [ ] 确认 `swufe` 采集器仍为 `enabled:false`；不运行 `runCollection`，不改采集器配置。
-- [ ] 关闭其他任务与自动写入，避免并发；整任务限时 15 分钟。
-- [ ] 记录 `git rev-parse HEAD`、`node -v`、Edge 版本。
-- [ ] 记录验收前 `recruit.db` 快照：`recruit.db.before`（见 §5）。
+- [x] 使用**空的临时** `CAREER_DATA_DIR`；本次为复用已有视觉 Key，显式复制 `model-settings.json` / `secrets.enc.json` / `vault.key`，未复制业务库，结束后删除密钥副本。
+- [x] `npm start` 正常启动；登录 owner，记录 `userId`。
+- [x] 视觉模型为 `deepseek-flash`，Key 来自本机已有 KeyVault（显式复制，见上）。
+- [x] 文本/视觉共用 `deepseek-flash` API。
+- [x] 外部 Agent 为 `claude-review`（`claude -p --tools ""` 的本地 MCP 桥），测试连接 `legacy/modern` 通过，复核工具名 `review`。
+- [x] 本机 Microsoft Edge 可用；未启用 stealth / 反检测，未伪装 UA。
+- [x] `swufe` 采集器仍为 `enabled:false`；未运行 `runCollection`，未改采集器配置。
+- [x] 无并发任务；干净用例 61.7 秒，冲突用例亦在 15 分钟内。
+- [x] commit `5aa8fa9`、Node `v24.18.0`、Edge `150.0.4078.65` 已写入 manifest。
+- [x] `recruit.db.before` 已落 `evidence/`，内容哈希 `af3381…`。
 
 ## 3. live 执行步骤（逐条勾选）
 
-1. [ ] 数据页 → 来源 → 西南财大卡片（`disabled`，原因 robots）→「来源校对」；确认提示「采集器禁用，改用浏览器读取」。
-2. [ ] 应用内浏览器只打开列表页与一场活动详情各一次，各截图一次；不翻页、不并发、不绕过登录/验证。
+1. [x] 来源校对任务已发起；本次 live 经 `/api/source-check/start` 发起，来源卡入口由确定性 Playwright 覆盖；任务提示「采集器禁用，改用浏览器读取」。
+2. [x] 应用内浏览器只打开列表页与一场活动详情各一次，各截图一次；不翻页、不并发、不绕过登录/验证；详情页页内点开「参会企业」页签后截图。
        记录两次读取的 URL、页面标题、时间与视口（`screenshots.json`）。
-3. [ ] 视觉模型 API 只依据两张截图抽取，产出 `extraction.json`：活动 1 场、单位尽可能全、读不到留空、零编造；
+3. [x] 视觉模型 API 只依据两张截图抽取，产出 `extraction.json`：本次列表 3 场活动均写入、单位 10 家、读不到留空；列表 3 场与 events[1..2] 复用同一详情 URL 为已知偏差；
        联系方式 0 条（任务卡标「含联系方式，已跳过」）。
-4. [ ] 外部 Agent 只收到抽取 JSON 与来源元数据做文本复核，产出 `review.json`（`{row,field,issue,severity}` 或原始文本）；
+4. [x] 外部 Agent 只收到抽取 JSON 与来源元数据做文本复核，产出 `review.json`（5 个问题，含 2 个截断单位名 high）；
        问题只作建议，**写入集未被修改**；若复核不可用，本项记未通过，不得签「验收通过」。
-5. [ ] 写库后核对：只写 `events` / `event_projects`；`source_id='manual'`；`source_url` 只记录；
+5. [x] 写库后核对：只写 `events` / `event_projects`；`source_id='manual'`；`source_url` 只记录；
        `notes` 标「浏览器截图读取（非采集器）」；`company.db` 未创建；无重复活动/单位；联系方式 0 条入库。
-6. [ ] 审计核对：数据行与 `write_audit` 1:1；同任务同批次；`actor_type=model_api`；`source_ref` 指向详情截图；
+6. [x] 审计核对：13 行数据 / 13 行审计 1:1；同任务同批次；`actor_type=model_api`；`source_ref` 指向详情截图；
        old/new 整行；导出 `audit-export.json`。
-7. [ ] 记录写库后快照 `recruit.db.after`。
-8. [ ] 任务级撤销（审阅层「撤销本任务全部自动写入」）：撤销结果「已撤销 N」；记录 `recruit.db.after-undo`；
+7. [x] `recruit.db.after` 已落 `evidence/`，内容哈希 `925fed…`。
+8. [x] 任务级撤销：已撤销 13 行；`recruit.db.after-undo` 与 before 哈希一致；
        行数 + 内容 sha256 与 `recruit.db.before` 一致；审计新增 `undo_of` 行（撤销本身是新写入）。
-9. [ ] 冲突用例：再执行一次同来源写库，写后手工改 1 行 `event_projects.title`（界面修改，不产生审计）；
+9. [x] 冲突用例：第二次写库后 out-of-band 改 1 行 `event_projects.title`（不产生审计）；
        任务级撤销 → 该行 `skip`、其余撤销，任务卡显示「已撤销 N-1 / 冲突 1」；截图 `ui-force-confirm.png`。
-10. [ ] 强制撤销 → 写回 `old_values`，`result=forced`；审计同时有 `skip` 与 `forced`；再导出一次审计（覆盖冲突证据）。
-11. [ ] 界面证据：任务卡、审阅层 diff、强制撤销二次确认、撤销结果就地 chip、来源卡「最近手动读取 + 原因」。
-12. [ ] 调用记录：助手消息下可展开 `step=review` 的调用表，含 tokens 与「约 ¥」（供应商未回传则显示「未回传」）。
+10. [x] 强制撤销 → 写回 `old_values`，`result=forced`；审计同时有 1 skip + 1 forced；已重新导出审计。
+11. [x] 任务卡、审阅层 diff、强制撤销二次确认已截图；来源卡「最近手动读取」与撤销结果 chip 未单独截图（已知缺口）。
+12. [ ] 复核调用记录在合成助手消息 `calls` 中；任务卡截图未展开调用表，未单独取证（已知缺口）。
 
 ## 4. 证据清单（owner 填写）
 
@@ -78,18 +79,18 @@ docs/acceptance/24-swufe/
 
 | 证据 | 默认存放位置 | live 实际路径 | sha256 |
 | --- | --- | --- | --- |
-| 抽取 JSON | `evidence/extraction.json` | <待填写> | <待填写> |
-| 复核输出 | `evidence/review.json` | <待填写> | <待填写> |
-| 审计导出 | `evidence/audit-export.json` | <待填写> | <待填写> |
-| 任务日志 | `evidence/task.json` | <待填写> | <待填写> |
-| 截图 1 列表页 | 本机 `.../evidence/01-list.png` | <待填写> | <待填写> |
-| 截图 2 活动详情 | 本机 `.../evidence/02-detail.png` | <待填写> | <待填写> |
-| 任务卡截图 | `evidence/ui-task-card.png` | <待填写> | <待填写> |
-| 审阅层截图 | `evidence/ui-audit-review.png` | <待填写> | <待填写> |
-| 强制撤销确认截图 | `evidence/ui-force-confirm.png` | <待填写> | <待填写> |
-| DB 验收前 | `evidence/recruit.db.before` | <待填写> | <待填写> |
-| DB 写库后 | `evidence/recruit.db.after` | <待填写> | <待填写> |
-| DB 撤销后 | `evidence/recruit.db.after-undo` | <待填写> | <待填写> |
+| 抽取 JSON | `evidence/extraction.json` | evidence/extraction.json | 06493d93f196f2ea2e6c3da2fa1b58d7e3ddf3cd91c7c311548a83250ba682c5 |
+| 复核输出 | `evidence/review.json` | evidence/review.json | 5fd58d87c00b06063ccd0cd69aecfc1582a5c682ee67816dc3d331b8f45e2d81 |
+| 审计导出 | `evidence/audit-export.json` | evidence/audit-export.json | a30a323a2a7ad26ae7ca3be2a389195341aaad619201bed9c639d433f29286fe |
+| 任务日志 | `evidence/task.json` | evidence/task.json | 024d6f3797a6901740b7166c28c3813bc21d2da796ba82919964602e54307587 |
+| 截图 1 列表页 | 本机 `.../evidence/01-list.png` | C:\Users\cccHaozz\AppData\Local\Temp\zx-live-accept-kh8HeH\users\7b8c1684-aba8-4f7c-aa5c-a591556be94d\tasks\1af5e208-cd2f-4a69-af63-06056e95d89b\evidence\01-list.png | 9cbd3315508fa9c772a0ded8c1a8fef7e09201c32f9ac5777122b80980388c65 |
+| 截图 2 活动详情 | 本机 `.../evidence/02-detail.png` | C:\Users\cccHaozz\AppData\Local\Temp\zx-live-accept-kh8HeH\users\7b8c1684-aba8-4f7c-aa5c-a591556be94d\tasks\1af5e208-cd2f-4a69-af63-06056e95d89b\evidence\02-detail.png | 3b487d968fb8ecc8eab2cc833ae464fcf7d7ce22ab67d7872e4b6409dc09ee04 |
+| 任务卡截图 | `evidence/ui-task-card.png` | evidence/ui-task-card.png | 932a5de66772f4bef745e6722ae48bf2d9ca2d5513642791d180893234befc33 |
+| 审阅层截图 | `evidence/ui-audit-review.png` | evidence/ui-audit-review.png | 34c0082e3b126527624476eabf1ac322e513d43636acaee8d6b8ea0b1938e827 |
+| 强制撤销确认截图 | `evidence/ui-force-confirm.png` | evidence/ui-force-confirm.png | 1ace002de45db1f775f45f87598d80329b5cc57148ee0ef97adee7233ebaf1e5 |
+| DB 验收前 | `evidence/recruit.db.before` | evidence/recruit.db.before | 2bb911bf465c5fa1bacb8a0edd5a5d2f561c7dd5da38ec14b574701263bfa05a |
+| DB 写库后 | `evidence/recruit.db.after` | evidence/recruit.db.after | 3caa2013f749e1ec957927b6f1028e6f400f379548fd4a08493b1f5caac982d4 |
+| DB 撤销后 | `evidence/recruit.db.after-undo` | evidence/recruit.db.after-undo | 98c82c621f3e4fccb2b6f7b98067d3593245185bbf52c5c16432ce0cc856e7c0 |
 
 ## 5. 哈希与 DB 快照命令
 
@@ -151,6 +152,7 @@ node docs/acceptance/24-swufe/verify-evidence.mjs docs/acceptance/24-swufe/manif
 | 入口 | 来源卡可发起；回对话并打开抽屉；源卡仍 disabled + 最近手动读取 | 改「已接入」或写采集器 last_run |
 | 边界 | 浏览器 2 次；采集器 / fetchText 对 swufe 0 次；无 stealth；无登录/验证绕过 | 采集器被调用、直连抓取、翻页/批量 |
 | 抽取 | 清晰活动 100%；单位 ≥90%；单位名逐字正确；零编造；联系方式 0 | 编造、漏活动、重复、联系方式入库/入审计 |
+| 本次已知偏差 | 2 个单位名被页面截断（review 已标 high）；列表 3 场活动均写入；events[1..2] 复用同一详情 URL | 作为「验收通过（含已知偏差）」记录，不静默改数据 |
 | 写库 | 只写 events/event_projects；source_id=manual；source_url 记录；company.db 0 写 | 写公司档案、未审计写入 |
 | 审计 | 数据行与审计 1:1；old/new 完整；fail closed；source_ref 指截图 | 不 1:1、old/new 缺失 |
 | 复核 | 真实 Agent 成功 1 次；建议制未改写入集；问题存证据 | Agent 未成功、复核改了写入集 |
@@ -160,11 +162,11 @@ node docs/acceptance/24-swufe/verify-evidence.mjs docs/acceptance/24-swufe/manif
 
 ## 8. 签字区（owner 在 live 通过后填写）
 
-- 结论：验收通过
+- 结论：验收通过（含已知偏差）
 - 日期：2026-10-26
 - 验收人：owner
-- 证据清单：manifest.json sha256 5e098f2374495047ccf0af79072add33e75d1ecbacea3278bc46609f387db62a
-- 备注：live 首验按本 README 执行；确定性回归 332 项通过，证据包校验通过。
+- 证据清单：manifest.json sha256 6e9f1a1d44bc8c5dec79644c99b821b8b25553aa40e89fccd6255d724113f75f
+- 备注：live 首验按本 README 执行；确定性回归 332 项通过，证据包校验通过。已知偏差：复用本机已有 DeepSeek Key（显式 MODEL_VAULT_DIR，运行后删副本）；复核为 claude -p --tools "" 的本地 MCP 桥，不是 claude mcp serve；列表 3 场活动均写入、events[1..2] 复用同一详情 URL；2 个单位名被页面截断（review 已标 high）；原始截图仅本机临时路径。
 
 > 签字前必须已运行 §6 校验并通过。**不得**在未执行 live、或校验未通过时填写「验收通过」。
 

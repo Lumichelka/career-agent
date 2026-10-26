@@ -2,41 +2,29 @@
   "status": "issues",
   "issues": [
     {
+      "row": "events[0]",
+      "field": "sourceUrl",
+      "issue": "三个事件标题与日期各不相同，却共用同一详情页链接 https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm，疑似 sourceUrl 未按各事件详情页分别填写",
+      "severity": "high"
+    },
+    {
       "row": "projects[4]",
       "field": "company",
-      "issue": "公司名疑似截断：'四川百品众合餐饮发展集团有限公' 缺少'司'字",
+      "issue": "公司名“四川百品众合餐饮发展集团有限公”疑似截断，缺少末尾“司”字",
       "severity": "high"
     },
     {
       "row": "projects[8]",
       "field": "company",
-      "issue": "公司名疑似截断：'中国人民财产保险股份有限公司达' 缺少后续字符",
+      "issue": "公司名“中国人民财产保险股份有限公司达”疑似截断不完整，缺少后续机构名称",
       "severity": "high"
-    },
-    {
-      "row": "events[1]",
-      "field": "sourceUrl",
-      "issue": "与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误",
-      "severity": "medium"
-    },
-    {
-      "row": "events[2]",
-      "field": "sourceUrl",
-      "issue": "与 events[0] 共用同一详情页地址 jobfair-show-67.htm，疑似详情页指向错误",
-      "severity": "medium"
-    },
-    {
-      "row": "events[0]",
-      "field": "venue",
-      "issue": "地点'西南财经大学柳林校区柳林体育馆'中'柳林'重复，疑似笔误",
-      "severity": "low"
     }
   ],
   "raw": "",
   "agent": {
-    "id": "01a1762d-2e9f-7b5e-baa8-fe2cb9a738d6",
+    "id": "01a17643-08f6-7d8e-b5c8-2b35a27d4694",
     "name": "claude-review"
   },
   "tool": "review",
-  "at": "2026-10-26T03:08:17.641Z"
+  "at": "2026-10-26T03:32:01.816Z"
 }
