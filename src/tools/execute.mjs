@@ -1,6 +1,6 @@
 // 工具执行：统一校验 → 去重 → 权限 → 超时 → 分发。
 import {getTool} from './registry.mjs';
-import {validateArguments} from './policy.mjs';
+import {validateArguments, validateExternalArguments} from './policy.mjs';
 import * as recruit from './handlers/recruit.mjs';
 import * as search from './handlers/search.mjs';
 import * as platform from './handlers/platform.mjs';
@@ -29,31 +29,40 @@ export const HANDLERS = {
   'company.read': company.read
 };
 
-export function createToolExecutor({runner = null} = {}) {
+// 统一工具面 = 本地注册表 + 本轮 pin 住的外部 Agent 工具（#35）。
+// externalTools 是描述符数组（name 以 mcp__ 开头），externalRunner 负责把它们接到连接层。
+export function createToolExecutor({runner = null, externalTools = [], externalRunner = null} = {}) {
+  const catalog = new Map((Array.isArray(externalTools) ? externalTools : [])
+    .filter(tool => tool && typeof tool.name === 'string')
+    .map(tool => [tool.name, tool]));
   const seen = new Map();
   return async function execute(name, rawArgs, ctx = {}) {
-    const tool = getTool(name);
+    const tool = getTool(name) || catalog.get(name) || null;
     if (!tool) return {status: 'error', code: 'UNKNOWN_TOOL', message: '工具未开放', recovery: '只使用已声明的工具。'};
     let args;
-    try { args = validateArguments(tool, rawArgs); }
+    try { args = tool.external ? validateExternalArguments(tool, rawArgs) : validateArguments(tool, rawArgs); }
     catch (e) { return {status: 'error', code: 'INVALID_ARGUMENTS', message: e.message, recovery: '根据工具声明修正参数后重试。'}; }
     const key = JSON.stringify([name, args]);
     if (seen.has(key)) {
       return {status: 'blocked', code: 'DUPLICATE_CALL', message: '本次任务已执行过相同请求，未再次访问平台。', previousStatus: seen.get(key), recovery: '使用先前结果；无结果时更换关键词或说明所需操作，不要原样重试。'};
     }
     // 写工具的确认由写网关按 sensitivity 判定（auto 直接写、sensitive 返回 confirm_required）；
-    // 只有没有声明 sensitivity 的旧写工具仍沿用 ctx.confirmed 这一道。
-    if (tool.permission === 'write' && !tool.sensitivity && !ctx.confirmed) {
+    // 只有没有声明 sensitivity 的旧写工具仍沿用 ctx.confirmed 这一道。外部工具不落本地库，不走本地确认。
+    if (tool.permission === 'write' && !tool.sensitivity && !ctx.confirmed && !tool.external) {
       return {status: 'confirm_required', code: 'NEEDS_CONFIRMATION', message: '该工具会写入数据，需要用户确认后执行。'};
     }
     const handler = runner || HANDLERS[tool.handler];
-    if (!handler) return {status: 'error', code: 'MISSING_HANDLER', message: '工具没有实现'};
+    if (tool.external) {
+      if (!externalRunner) return {status: 'error', code: 'UNSUPPORTED', message: '外部 Agent 工具没有接通执行器', recovery: '先在设置里连接该外部 Agent 再试。'};
+    } else if (!handler) return {status: 'error', code: 'MISSING_HANDLER', message: '工具没有实现'};
     const controller = new AbortController();
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, tool.timeoutMs || 15000);
     const signal = ctx.signal ? AbortSignal.any([ctx.signal, controller.signal]) : controller.signal;
     try {
-      const result = runner ? await runner(tool, args, {...ctx, signal}) : await handler(args, {...ctx, signal});
+      const result = tool.external
+        ? await externalRunner(tool, args, {...ctx, signal})
+        : runner ? await runner(tool, args, {...ctx, signal}) : await handler(args, {...ctx, signal});
       seen.set(key, result?.status || 'returned');
       return result;
     } catch (e) {
