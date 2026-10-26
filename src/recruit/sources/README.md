@@ -19,6 +19,8 @@ export default {
   parseList(html, source) { return [{title, startAt, venue, url, ...}]; },
   // json 模式签名：parseList(_html, source, json)
   // 详情页：detail: true + parseDetail(text, item)
+  // 列表需要浏览器渲染：fetchList({source, limit, onLog}) → items | {items, pageCount, pages}
+  //   提供 fetchList 时优先于按 mode 抓取；detailAll: true 表示列表已有地点也要逐条抓详情
 };
 ```
 
