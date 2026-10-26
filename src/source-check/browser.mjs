@@ -8,6 +8,21 @@ import {sourceCheckConfig, selectDetailHref} from './config.mjs';
 export const BROWSER_LAUNCH_OPTIONS = {channel: 'msedge', headless: true};
 export const BROWSER_CONTEXT_OPTIONS = {locale: 'zh-CN', viewport: {width: 1366, height: 900}};
 
+// 页面内取链接的脚本以字符串下发：Playwright 无法把函数参数序列化进页面，
+// 详情链接的挑选（pattern/启发式）留在 Node 侧执行。
+export const COLLECT_LINKS_SCRIPT = '[...document.querySelectorAll(\'a[href]\')].map(a => ({href: a.href, text: (a.innerText || a.textContent || \'\').trim()}))';
+
+// 列表页 → 详情链接：脚本只取原始链接，selectDetailHref 在 Node 侧跑；失败返回空串。
+export async function findDetailHref(page, {pattern = ''} = {}) {
+  let links = [];
+  try {
+    links = await page.evaluate(COLLECT_LINKS_SCRIPT);
+  } catch {
+    links = [];
+  }
+  return selectDetailHref(Array.isArray(links) ? links : [], {pattern});
+}
+
 const BLOCK_URL = /\/(login|signin|passport|sso|captcha|verify|auth)(\b|[/?#])/i;
 const BLOCK_TEXT = /(请输入验证码|验证码|安全验证|人机验证|访问过于频繁|访问受限|403\s*Forbidden|Access\s*Denied|captcha)/i;
 
@@ -118,10 +133,8 @@ export async function readSourcePages({source, evidenceDir, signal} = {}) {
     const listAt = new Date().toISOString();
 
     // 详情链接：显式 pattern 优先（swufe 等），否则用通用启发式挑第一条「活动详情」链接。
-    const detailHref = await page.evaluate((selectDetailHref, {pattern}) => {
-      const links = [...document.querySelectorAll('a[href]')].map(a => ({href: a.href, text: (a.innerText || a.textContent || '').trim()}));
-      return selectDetailHref(links, {pattern});
-    }, selectDetailHref, {pattern: detailPattern}).catch(() => '');
+    // 注意不要把函数传给 page.evaluate：Playwright 只会序列化参数值，函数会直接报错。
+    const detailHref = await findDetailHref(page, {pattern: detailPattern});
     if (!detailHref) {
       throw new SourceCheckError('SOURCE_NO_DETAIL', '列表页没有找到可打开的活动详情链接，已停止，未写入任何数据。', '在普通浏览器人工打开活动后手动导入。');
     }

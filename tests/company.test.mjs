@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {CompanyStore} from '../src/company/store.mjs';
@@ -226,6 +227,67 @@ test('公司调研：单家搜索失败不中断整批，跳过并继续', async
     store.close();
   });
 });
+const COMPANY_FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/company-sources.json', import.meta.url), 'utf8'));
+
+test('公司调研：20 条 fixture 单位批量生成，每条带来源且不编造字段', async () => {
+  await withDir(async dir => {
+    assert.equal(COMPANY_FIXTURE.companies.length, 20);
+    const recruit = RecruitStore.open(join(dir, 'recruit.db'));
+    try {
+      COMPANY_FIXTURE.companies.forEach((item, index) => {
+        recruit.upsertEvent({
+          id: String(index + 1).padStart(24, '0'), sourceId: 'manual', school: '测试大学', city: '成都', kind: '双选会',
+          title: item.name + '宣讲会', company: item.name, startAt: '2026-11-01T09:00:00+08:00', fetchedAt: new Date().toISOString()
+        });
+      });
+    } finally { recruit.close(); }
+
+    const fetchImpl = async u => {
+      const q = String(u.searchParams.get('q') || '');
+      const hit = COMPANY_FIXTURE.companies.find(c => q.includes(c.name));
+      return {ok: true, json: async () => ({results: hit ? [{title: hit.title, url: hit.url, content: hit.snippet}] : []})};
+    };
+    const out = await generateCompanyProfiles({dataDir: dir, searchUrl: 'https://search.example.com/search', fetchImpl, limit: 20});
+    assert.equal(out.status, 'readable');
+    assert.equal(out.generated, 20);
+    assert.equal(out.skipped, 0);
+    const store = CompanyStore.open(join(dir, 'company.db'));
+    try {
+      const list = store.list();
+      assert.equal(list.length, 20);
+      for (const company of list) {
+        assert.ok(company.sources.length >= 1, company.name + ' 必须有来源');
+        assert.ok(company.sources.every(s => s.url.startsWith('https://companies.example.com/')));
+        assert.match(company.summary, /https:\/\/companies\.example\.com\//);
+        assert.equal(company.industry, '', '不编造行业');
+        assert.equal(company.size, '', '不编造规模');
+        assert.match(company.notes, /未做归纳推断/);
+      }
+    } finally { store.close(); }
+  });
+});
+
+test('API：未配置搜索服务时批量生成返回可诊断的 unavailable，且不写库', async () => {
+  await withDir(async dir => {
+    const recruit = RecruitStore.open(join(dir, 'recruit.db'));
+    recruit.upsertEvent({id: 'a'.repeat(24), sourceId: 'manual', title: '甲宣讲', company: '甲公司', startAt: '2026-11-01T09:00:00+08:00', fetchedAt: new Date().toISOString()});
+    recruit.close();
+    const out = await handleCompany({method: 'POST', pathname: 'companies/generate', body: {limit: 5}, dir, searchUrl: ''});
+    assert.equal(out.json.status, 'unavailable');
+    assert.match(out.json.message, /未配置/);
+    assert.match(out.json.message, /搜索/);
+    const store = CompanyStore.open(join(dir, 'company.db'));
+    try { assert.equal(store.stats().companies, 0); } finally { store.close(); }
+  });
+});
+
+test('数据页：公司档案批量生成入口存在，并提示未配置搜索服务', () => {
+  const html = readFileSync(new URL('../src/web/recruit.html', import.meta.url), 'utf8');
+  assert.match(html, /\/api\/companies\/companies\/generate/);
+  assert.match(html, /批量生成公司档案/);
+  assert.match(html, /未配置/);
+});
+
 test('API：批量生成公司档案端点', async () => {
   await withDir(async dir => {
     const recruit = RecruitStore.open(join(dir, 'recruit.db'));

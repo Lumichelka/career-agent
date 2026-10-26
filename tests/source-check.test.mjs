@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {createApp} from '../src/server/app.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {resolveSource, writeSourceCheck, SOURCE_CHECK_NOTES} from '../src/source-check/pipeline.mjs';
-import {SourceCheckBlockedError, BROWSER_LAUNCH_OPTIONS, BROWSER_CONTEXT_OPTIONS, detectBlock, openParticipantTab} from '../src/source-check/browser.mjs';
+import {SourceCheckBlockedError, BROWSER_LAUNCH_OPTIONS, BROWSER_CONTEXT_OPTIONS, detectBlock, openParticipantTab, findDetailHref, COLLECT_LINKS_SCRIPT} from '../src/source-check/browser.mjs';
 import {normalizeExtraction, stripContacts} from '../src/source-check/extract.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -374,4 +374,30 @@ test('阻断识别与联系方式清洗：登录跳转/验证码停下，联系�
 
   const cleaned = stripContacts({title: '活动', contacts: {phone: '13800138000'}, nested: {email: 'a@b.com', keep: 'ok'}, note: '13800138000'});
   assert.deepEqual(cleaned, {title: '活动', nested: {keep: 'ok'}, note: ''});
+});
+
+// Playwright 1.64 不能把函数作为 page.evaluate 的参数序列化；详情链接必须在 Node 侧挑。
+test('详情链接选取：page.evaluate 只收到字符串脚本（不传函数），仍在 Node 侧应用 pattern', async () => {
+  const seen = [];
+  const links = [
+    {href: 'https://site.edu.cn/login', text: '登录'},
+    {href: 'https://site.edu.cn/jobfair/jobfair-show-123.htm', text: '双选会详情'},
+    {href: 'https://site.edu.cn/zhaopin/2026-05-12', text: '中国银行宣讲会'}
+  ];
+  const page = {
+    evaluate: async arg => {
+      seen.push(arg);
+      if (typeof arg === 'function') throw new Error('函数参数无法被 Playwright 序列化');
+      return links;
+    }
+  };
+  assert.equal(await findDetailHref(page, {pattern: 'jobfair-show-\\d+\\.htm'}), 'https://site.edu.cn/jobfair/jobfair-show-123.htm');
+  assert.equal(typeof seen[0], 'string');
+  assert.match(COLLECT_LINKS_SCRIPT, /querySelectorAll\(['"]a\[href\]['"]\)/);
+  assert.equal(seen.length, 1, '只调用一次 page.evaluate');
+
+  const empty = {evaluate: async () => []};
+  assert.equal(await findDetailHref(empty), '');
+  const failing = {evaluate: async () => { throw new Error('page crashed'); }};
+  assert.equal(await findDetailHref(failing), '', '读取失败时返回空，由调用方给出 SOURCE_NO_DETAIL');
 });

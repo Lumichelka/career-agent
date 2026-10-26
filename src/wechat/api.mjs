@@ -9,7 +9,7 @@ import {publishArticle} from './publish.mjs';
 import {syncAccount, syncSubscriptions, discoverAndSubscribe} from './subscribe.mjs';
 import {discoverAccounts} from './attribute.mjs';
 import {bizOf, canonicalArticleUrl, isDemoUrl} from './identity.mjs';
-import {RecruitStore} from '../recruit/store.mjs';
+import {purgeDemoRecruitEvents} from '../recruit/demo-purge.mjs';
 
 export {bizOf};
 
@@ -17,11 +17,13 @@ function firstLine(text) {
   return String(text || '').split('\n').map(s => s.trim()).find(Boolean) || '公众号文章';
 }
 
-export async function handleWechat({method, pathname, url, body, dir, deps = {}} = {}) {
+export async function handleWechat({method, pathname, url, body, dir, userId = '', actorType = 'model', actorRef = '', deps = {}} = {}) {
   const store = WeChatStore.open(join(dir, 'wechat.db'));
   const fetchArticle = deps.fetchArticle || fetchWechatArticle;
   const analyze = deps.analyze || analyzeArticle;
   const autoPublish = deps.autoPublish !== false;
+  // 公众号自动发布是自动写入：有登录身份时经写网关写业务行 + write_audit；CLI 用 cli 身份同样留痕。
+  const audit = userId ? {userId, actorType: actorType || 'model', actorRef: actorRef || ''} : null;
   try {
     if (method === 'GET') {
       if (pathname === 'accounts') {
@@ -63,7 +65,7 @@ export async function handleWechat({method, pathname, url, body, dir, deps = {}}
         if (id && !accounts?.length) return {status: 404, json: {error: '账号不存在'}};
         const out = await syncSubscriptions({
           store, accounts, dir,
-          fetchFeed: deps.fetchFeed, fetchArticle, analyze,
+          fetchFeed: deps.fetchFeed, fetchArticle, analyze, audit,
           publish: deps.syncPublish === true, limit: Number(body?.limit) || 5,
           onLog: deps.onLog
         });
@@ -71,15 +73,13 @@ export async function handleWechat({method, pathname, url, body, dir, deps = {}}
       }
       if (pathname === 'purge-demo') {
         const removedArticles = store.purgeDemoData();
-        let removedEvents = 0;
+        let removedEvents = 0, auditBatchId = '';
         try {
-          const rs = RecruitStore.open(join(dir, 'recruit.db'));
-          try {
-            const res = rs.db.prepare("DELETE FROM events WHERE source_url LIKE '%example.com/%' OR source_url LIKE '%example.org/%' OR source_url LIKE '%example.net/%'").run();
-            removedEvents = Number(res.changes) || 0;
-          } finally { rs.close(); }
+          const out = purgeDemoRecruitEvents({dir, userId: userId || 'cli', actorType: actorType || (userId ? 'model' : 'cli'), actorRef});
+          removedEvents = out.removed;
+          auditBatchId = out.batchId;
         } catch { /* 招聘库尚未建立 */ }
-        return {json: {removedArticles, removedEvents, stats: store.stats()}};
+        return {json: {removedArticles, removedEvents, auditBatchId, stats: store.stats()}};
       }
       if (pathname.startsWith('accounts/') && pathname.endsWith('/subscribe')) {
         const id = pathname.split('/')[1];
@@ -87,7 +87,7 @@ export async function handleWechat({method, pathname, url, body, dir, deps = {}}
         try {
           const account = store.setSubscription(id, body?.feedUrl || '');
           const synced = body?.sync ? await syncAccount(store, store.getAccount(id), {
-            dir, fetchFeed: deps.fetchFeed, fetchArticle, analyze,
+            dir, fetchFeed: deps.fetchFeed, fetchArticle, analyze, audit,
             publish: deps.syncPublish === true, limit: Number(body?.limit) || 5, onLog: deps.onLog
           }) : null;
           return {json: {account: store.getAccount(id), sync: synced}};
@@ -98,7 +98,7 @@ export async function handleWechat({method, pathname, url, body, dir, deps = {}}
         const account = store.getAccount(id);
         if (!account) return {status: 404, json: {error: '账号不存在'}};
         const out = await syncAccount(store, account, {
-          dir, fetchFeed: deps.fetchFeed, fetchArticle, analyze,
+          dir, fetchFeed: deps.fetchFeed, fetchArticle, analyze, audit,
           publish: deps.syncPublish === true, limit: Number(body?.limit) || 5, onLog: deps.onLog
         });
         return {json: out};
@@ -140,7 +140,7 @@ export async function handleWechat({method, pathname, url, body, dir, deps = {}}
         const saved = store.saveAnalysis(article.id, analysis);
         let published = null;
         if (autoPublish && (analysis.projects || []).length && analysis.draft?.startAt) {
-          published = await publishArticle({dir, articleId: saved.id, store, recruitStore: deps.recruitStore});
+          published = await publishArticle({dir, articleId: saved.id, store, recruitStore: deps.recruitStore, audit});
         }
         return {json: {
           article: published?.ok ? store.getArticle(saved.id) : saved,
@@ -160,7 +160,7 @@ export async function handleWechat({method, pathname, url, body, dir, deps = {}}
       }
       if (pathname.startsWith('articles/') && pathname.endsWith('/publish')) {
         const id = pathname.split('/')[1];
-        const out = await publishArticle({dir, articleId: id, store, recruitStore: deps.recruitStore, force: body?.force === true});
+        const out = await publishArticle({dir, articleId: id, store, recruitStore: deps.recruitStore, audit});
         return out.ok ? {json: out} : {status: out.reason === 'not_found' ? 404 : 422, json: out};
       }
       if (pathname.startsWith('articles/') && pathname.endsWith('/link')) {

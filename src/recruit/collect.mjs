@@ -2,7 +2,7 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {fetchText} from './fetch.mjs';
-import {SOURCES, REMOVED_SOURCES, sourceById, guessKind, guessCompany, normalizeCity} from './sources/index.mjs';
+import {SOURCES, REMOVED_SOURCES, sourceById, enabledSources, guessKind, guessCompany, normalizeCity} from './sources/index.mjs';
 import {browserText, parseRenderedText} from './browser.mjs';
 import {RecruitStore} from './store.mjs';
 
@@ -104,6 +104,12 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     if (!source.enabled) {
       result.status = 'disabled';
       result.message = source.note || '该信息源尚未接入';
+      return result;
+    }
+    // 登录型 browser 源：明确停止，不自动登录/不绕过验证；人工用来源校对或手动导入。
+    if (source.collectMode === 'manual' || source.loginRequired) {
+      result.status = 'blocked';
+      result.message = '需要登录/人工确认：不自动采集、不绕过登录；请用来源校对或手动导入。';
       return result;
     }
     onLog?.({source: source.id, text: '开始采集：' + source.name});
@@ -250,7 +256,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
 }
 
 export async function runCollection({dir, sourceIds, limit = 20, concurrency = 2, onLog}) {
-  const ids = sourceIds?.length ? sourceIds : SOURCES.filter(s => s.enabled).map(s => s.id);
+  const ids = sourceIds?.length ? sourceIds : enabledSources().map(s => s.id);
   const results = new Array(ids.length).fill(null);
   const width = Math.max(1, Math.min(4, Math.floor(concurrency) || 1, ids.length));
   let cursor = 0;

@@ -8,34 +8,21 @@
 //   node recruit/cli.mjs probe
 //   node recruit/cli.mjs verify
 import {join, resolve} from 'node:path';
-import {writeFileSync, readFileSync, existsSync} from 'node:fs';
+import {writeFileSync} from 'node:fs';
 import {SOURCES, REMOVED_SOURCES, sourceById} from './sources/index.mjs';
 import {runCollection, collectSource} from './collect.mjs';
 import {RecruitStore} from './store.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
 import {verifyEvent} from './verify.mjs';
-import {resolveDataDir} from '../config/paths.mjs';
+import {defaultUserDataDir} from '../config/paths.mjs';
 
 const argv = process.argv.slice(2);
 const command = argv[0] || 'help';
 const flag = name => { const i = argv.indexOf('--' + name); return i >= 0 ? argv[i + 1] : ''; };
 const many = name => argv.reduce((acc, v, i) => (v === '--' + name && argv[i + 1] ? [...acc, argv[i + 1]] : acc), []);
-// 默认写到网页里 owner 账号的数据目录，这样命令行采集的结果网页也能看到。
-function defaultDataDir() {
-  const base = resolveDataDir();
-  try {
-    const accounts = JSON.parse(readFileSync(join(base, 'accounts.json'), 'utf8'));
-    if (accounts.length === 1) {
-      const dir = join(base, 'users', accounts[0].id, '.data');
-      if (existsSync(dir)) return dir;
-    }
-  } catch { /* 还没初始化过账号 */ }
-  return base;
-}
-
 const days = Number(flag('days') || 30);
-const dataDir = resolve(flag('data') || defaultDataDir());
+const dataDir = resolve(flag('data') || defaultUserDataDir());
 const openStore = () => { const s = RecruitStore.open(join(dataDir, 'recruit.db')); s.syncSources(SOURCES, REMOVED_SOURCES); return s; };
 const line = '─'.repeat(66);
 

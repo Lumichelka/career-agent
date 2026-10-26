@@ -4,26 +4,13 @@
 //   node company/cli.mjs generate [--limit 25] [--data <目录>]
 // 需要先在“模型与接口 → 通用联网搜索”里配置 SearXNG 地址；未配置会给出可诊断提示，不伪造数据。
 import {join, resolve} from 'node:path';
-import {readFileSync, existsSync} from 'node:fs';
-import {resolveDataDir} from '../config/paths.mjs';
+import {readFileSync} from 'node:fs';
+import {defaultUserDataDir} from '../config/paths.mjs';
 import {generateCompanyProfiles} from './research.mjs';
 
 const argv = process.argv.slice(2);
 const command = argv[0] || 'help';
 const flag = name => { const i = argv.indexOf('--' + name); return i >= 0 ? argv[i + 1] : ''; };
-
-// 默认写到 owner 账号的数据目录，这样命令行生成的结果网页也能看到。
-function defaultDataDir() {
-  const base = resolveDataDir();
-  try {
-    const accounts = JSON.parse(readFileSync(join(base, 'accounts.json'), 'utf8'));
-    if (accounts.length === 1) {
-      const dir = join(base, 'users', accounts[0].id, '.data');
-      if (existsSync(dir)) return dir;
-    }
-  } catch { /* 还没初始化过账号 */ }
-  return base;
-}
 
 function readSearchUrl(dir) {
   try {
@@ -33,7 +20,7 @@ function readSearchUrl(dir) {
 }
 
 if (command === 'generate') {
-  const dataDir = resolve(flag('data') || defaultDataDir());
+  const dataDir = resolve(flag('data') || defaultUserDataDir());
   const limit = Number(flag('limit') || 25);
   const searchUrl = readSearchUrl(dataDir);
   const out = await generateCompanyProfiles({dataDir, searchUrl, limit});

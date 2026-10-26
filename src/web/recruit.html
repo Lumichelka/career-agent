@@ -199,6 +199,15 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
     <div class="note">平台岗位来自本人登录后的只读浏览；入库前要你在任务卡确认，智能体不代投递。可按岗位/城市/平台筛选，点来源回原页面核对。</div>
   </section>
 
+  <section class="panel" id="companies-panel">
+    <h2>公司档案 <span id="co-status" class="hint"></span></h2>
+    <div class="toolbar" style="margin-bottom:8px">
+      <button id="co-generate" class="primary">批量生成公司档案</button>
+      <span class="note" style="margin:0">从招聘库高频单位名生成，每条带来源 URL；需先在「模型与接口 → 通用联网搜索」配置 SearXNG。未配置会明确提示，不伪造公司信息。</span>
+    </div>
+    <div id="co-result" class="hint"></div>
+  </section>
+
   <section class="panel">
     <h2>运行记录</h2>
     <div id="runs" class="empty">暂无记录</div>
@@ -238,7 +247,8 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
   </div>
 </dialog>
 <div class="toast" id="toast"></div>
-<script>
+<script type="module">
+import {projectCardMeta} from '/recruit-cards.js';
 const TOKEN='SESSION_TOKEN';
 const el=s=>document.querySelector(s);
 let catalog={},sourceState=[],sourceManual={};
@@ -299,6 +309,7 @@ function renderSources(sources,wechat){
   const statusBadge=s=>{
     if(s.orphaned)return '<span class="badge err">来源已下线</span>';
     if(!s.enabled)return '<span class="badge off">未接入</span>';
+    if(catalog[s.id]?.collectMode==='manual')return '<span class="badge off">需登录/人工</span>';
     const st=s.last_status||'待采集';
     return '<span class="badge '+(/^(ok|connected)$/.test(st)?'ok':'off')+'">'+esc(st)+'</span>';
   };
@@ -309,6 +320,7 @@ function renderSources(sources,wechat){
     if(s.lastSuccess) html+='<div class="src-sub">成功 '+esc(shortStamp(s.lastSuccess))+'</div>';
     html+='<div class="src-sub">'+esc(ageText(s.dataAgeMinutes))+'</div>';
     if(s.stale) html+='<div><span class="flag">数据超 24h</span></div>';
+    if(s.failureStreak>0) html+='<div><span class="flag bad">连续失败 '+esc(s.failureStreak)+' 次</span></div>';
     return html;
   };
   const accountRow=a=>'<div class="src-row"><div class="src-name"><b>'+esc(a.name)+'</b>'+(a.feedUrl?'<span class="badge ok">已订阅</span>':'<span class="badge off">未订阅</span>')+'<div class="src-sub">'+esc(a.school||'未归类')+' · 公众号'+(a.biz?' · biz '+esc(String(a.biz).slice(0,10)):' · biz 待识别')+(a.lastArticleAt?' · 最近文章 '+esc(String(a.lastArticleAt).slice(0,10)):'')+(a.lastSyncAt?' · 同步 '+esc(shortStamp(a.lastSyncAt)):'')+'</div></div><div>公众号</div><div>'+esc(a.school||'—')+'</div><div>'+esc(a.articles)+' 篇</div><div>'+(a.recruitmentArticles||0)+' 招聘</div><div class="src-actions">'+(a.feedUrl?'<button data-wx-sync="'+esc(a.id)+'">同步</button>':'')+'<a href="/recruit?tab=sources&type=wechat">文章记录</a></div></div>';
@@ -366,9 +378,9 @@ function renderDayDetail(){
   const day=calendar?.days.find(d=>d.date===selectedDate);
   if(!day){el('#day-detail').innerHTML='<div class="empty">这天没有活动。</div>';return}
   const events=day.events.map(e=>{
-    const projects=(e.projects||[]).map(p=>'<div class="project"><div><b>'+esc(p.company||'未填单位')+'</b> '+esc(p.title||'')+'<div class="hint">'+esc(p.positions||'')+(p.applyMode?' · '+esc(p.applyMode):'')+(p.applyUrl?' · '+esc(p.applyUrl):'')+'</div></div><a class="hint" href="/chat?project='+encodeURIComponent(p.id)+'">研究 ↗</a><button data-del-project="'+esc(p.id)+'">删除</button></div>').join('');
+    const projects=(e.projects||[]).map(p=>{const meta=projectCardMeta(p);const details=meta.details.map(d=>d.label+'：'+d.value).join(' · ');return '<div class="project"><div><b>'+esc(p.company||'未填单位')+'</b> '+esc(p.title||'')+'<div class="hint">'+esc(details)+(p.applyMode?' · '+esc(p.applyMode):'')+(p.applyUrl?' · '+esc(p.applyUrl):'')+'</div></div><a class="hint" href="/chat?project='+encodeURIComponent(p.id)+'">研究 ↗</a><button data-del-project="'+esc(p.id)+'">删除</button></div>';}).join('');
     const flags=[e.status==='orphaned'?'<span class="flag bad">来源已下线</span>':'',e.status==='possibly_removed'?'<span class="flag bad">可能撤下</span>':'',e.interviewStage?'<span class="flag">'+esc([...new Set([e.interviewStage,e.interviewType].filter(Boolean))].join(' · '))+'</span>':'',(e.crossSources||[]).length>1?'<span class="flag ok">多源收录</span>':''].filter(Boolean).join(' ');
-    return '<article class="ev"><time>'+esc(fmtTime(e.startAt))+(e.endAt?'–'+esc(fmtTime(e.endAt)):'')+'</time><div><p class="title">'+esc(e.title)+'</p><div class="meta">'+(e.company?'<b><a href="/companies?name='+encodeURIComponent(e.company)+'">'+esc(e.company)+'</a></b> · ':'')+esc(e.school)+' · '+esc(e.kind)+(e.venue?'<br>地点：'+esc(e.venue):'')+'<br>招聘项目：'+(e.projects||[]).length+' 个</div><div class="row">'+(e.sourceUrl?'<a href="'+esc(e.sourceUrl)+'" target="_blank" rel="noopener noreferrer">来源 ↗</a>':'')+'<a href="'+esc(mapFor(e))+'" target="_blank" rel="noopener noreferrer">地图 ↗</a><button data-verify="'+esc(e.id)+'">复核来源</button><button data-add-project="'+esc(e.id)+'">＋ 招聘项目</button><button data-bulk-project="'+esc(e.id)+'">批量粘贴</button></div><div class="projects">'+(projects||'<div class="hint">还没有拆分项目；双选会可在这里补充参会单位/岗位。</div>')+'</div><div class="bulk-form" data-bulk="'+esc(e.id)+'" hidden><textarea data-bulk-text placeholder="每行一个：单位 | 岗位 | 要求 | 投递方式 | 链接"></textarea><button data-save-bulk="'+esc(e.id)+'">批量保存</button></div><div class="project-form" data-form="'+esc(e.id)+'" hidden><input data-p-company placeholder="单位名称"><input data-p-title placeholder="项目/岗位名称"><input data-p-positions placeholder="岗位要求/专业"><input data-p-apply placeholder="投递方式（网申/邮箱/现场）"><input data-p-url placeholder="投递链接"><button data-save-project="'+esc(e.id)+'">保存项目</button></div></div><div class="side">'+flags+'</div></article>';
+    return '<article class="ev"><time>'+esc(fmtTime(e.startAt))+(e.endAt?'–'+esc(fmtTime(e.endAt)):'')+'</time><div><p class="title">'+esc(e.title)+'</p><div class="meta">'+(e.company?'<b><a href="/companies?name='+encodeURIComponent(e.company)+'">'+esc(e.company)+'</a></b> · ':'')+esc(e.school)+' · '+esc(e.kind)+(e.venue?'<br>地点：'+esc(e.venue):'')+'<br>招聘项目：'+(e.projects||[]).length+' 个</div><div class="row">'+(e.sourceUrl?'<a href="'+esc(e.sourceUrl)+'" target="_blank" rel="noopener noreferrer">来源 ↗</a>':'')+'<a href="'+esc(mapFor(e))+'" target="_blank" rel="noopener noreferrer">地图 ↗</a><button data-verify="'+esc(e.id)+'">复核来源</button><button data-add-project="'+esc(e.id)+'">＋ 招聘项目</button><button data-bulk-project="'+esc(e.id)+'">批量粘贴</button></div><div class="projects">'+(projects||'<div class="hint">还没有拆分项目；双选会可在这里补充参会单位/岗位。</div>')+'</div><div class="bulk-form" data-bulk="'+esc(e.id)+'" hidden><textarea data-bulk-text placeholder="每行一个：单位 | 岗位 | 要求 | 投递方式 | 链接"></textarea><button data-save-bulk="'+esc(e.id)+'">批量保存</button></div><div class="project-form" data-form="'+esc(e.id)+'" hidden><input data-p-company placeholder="单位名称"><input data-p-title placeholder="项目/岗位名称"><input data-p-positions placeholder="岗位/工作内容"><input data-p-requirements placeholder="岗位要求（学历/专业/经验）"><input data-p-apply placeholder="投递方式（网申/邮箱/现场）"><input data-p-url placeholder="投递链接"><button data-save-project="'+esc(e.id)+'">保存项目</button></div></div><div class="side">'+flags+'</div></article>';
   }).join('');
   el('#day-detail').innerHTML='<h3 style="font-size:14px;margin:0 0 8px">'+esc(day.date)+' <span class="hint">'+events.length+' 项</span></h3>'+events;
 }
@@ -404,6 +416,17 @@ async function collect(ids,label){
 }
 
 el('#collect-all').onclick=()=>collect([],'采集');
+el('#co-generate').onclick=async()=>{
+  const btn=el('#co-generate');btn.disabled=true;el('#co-status').textContent='生成中…';
+  try{
+    const r=await fetch('/api/companies/companies/generate',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({limit:25})});
+    const d=await r.json().catch(()=>({error:'返回格式异常'}));
+    if(!r.ok)throw new Error(d.error||('HTTP '+r.status));
+    el('#co-status').textContent=d.message||('已生成 '+(d.generated||0)+' 家');
+    el('#co-result').innerHTML=(d.companies||[]).map(c=>esc(c.name)+' · 来源 '+(c.sources||[]).length+' 条').join('<br>')||(d.status==='unavailable'?'未配置通用搜索服务：请到「模型与接口 → 通用联网搜索」填写 SearXNG 地址后重试；未配置时不会伪造公司信息。':'');
+  }catch(e){el('#co-status').textContent=e.message;el('#co-result').textContent='生成失败：'+(e.message||'未知原因');}
+  finally{btn.disabled=false}
+};
 el('#refresh').onclick=()=>loadAll();
 el('#pj-search').onclick=()=>loadPlatformJobs();
 for(const id of ['#pj-q','#pj-city'])el(id).addEventListener('keydown',e=>{if(e.key==='Enter')loadPlatformJobs()});
@@ -546,7 +569,7 @@ document.addEventListener('click',async e=>{
   const bulk=e.target.closest('[data-bulk-project]');if(bulk){const form=document.querySelector('[data-bulk="'+bulk.dataset.bulkProject+'"]');if(form)form.hidden=!form.hidden;return}
   const saveBulk=e.target.closest('[data-save-bulk]');if(saveBulk){const form=saveBulk.closest('.bulk-form');try{const r=await api('projects/bulk',{eventId:saveBulk.dataset.saveBulk,text:form.querySelector('[data-bulk-text]').value});toast('已保存 '+r.count+' 个项目');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
   const add=e.target.closest('[data-add-project]');if(add){const form=document.querySelector('[data-form="'+add.dataset.addProject+'"]');if(form)form.hidden=!form.hidden;return}
-  const save=e.target.closest('[data-save-project]');if(save){const form=save.closest('.project-form');const eventId=save.dataset.saveProject;try{await api('projects',{eventId,company:form.querySelector('[data-p-company]').value,title:form.querySelector('[data-p-title]').value,positions:form.querySelector('[data-p-positions]').value,applyMode:form.querySelector('[data-p-apply]').value,applyUrl:form.querySelector('[data-p-url]').value});toast('项目已保存');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
+  const save=e.target.closest('[data-save-project]');if(save){const form=save.closest('.project-form');const eventId=save.dataset.saveProject;try{await api('projects',{eventId,company:form.querySelector('[data-p-company]').value,title:form.querySelector('[data-p-title]').value,positions:form.querySelector('[data-p-positions]').value,requirements:form.querySelector('[data-p-requirements]').value,applyMode:form.querySelector('[data-p-apply]').value,applyUrl:form.querySelector('[data-p-url]').value});toast('项目已保存');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
   const del=e.target.closest('[data-del-project]');if(del){if(!confirm('删除这个招聘项目？'))return;try{await api('projects/'+del.dataset.delProject+'/delete',{});toast('已删除');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
 });
 loadAll();

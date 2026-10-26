@@ -54,6 +54,32 @@ test('markSource：成功写最近尝试/成功与抓取、新增、更新数；
   assert.ok(row.last_attempt, '失败仍写最近尝试时间');
 });
 
+test('failure_streak：连续失败递增，成功清零，API 透出', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-fresh-'));
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  try {
+    store.syncSources(SOURCES);
+    const id = 'scu-employ';
+    store.markSource(id, {status: 'ok', fetched: 2});
+    assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 0);
+    store.markSource(id, {status: 'error', error: '超时'});
+    assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 1);
+    store.markSource(id, {status: 'blocked', error: '被拦截'});
+    assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 2);
+    store.markSource(id, {status: 'timeout', error: '超时'});
+    assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 3);
+    store.markSource(id, {status: 'empty', fetched: 0});
+    assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 0, 'empty 属于成功采集，清零');
+  } finally { store.close(); }
+
+  const {handleRecruit} = await import('../src/recruit/api.mjs');
+  const res = await handleRecruit({method: 'GET', pathname: 'sources', url: new URL('http://x/sources'), body: null, dir});
+  const row = res.json.sources.find(s => s.id === 'scu-employ');
+  assert.equal(row.failureStreak, 0, 'API 返回 failureStreak');
+  assert.equal(typeof row.failure_streak, 'number');
+  await cleanup(dir);
+});
+
 test('sourceStates：数据年龄与「今日有活动但数据超 24h」标黄', async t => {
   const {store} = await openStore(t);
   store.syncSources(SOURCES);

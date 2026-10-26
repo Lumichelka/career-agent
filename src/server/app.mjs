@@ -367,8 +367,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/liveness.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/agents.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/liveness.js': 'src/web/liveness.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/audit.js': 'src/web/audit.js', '/backends.js': 'src/web/backends.js', '/agents.js': 'src/web/agents.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/liveness.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/agents.js', '/recruit-cards.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/recruit-cards.js': 'src/web/recruit-cards.js', '/liveness.js': 'src/web/liveness.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/audit.js': 'src/web/audit.js', '/backends.js': 'src/web/backends.js', '/agents.js': 'src/web/agents.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -510,7 +510,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, out.json, out.status || 200);
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/wechat')) {
-      const out = await handleWechat({method: 'GET', pathname: url.pathname.slice('/api/wechat/'.length), url, dir});
+      const out = await handleWechat({method: 'GET', pathname: url.pathname.slice('/api/wechat/'.length), url, dir, userId: user.id});
       if (!out) return send(res, {error: '未知的公众号接口'}, 404);
       return send(res, out.json, out.status || 200);
     }
@@ -674,7 +674,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, out.json, out.status || 200);
       }
       if (url.pathname.startsWith('/api/wechat')) {
-        const out = await handleWechat({method: 'POST', pathname: url.pathname.slice('/api/wechat/'.length), body, dir});
+        const out = await handleWechat({method: 'POST', pathname: url.pathname.slice('/api/wechat/'.length), body, dir, userId: user.id, actorType: 'model'});
         if (!out) return send(res, {error: '未知的公众号接口'}, 404);
         return send(res, out.json, out.status || 200);
       }

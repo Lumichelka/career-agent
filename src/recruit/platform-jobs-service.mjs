@@ -91,7 +91,8 @@ export async function savePlatformJobs({dir, userId, taskId = '', actorType = 'm
       sourceRef: {platform, url: String(snapshot.url || '')},
       entity: 'event_projects',
       action: 'create',
-      execute: ({db}) => savePlatformJobRows({db, payload})
+      // service 已经归一化过，写入时直接复用，避免同一批岗位解析两遍。
+      execute: ({db}) => savePlatformJobRows({db, normalized})
     });
     if (outcome.status === 'confirm_required') {
       return {

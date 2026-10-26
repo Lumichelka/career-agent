@@ -3,11 +3,7 @@ import {join} from 'node:path';
 import {WeChatStore} from './store.mjs';
 import {fetchWechatArticle} from './fetch-article.mjs';
 import {analyzeArticle} from './analyze.mjs';
-import {canonicalArticleUrl} from './identity.mjs';
-
-function bizOf(url) {
-  try { return new URL(url).searchParams.get('__biz') || ''; } catch { return ''; }
-}
+import {bizOf, canonicalArticleUrl} from './identity.mjs';
 
 export function findWechatLinks(text) {
   const out = new Set();

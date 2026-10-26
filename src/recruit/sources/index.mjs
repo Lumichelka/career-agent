@@ -51,8 +51,9 @@ export function sourceById(id) {
   return source;
 }
 
+// 自动采集源：enabled 但 collectMode='manual' 的浏览器登录源需要人工确认，不进入默认批量采集。
 export function enabledSources() {
-  return SOURCES.filter(s => s.enabled);
+  return SOURCES.filter(s => s.enabled && s.collectMode !== 'manual');
 }
 
 export function sourceHealth(source) {
@@ -64,6 +65,9 @@ export function sourceHealth(source) {
     category: source.category,
     note: source.note || '',
     fallback: source.fallback || '',
+    loginRequired: source.loginRequired === true,
+    manualConfirm: source.manualConfirm === true,
+    collectMode: source.collectMode || 'auto',
     capabilities: {
       ...(source.capabilities || {list: source.mode, detail: source.detail ? 'http' : 'none', projects: typeof source.fetchProjects === 'function' ? 'custom' : 'none'}),
       manual: true

@@ -25,6 +25,24 @@ test('任意 URL 归一化：只接受 http/https，拒绝脚本/裸地址', () 
   assert.equal(normalizeSourceCheckUrl(''), null);
 });
 
+test('任意 URL：默认拒绝 loopback/私网/link-local，显式开关才放行', () => {
+  for (const url of [
+    'http://127.0.0.1:4189/admin',
+    'http://localhost:3000/',
+    'http://[::1]/',
+    'http://10.0.0.5/',
+    'http://172.16.0.1/',
+    'http://192.168.1.10/',
+    'http://169.254.169.254/latest/meta-data',
+    'http://0.0.0.0/'
+  ]) {
+    assert.equal(normalizeSourceCheckUrl(url), null, url + ' 默认必须拒绝');
+    assert.equal(normalizeSourceCheckUrl(url, {allowPrivate: true}), new URL(url).href, url + ' 显式开关下允许（人工确认后）');
+  }
+  assert.equal(normalizeSourceCheckUrl('https://career.uibe.edu.cn/zhaopin/'), 'https://career.uibe.edu.cn/zhaopin/', '公网地址不受影响');
+  assert.equal(normalizeSourceCheckUrl('https://career.uibe.edu.cn.evil.local/'), null, '伪装域名不能绕过');
+});
+
 test('来源校对能力标记：财经院校与浏览器登录形态开放，采集器源不开放', () => {
   assert.equal(sourceCheckEnabled({sourceCheck: {enabled: true}}), true);
   assert.equal(sourceCheckEnabled({sourceCheck: true}), true);

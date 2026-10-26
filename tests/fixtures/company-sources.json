@@ -1,0 +1,124 @@
+{
+  "companies": [
+    {
+      "name": "中国工商银行",
+      "title": "中国工商银行官网",
+      "url": "https://companies.example.com/1",
+      "snippet": "中国工商银行是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "中国建设银行",
+      "title": "中国建设银行官网",
+      "url": "https://companies.example.com/2",
+      "snippet": "中国建设银行是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "中国农业银行",
+      "title": "中国农业银行官网",
+      "url": "https://companies.example.com/3",
+      "snippet": "中国农业银行是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "中国银行",
+      "title": "中国银行官网",
+      "url": "https://companies.example.com/4",
+      "snippet": "中国银行是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "交通银行",
+      "title": "交通银行官网",
+      "url": "https://companies.example.com/5",
+      "snippet": "交通银行是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "招商银行",
+      "title": "招商银行官网",
+      "url": "https://companies.example.com/6",
+      "snippet": "招商银行是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "中国邮政储蓄银行",
+      "title": "中国邮政储蓄银行官网",
+      "url": "https://companies.example.com/7",
+      "snippet": "中国邮政储蓄银行是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "中信证券",
+      "title": "中信证券官网",
+      "url": "https://companies.example.com/8",
+      "snippet": "中信证券是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "华泰证券",
+      "title": "华泰证券官网",
+      "url": "https://companies.example.com/9",
+      "snippet": "华泰证券是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "国泰君安证券",
+      "title": "国泰君安证券官网",
+      "url": "https://companies.example.com/10",
+      "snippet": "国泰君安证券是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "中国石化",
+      "title": "中国石化官网",
+      "url": "https://companies.example.com/11",
+      "snippet": "中国石化是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "中国石油",
+      "title": "中国石油官网",
+      "url": "https://companies.example.com/12",
+      "snippet": "中国石油是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "国家电网",
+      "title": "国家电网官网",
+      "url": "https://companies.example.com/13",
+      "snippet": "国家电网是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "中国移动",
+      "title": "中国移动官网",
+      "url": "https://companies.example.com/14",
+      "snippet": "中国移动是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "华为技术有限公司",
+      "title": "华为技术有限公司官网",
+      "url": "https://companies.example.com/15",
+      "snippet": "华为技术有限公司是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "腾讯科技有限公司",
+      "title": "腾讯科技有限公司官网",
+      "url": "https://companies.example.com/16",
+      "snippet": "腾讯科技有限公司是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "阿里巴巴集团",
+      "title": "阿里巴巴集团官网",
+      "url": "https://companies.example.com/17",
+      "snippet": "阿里巴巴集团是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "字节跳动科技有限公司",
+      "title": "字节跳动科技有限公司官网",
+      "url": "https://companies.example.com/18",
+      "snippet": "字节跳动科技有限公司是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "京东集团",
+      "title": "京东集团官网",
+      "url": "https://companies.example.com/19",
+      "snippet": "京东集团是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    },
+    {
+      "name": "美团科技有限公司",
+      "title": "美团科技有限公司官网",
+      "url": "https://companies.example.com/20",
+      "snippet": "美团科技有限公司是一家在招聘会上出现的用人单位；本条为测试 fixture 的公开摘要。"
+    }
+  ]
+}

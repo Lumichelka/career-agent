@@ -25,7 +25,7 @@ async function defaultFetchFeed(url) {
   return res.ok ? {ok: true, text: res.text, url: res.url || url, message: ''} : {ok: false, message: res.message || res.reason || '来源页打不开'};
 }
 
-async function ingestArticle({store, account, link, fetchArticle, analyze, dir, publish = false, recruitStore, onLog}) {
+async function ingestArticle({store, account, link, fetchArticle, analyze, dir, publish = false, recruitStore, audit = null, onLog}) {
   const canonical = canonicalArticleUrl(link);
   if (!canonical) return {ok: false, reason: 'invalid_link'};
   if (isDemoUrl(canonical)) return {ok: false, reason: 'demo_link', message: '示例域名链接不导入'};
@@ -55,7 +55,7 @@ async function ingestArticle({store, account, link, fetchArticle, analyze, dir, 
   const saved = store.saveAnalysis(article.id, analysis);
   let published = null;
   if (publish && dir) {
-    try { published = await publishArticle({dir, articleId: saved.id, store, recruitStore}); }
+    try { published = await publishArticle({dir, articleId: saved.id, store, recruitStore, audit}); }
     catch (e) { published = {ok: false, reason: 'publish_error', message: e.message}; }
   }
   onLog?.({text: '公众号入库：' + saved.title.slice(0, 30) + '（' + saved.hasRecruitment + '，' + (analysis.projects || []).length + ' 项目草稿）'});
@@ -74,6 +74,7 @@ export async function syncAccount(store, account, {
   dir = '',
   publish = false,
   recruitStore,
+  audit = null,
   onLog
 } = {}) {
   const feedUrl = account?.feedUrl || '';
@@ -101,7 +102,7 @@ export async function syncAccount(store, account, {
     const current = store.getAccount(account.id) || account;
     for (const link of links) {
       if (store.hasArticle(link)) { result.skipped++; continue; }
-      const got = await ingestArticle({store, account: current, link, fetchArticle, analyze, dir, publish, recruitStore, onLog});
+      const got = await ingestArticle({store, account: current, link, fetchArticle, analyze, dir, publish, recruitStore, audit, onLog});
       if (got.ok) {
         result.imported++;
         result.articles.push({id: got.article.id, title: got.article.title, hasRecruitment: got.article.hasRecruitment, projects: (got.analysis.projects || []).length});

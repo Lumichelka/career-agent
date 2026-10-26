@@ -122,10 +122,14 @@ export class WeChatStore {
         }
       }
       if (existing) {
+        // 旧库可能同时存在“西财就业”（别名行）和“西财校招”（canonical 行）；
+        // 直接把旧行改名会撞 name UNIQUE，先合并到 canonical 行再更新种子字段。
+        const conflict = this.db.prepare('SELECT * FROM wechat_accounts WHERE name=? AND id<>?').get(a.name, existing.id);
+        if (conflict) existing = this.mergeAccountRows(conflict.id, existing.id) || existing;
         const keepAliasBiz = [existing.biz, ...parseList(existing.alias_biz)].filter(v => v && v !== a.biz);
-        const keepAliasNames = [...parseList(existing.alias_names)].filter(v => v && v !== a.name);
+        const keepAliasNames = [existing.name, ...parseList(existing.alias_names)].filter(v => v && v !== a.name);
         this.db.prepare(`UPDATE wechat_accounts SET name=?,school=?,category=?,biz=?,alias_biz=?,alias_names=?,note=?,updated_at=? WHERE id=?`)
-          .run(a.name, a.school || '', a.category || '', a.biz || existing.biz || '',
+          .run(a.name, a.school || existing.school || '', a.category || existing.category || '', a.biz || existing.biz || '',
             listJson([...keepAliasBiz, ...(a.legacyBiz || [])]), listJson([...keepAliasNames, ...(a.legacyNames || [])]),
             a.note || existing.note || '', now, existing.id);
       } else {
@@ -136,6 +140,31 @@ export class WeChatStore {
     }
   }
 
+  // 账号去重：把 drop 行并入 keep 行（文章改挂、别名/订阅/同步状态取并集），再删 drop。
+  mergeAccountRows(keepId, dropId) {
+    if (!keepId || !dropId || keepId === dropId) return this.db.prepare('SELECT * FROM wechat_accounts WHERE id=?').get(keepId) || null;
+    const keep = this.db.prepare('SELECT * FROM wechat_accounts WHERE id=?').get(keepId);
+    const drop = this.db.prepare('SELECT * FROM wechat_accounts WHERE id=?').get(dropId);
+    if (!keep || !drop) return keep || drop || null;
+    this.db.prepare('UPDATE wechat_articles SET account_id=? WHERE account_id=?').run(keepId, dropId);
+    const keepNameKey = accountNameKey(keep.name);
+    const names = [...new Set([
+      ...parseList(keep.alias_names), drop.name, ...parseList(drop.alias_names)
+    ].filter(name => name && accountNameKey(name) !== keepNameKey))];
+    const biz = [...new Set([
+      ...parseList(keep.alias_biz), keep.biz, drop.biz, ...parseList(drop.alias_biz)
+    ].filter(value => value && value !== keep.biz))];
+    const now = new Date().toISOString();
+    this.db.prepare(`UPDATE wechat_accounts SET school=?,category=?,biz=?,home_url=?,note=?,alias_biz=?,alias_names=?,
+      feed_url=?,last_sync_at=?,last_sync_status=?,last_sync_error=?,updated_at=? WHERE id=?`)
+      .run(keep.school || drop.school || '', keep.category || drop.category || '', keep.biz || drop.biz || '',
+        keep.home_url || drop.home_url || '', keep.note || drop.note || '', listJson(biz), listJson(names),
+        keep.feed_url || drop.feed_url || '', keep.last_sync_at || drop.last_sync_at || '',
+        keep.last_sync_status || drop.last_sync_status || '', keep.last_sync_error || drop.last_sync_error || '', now, keepId);
+    this.db.prepare('DELETE FROM wechat_accounts WHERE id=?').run(dropId);
+    return this.db.prepare('SELECT * FROM wechat_accounts WHERE id=?').get(keepId);
+  }
+
   // 旧库升级：链接归一化、合并重复文章、清 example.com、把“未归类”文章重新归属到已知账号。
   upgradeData() {
     try {
@@ -144,10 +173,9 @@ export class WeChatStore {
       this.purgeDemoData();
       this.backfillAttribution();
       this.db.exec('COMMIT');
-    } catch (e) {
+    } catch {
       try { this.db.exec('ROLLBACK'); } catch { /* 已回滚 */ }
-      // 升级失败不阻塞使用；保留原因，下次打开会重试。
-      this.upgradeError = e.message;
+      // 升级失败不阻塞使用；下次打开会重试。
     }
   }
 
@@ -180,7 +208,6 @@ export class WeChatStore {
   purgeDemoData() {
     const rows = this.db.prepare('SELECT id,url,event_id FROM wechat_articles').all().filter(r => isDemoUrl(r.url));
     for (const row of rows) this.db.prepare('DELETE FROM wechat_articles WHERE id=?').run(row.id);
-    this.purgedDemoEventIds = rows.map(r => r.event_id).filter(Boolean);
     return rows.length;
   }
 
