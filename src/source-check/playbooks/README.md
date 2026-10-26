@@ -15,6 +15,7 @@
 | `sourceIds` | 是 | 适用来源 id 列表；`wechat:<账号 id>` 按 `wechat` 匹配 |
 | `aliases` | 否 | 来源别名（如 `swufe`），用于匹配 |
 | `entry` | 是 | 入口 URL 列表，按顺序成为 operator 的 `goto` 步骤 |
+| `detailSelector` | 否 | 列表页里进入详情的 CSS 选择器；有它在 `goto` 后生成一次 `click`，让兜底也能截到「列表 + 详情」两页 |
 | `domains` | 是 | 允许域；至少覆盖入口主机，供评审与后续收紧 |
 | `successMarkers` | 是 | 可观察的成功标志（页面出现什么、证据是否齐全） |
 | `forbiddenActions` | 是 | 明确禁止的动作（投递/支付/删除/提交表单/绕过验证等） |

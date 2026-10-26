@@ -11,6 +11,7 @@ aliases:
   - 西南财经大学
 entry:
   - https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm
+detailSelector: a[href*="/jobfair/jobfair-show-"]
 domains:
   - job3.swufe.edu.cn
 successMarkers:
