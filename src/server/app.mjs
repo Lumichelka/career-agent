@@ -34,6 +34,7 @@ import {handleAudit, handleAuditClear, handleAuditExport} from '../writes/audit-
 import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
 import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
 import {createSourceCheckService} from '../source-check/pipeline.mjs';
+import {createExternalReviewer} from '../source-check/review.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -76,7 +77,22 @@ const sourceCheckService = createSourceCheckService({
   taskManager,
   ...(sourceCheck.browserReader ? {browserReader: sourceCheck.browserReader} : {}),
   ...(sourceCheck.extractor ? {extractor: sourceCheck.extractor} : {}),
-  ...(sourceCheck.visionCall ? {visionCall: sourceCheck.visionCall} : {})
+  ...(sourceCheck.visionCall ? {visionCall: sourceCheck.visionCall} : {}),
+  ...(sourceCheck.reviewer ? {reviewer: sourceCheck.reviewer} : {}),
+  // #40：默认复核走该用户自己的外部 Agent；测试可注入 reviewer，不启动真实 Agent。
+  reviewerFactory: sourceCheck.reviewerFactory || (async ({userId, task, emit}) => {
+    const user = accounts.users.find(item => item.id === userId);
+    if (!user) return null;
+    const t = await tenant(user);
+    return createExternalReviewer({
+      config: t.agents,
+      connections: t.connections,
+      home: join(dataDir, 'users', userId),
+      evidenceDir: join(dataDir, 'users', userId, 'tasks', task.id, 'evidence'),
+      taskId: task.id,
+      emit
+    });
+  })
 });
 let actualPort = Number(port);
 let localOrigin = 'http://127.0.0.1:' + actualPort;

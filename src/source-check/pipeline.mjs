@@ -12,6 +12,7 @@ import {createWriteGateway} from '../writes/gateway.mjs';
 import {bulkWriteRows} from '../recruit/bulk.mjs';
 import {createVisionExtractor, normalizeExtraction} from './extract.mjs';
 import {SourceCheckBlockedError, readSourcePages} from './browser.mjs';
+import {fallbackReviewCall, parseReviewIssues, REVIEW_MAX_RAW} from './review.mjs';
 
 // 首个验收只覆盖西南财大双选会；'swufe' 是入口约定的别名。
 export const SOURCE_CHECK_ALIASES = {swufe: 'swufe-xjh', 'swufe-xjh': 'swufe-xjh'};
@@ -19,7 +20,7 @@ export const SOURCE_CHECK_NOTES = '浏览器截图读取（非采集器）';
 export const SOURCE_CHECK_REASON = '采集器已禁用（robots 限制），改用应用内浏览器读取';
 export const SOURCE_CHECK_STATUS = '采集器已禁用，改用应用内浏览器读取；不会调用采集器，也不会向目标站发直连请求。';
 export const SOURCE_CHECK_ACTOR = 'model_api';
-const EVIDENCE_FILES = /^(01-list\.png|02-detail\.png|screenshots\.json|extraction\.json)$/;
+const EVIDENCE_FILES = /^(01-list\.png|02-detail\.png|screenshots\.json|extraction\.json|review\.json)$/;
 
 export function resolveSource(sourceId) {
   const key = SOURCE_CHECK_ALIASES[String(sourceId || '').trim()];
@@ -102,8 +103,103 @@ function evidenceDetail(shot) {
   return 'URL ' + String(shot.url || '') + ' · ' + String(shot.at || '') + ' · 视口 ' + String(viewport.width || '') + '×' + String(viewport.height || '');
 }
 
-// 单次任务的执行体：说明 → 浏览器两页 → 视觉抽取 → 写库；阻断则标 blocked 并保留恢复建议。
-export async function runSourceCheck({dataDir, userId, task, source, models = {}, browserReader = readSourcePages, extractor = null, actorRef = '', signal, emit = () => {}, addEvidence = async () => {}, setPhase = () => {}}) {
+function publicReview(review) {
+  if (!review) return null;
+  const out = {...review};
+  delete out.call;
+  return out;
+}
+
+// 抽取之后、写库之前的文本复核：建议制——问题只进证据与任务卡，写入集与审计一点都不改。
+// 复核不可用时任务继续，写库照常；Agent 支路记为未通过（agentLeg=failed）。
+async function runReview({reviewer, extraction, source, screenshots, signal, taskId, evidenceDir, addEvidence, emit}) {
+  if (typeof reviewer !== 'function') return null;
+  const started = Date.now();
+  let out = null;
+  let error = null;
+  try {
+    out = await reviewer({extraction, screenshots, source, signal});
+  } catch (caught) {
+    error = caught;
+  }
+  if (!error && out && out.ok === false) {
+    error = Object.assign(new Error(out.error?.message || '外部 Agent 复核失败'), out.error || {}, {
+      agent: out.agent || null, tool: out.tool || '', call: out.call || null
+    });
+  }
+  const durationMs = Date.now() - started;
+  const at = new Date().toISOString();
+  let review;
+  if (error) {
+    const code = String(error.code || 'REVIEW_FAILED').slice(0, 60);
+    const call = error.call || (error.attempted === false ? null : fallbackReviewCall({
+      agent: error.agent || out?.agent || null, tool: error.tool || out?.tool || '', durationMs, outcome: 'failed', errorCode: code
+    }));
+    review = {
+      status: 'unavailable',
+      count: 0,
+      issues: [],
+      agentLeg: 'failed',
+      attempted: Boolean(call),
+      agent: error.agent || out?.agent || null,
+      tool: error.tool || out?.tool || '',
+      error: {
+        code,
+        message: String(error.message || '外部 Agent 复核不可用').slice(0, 500),
+        recovery: String(error.recovery || '检查外部 Agent 配置与网络后重试；写库不受影响。').slice(0, 300)
+      },
+      at,
+      call
+    };
+    if (call) {
+      const payload = {status: review.status, issues: [], raw: '', agent: review.agent, tool: review.tool, error: review.error, at};
+      await writeFile(join(evidenceDir, 'review.json'), JSON.stringify(payload, null, 2), 'utf8');
+      await addEvidence({
+        kind: 'review',
+        label: '外部 Agent 复核不可用：' + code,
+        detail: review.error.message + '（' + review.error.recovery + '）',
+        url: evidenceUrl(taskId, 'review.json')
+      });
+    }
+  } else {
+    const text = String(out?.text ?? out?.raw ?? '');
+    const issues = Array.isArray(out?.issues) ? out.issues : parseReviewIssues(text);
+    const status = issues === null ? 'unparsed' : issues.length ? 'issues' : 'clean';
+    const call = out?.call || fallbackReviewCall({
+      agent: out?.agent || null, tool: out?.tool || '', durationMs, outcome: 'ok'
+    });
+    review = {
+      status,
+      count: issues === null ? 0 : issues.length,
+      issues: issues === null ? [] : issues,
+      raw: issues === null ? text.slice(0, REVIEW_MAX_RAW) : '',
+      agentLeg: 'passed',
+      attempted: true,
+      agent: out?.agent || null,
+      tool: out?.tool || '',
+      at,
+      call
+    };
+    const payload = {status, issues: review.issues, raw: review.raw, agent: review.agent, tool: review.tool, at};
+    await writeFile(join(evidenceDir, 'review.json'), JSON.stringify(payload, null, 2), 'utf8');
+    const label = status === 'issues'
+      ? '外部 Agent 复核：' + review.count + ' 个问题'
+      : status === 'unparsed' ? '外部 Agent 复核：已复核（未解析出问题列表）' : '外部 Agent 复核：未发现问题';
+    await addEvidence({
+      kind: 'review',
+      label,
+      detail: status === 'issues'
+        ? review.issues.slice(0, 5).map(item => (item.row || '') + (item.field ? ' · ' + item.field : '') + '：' + item.issue).join('\n')
+        : status === 'unparsed' ? review.raw.slice(0, 400) : '复核建议制：未发现问题；写入集未被修改。',
+      url: evidenceUrl(taskId, 'review.json')
+    });
+  }
+  emit({type: 'review', taskId, review: publicReview(review)});
+  return review;
+}
+
+// 单次任务的执行体：说明 → 浏览器两页 → 视觉抽取 → 文本复核 → 写库；阻断则标 blocked 并保留恢复建议。
+export async function runSourceCheck({dataDir, userId, task, source, models = {}, browserReader = readSourcePages, extractor = null, reviewer = null, actorRef = '', signal, emit = () => {}, addEvidence = async () => {}, setPhase = () => {}}) {
   const evidenceDir = evidenceDirFor(dataDir, userId, task.id);
   await mkdir(evidenceDir, {recursive: true});
   emit({type: 'status', text: SOURCE_CHECK_STATUS});
@@ -162,6 +258,13 @@ export async function runSourceCheck({dataDir, userId, task, source, models = {}
     throw Object.assign(new Error('截图里没有读到可写入的活动，未写入任何数据。'), {code: 'SOURCE_NO_EVENTS_READ', recovery: '在普通浏览器人工核对后手动导入；不要靠猜补字段。'});
   }
 
+  // 复核在写库之前：只发送抽取 JSON 与来源元数据；问题不改写入集，失败也不阻断写库。
+  setPhase('正在请外部 Agent 文本复核抽取结果…');
+  const review = await runReview({
+    reviewer, extraction, source, screenshots: shots, signal,
+    taskId: task.id, evidenceDir, addEvidence, emit
+  });
+
   setPhase('正在写入本机招聘库…');
   const write = await writeSourceCheck({dataDir, userId, taskId: task.id, extraction, source, screenshots: shots, actorRef});
   if (write.duplicate) {
@@ -170,11 +273,43 @@ export async function runSourceCheck({dataDir, userId, task, source, models = {}
     emit({type: 'writes', taskId: task.id, tool: 'career_recruit_bulk_write', batchId: write.batchId, counts: write.counts});
   }
   setPhase('来源校对完成：已写入活动 ' + extraction.events.length + ' 条、单位 ' + extraction.projects.length + ' 条。');
-  return {extraction, write, screenshots};
+  return {extraction, write, screenshots, review};
+}
+
+// 来源校对任务没有对话轮次，但复核调用记录必须挂在助手消息的调用表里（step=review）。
+// 这里在任务收尾后补一条合成助手消息；只写会话消息，不写 workbench/任务记忆记录。
+function reviewMessage(review, extraction) {
+  const wrote = '来源校对完成：写入活动 ' + (extraction?.events?.length || 0) + ' 条、单位 ' + (extraction?.projects?.length || 0) + ' 条。';
+  if (!review) return wrote;
+  if (review.status === 'unavailable') {
+    return wrote + ' 外部 Agent 复核不可用（' + review.error?.code + '）：' + review.error?.message + '；数据已照常写入。';
+  }
+  if (review.status === 'issues') return wrote + ' 外部 Agent 复核 ' + review.count + ' 个问题（建议制，未修改写入集）。';
+  if (review.status === 'unparsed') return wrote + ' 外部 Agent 已复核，但没有返回可解析的问题列表。';
+  return wrote + ' 外部 Agent 复核未发现问题。';
+}
+
+async function appendReviewMessage({dataDir, userId, sessionId, review, extraction}) {
+  if (!review?.call) return;
+  const file = join(userDataDir(dataDir, userId), String(sessionId) + '.json');
+  let session;
+  try { session = JSON.parse(await readFile(file, 'utf8')); } catch { return; }
+  session.messages = Array.isArray(session.messages) ? session.messages : [];
+  session.messages.push({
+    role: 'assistant',
+    backend: review.call.backend?.label || '外部 Agent 复核',
+    backendKind: 'agent',
+    calls: [review.call],
+    content: reviewMessage(review, extraction),
+    durationMs: Number(review.call.durationMs) || 0,
+    at: review.call.at
+  });
+  session.updatedAt = new Date().toISOString();
+  await writeFile(file, JSON.stringify(session, null, 2), 'utf8');
 }
 
 // 供 /api/source-check/start 使用的服务：创建会话 + 排队/运行任务，立即返回 id 供数据页跳转。
-export function createSourceCheckService({dataDir, taskManager, browserReader = readSourcePages, extractor = null, visionCall = null} = {}) {
+export function createSourceCheckService({dataDir, taskManager, browserReader = readSourcePages, extractor = null, visionCall = null, reviewer = null, reviewerFactory = null} = {}) {
   if (!dataDir) throw new Error('来源校对服务需要 dataDir');
   if (!taskManager) throw new Error('来源校对服务需要任务管理器');
 
@@ -204,12 +339,21 @@ export function createSourceCheckService({dataDir, taskManager, browserReader = 
       onCreate: task => resolveCreated(task),
       execute: async ({task, signal, emit, addEvidence, setPhase}) => {
         let result = null;
+        let userReviewer = reviewer;
+        if (!userReviewer && typeof reviewerFactory === 'function') {
+          try { userReviewer = await reviewerFactory({userId: user.id, task, emit, signal}); }
+          catch { userReviewer = null; }
+        }
         try {
           result = await runSourceCheck({
             dataDir, userId: user.id, task, source, models, signal, emit, addEvidence, setPhase,
             browserReader, extractor: extractor || (visionCall ? createVisionExtractor({config: models, visionCall}) : null),
+            reviewer: userReviewer,
             actorRef: models?.label || ''
           });
+          if (result?.review?.call) {
+            await appendReviewMessage({dataDir, userId: user.id, sessionId: session.id, review: result.review, extraction: result.extraction}).catch(() => {});
+          }
           return result;
         } finally {
           // 来源卡记录失败不能反过来把已完成的写入判成失败。
