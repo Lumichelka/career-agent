@@ -2,29 +2,53 @@
   "status": "issues",
   "issues": [
     {
-      "row": "events[0]",
-      "field": "sourceUrl",
-      "issue": "三个事件标题与日期各不相同，却共用同一详情页链接 https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm，疑似 sourceUrl 未按各事件详情页分别填写",
-      "severity": "high"
+      "row": "events[1]",
+      "field": "title",
+      "issue": "标题以“（第一...”结尾，疑似被截断，内容不完整",
+      "severity": "medium"
+    },
+    {
+      "row": "events[1]",
+      "field": "venue",
+      "issue": "场地字段以“学生活动中心...”结尾，疑似被截断",
+      "severity": "medium"
+    },
+    {
+      "row": "events[2]",
+      "field": "venue",
+      "issue": "场地字段以“学生活动中心...”结尾，疑似被截断",
+      "severity": "medium"
     },
     {
       "row": "projects[4]",
       "field": "company",
-      "issue": "公司名“四川百品众合餐饮发展集团有限公”疑似截断，缺少末尾“司”字",
+      "issue": "公司名疑似被截断，末尾缺少“司”等字符",
       "severity": "high"
     },
     {
       "row": "projects[8]",
       "field": "company",
-      "issue": "公司名“中国人民财产保险股份有限公司达”疑似截断不完整，缺少后续机构名称",
+      "issue": "公司名疑似被截断，缺少“州市分公司”等后续字符",
       "severity": "high"
+    },
+    {
+      "row": "events[1]",
+      "field": "sourceUrl",
+      "issue": "来源链接为空，缺少可追溯详情地址",
+      "severity": "low"
+    },
+    {
+      "row": "events[2]",
+      "field": "sourceUrl",
+      "issue": "来源链接为空，缺少可追溯详情地址",
+      "severity": "low"
     }
   ],
   "raw": "",
   "agent": {
-    "id": "01a17643-08f6-7d8e-b5c8-2b35a27d4694",
+    "id": "01a177ce-b51f-7bd9-951c-b00d6353839d",
     "name": "claude-review"
   },
   "tool": "review",
-  "at": "2026-10-26T03:32:01.816Z"
+  "at": "2026-10-26T10:44:10.242Z"
 }

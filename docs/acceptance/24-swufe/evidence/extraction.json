@@ -17,24 +17,24 @@
       "sourceUrl": "https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm"
     },
     {
-      "title": "西南财经大学“校招市集”2026年秋季系列双选会（第一场）",
+      "title": "西南财经大学“校招市集”2026年秋季系列双选会（第一...",
       "startAt": "2026-09-29T14:00:00+08:00",
       "endAt": "",
-      "venue": "四川省成都市温江区柳台大道555号，西南财经大学，学生活动中心",
+      "venue": "四川省成都市温江区柳台大道555号，西南财经大学，学生活动中心...",
       "school": "西南财经大学",
       "city": "成都",
       "kind": "双选会",
-      "sourceUrl": "https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm"
+      "sourceUrl": ""
     },
     {
       "title": "西南财经大学第八届律所专场校园招聘会",
       "startAt": "2026-05-12T14:00:00+08:00",
       "endAt": "",
-      "venue": "成都市温江区柳台大道555号西南财经大学柳林校区 学生活动中心",
+      "venue": "成都市温江区柳台大道555号西南财经大学柳林校区 学生活动中心...",
       "school": "西南财经大学",
       "city": "成都",
-      "kind": "专场招聘会",
-      "sourceUrl": "https://job3.swufe.edu.cn/jobfair/jobfair-show-67.htm"
+      "kind": "双选会",
+      "sourceUrl": ""
     }
   ],
   "projects": [
@@ -67,9 +67,9 @@
     },
     {
       "eventIndex": 0,
-      "company": "成都市舶说文化发展有限公司",
+      "company": "成都市船说文化发展有限公司",
       "title": "",
-      "positions": "初高中物理老师、小初数学老师",
+      "positions": "初高中物理老师、初小数学老师",
       "requirements": "",
       "applyMode": "",
       "applyUrl": ""
@@ -133,5 +133,5 @@
     "events": 0,
     "projects": 0
   },
-  "extractedAt": "2026-10-26T03:31:23.753Z"
+  "extractedAt": "2026-10-26T10:43:31.353Z"
 }

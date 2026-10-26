@@ -3,34 +3,34 @@
   "ticket": "42",
   "acceptance": "24-swufe",
   "status": "passed",
-  "runAt": "2026-10-26T03:33:13.618Z",
+  "runAt": "2026-10-26T10:45:18.577Z",
   "owner": "owner",
   "environment": {
-    "dataDir": "C:\\Users\\cccHaozz\\AppData\\Local\\Temp\\zx-live-accept-kh8HeH",
-    "userId": "7b8c1684-aba8-4f7c-aa5c-a591556be94d",
-    "taskId": "1af5e208-cd2f-4a69-af63-06056e95d89b",
-    "conflictTaskId": "271ffabf-e380-4abc-8c9f-e5120b7da5b8",
-    "commit": "e2d59e0ee768b5753b354e8580c955e5a2c4a3c5",
+    "dataDir": "C:\\Users\\cccHaozz\\AppData\\Local\\Temp\\zx-live-accept-yJfgBg",
+    "screenshotBackup": "C:\\Users\\cccHaozz\\Documents\\career-agent-acceptance\\24-swufe",
+    "userId": "e85e589d-831f-43f2-86ec-f207955e5af2",
+    "taskId": "c874b8e7-dbd7-4812-86f7-65642b304705",
+    "conflictTaskId": "20205d78-ce99-4982-b2c5-51321fab74e5",
+    "commit": "11198661300671f6427a200a19ee7e576579070f",
     "nodeVersion": "v24.18.0",
-    "edgeVersion": "150.0.4078.65",
-    "screenshotBackup": "C:\\Users\\cccHaozz\\Documents\\career-agent-acceptance\\24-swufe"
+    "edgeVersion": "150.0.4078.65"
   },
   "evidence": {
     "extraction": {
       "path": "evidence/extraction.json",
-      "sha256": "06493d93f196f2ea2e6c3da2fa1b58d7e3ddf3cd91c7c311548a83250ba682c5"
+      "sha256": "9024ec7dc4e183c64e9645640b59f890f185e0d676efd5880ed971a39acd1296"
     },
     "review": {
       "path": "evidence/review.json",
-      "sha256": "5fd58d87c00b06063ccd0cd69aecfc1582a5c682ee67816dc3d331b8f45e2d81"
+      "sha256": "1c376ecdd5542a550c66e27b300ad4cabde3eb7e14b0bfe5956eb35fd18c769e"
     },
     "auditExport": {
       "path": "evidence/audit-export.json",
-      "sha256": "a30a323a2a7ad26ae7ca3be2a389195341aaad619201bed9c639d433f29286fe"
+      "sha256": "e3dafa7d6edded6b7e82f6a1d22a0b6ddec0d9c20414c0838f7ae665ba05ba83"
     },
     "taskLog": {
       "path": "evidence/task.json",
-      "sha256": "024d6f3797a6901740b7166c28c3813bc21d2da796ba82919964602e54307587"
+      "sha256": "b7e37941ae6a1a6793717c24e21818937b04af9879524e5b41f696c5a43343e9"
     },
     "screenshots": {
       "list": {
@@ -39,19 +39,19 @@
       },
       "detail": {
         "path": "C:\\Users\\cccHaozz\\Documents\\career-agent-acceptance\\24-swufe\\02-detail.png",
-        "sha256": "3b487d968fb8ecc8eab2cc833ae464fcf7d7ce22ab67d7872e4b6409dc09ee04"
+        "sha256": "9753c62bea3a36d4daad7b3c70413d24831ef8a6502a92cfe940a566bc626fa3"
       },
       "uiTaskCard": {
         "path": "evidence/ui-task-card.png",
-        "sha256": "932a5de66772f4bef745e6722ae48bf2d9ca2d5513642791d180893234befc33"
+        "sha256": "96231ccfeb5406e72acc750f2033c33f213a70fd0139e57c3971e95cb75bdfa0"
       },
       "uiAuditReview": {
         "path": "evidence/ui-audit-review.png",
-        "sha256": "34c0082e3b126527624476eabf1ac322e513d43636acaee8d6b8ea0b1938e827"
+        "sha256": "db3cd5c3e530a002c1db7f801d6f793b1e98a37db7b0a28c8ddf6c4c05142c3b"
       },
       "uiForceConfirm": {
         "path": "evidence/ui-force-confirm.png",
-        "sha256": "1ace002de45db1f775f45f87598d80329b5cc57148ee0ef97adee7233ebaf1e5"
+        "sha256": "68f8584a981928e4f2aa6c34e074e2c8c0892aa85d091b605cd721670d8bac71"
       }
     },
     "db": {
@@ -64,14 +64,14 @@
       },
       "after": {
         "path": "evidence/recruit.db.after",
-        "sha256": "3caa2013f749e1ec957927b6f1028e6f400f379548fd4a08493b1f5caac982d4",
-        "contentHash": "925fed416cb22bf0086abb8af6b7fe233e858a93a246317a4a9e2e5c2ed5175d",
+        "sha256": "03a84ec5d49bca39d9914a0d98ecf5d7b03122e2771bbed142ee70440d3bf5eb",
+        "contentHash": "85b58b45d82442f003590d4c6ead1a419d69bcbbb14ef4813248290000a5671f",
         "events": 3,
         "projects": 10
       },
       "afterUndo": {
         "path": "evidence/recruit.db.after-undo",
-        "sha256": "98c82c621f3e4fccb2b6f7b98067d3593245185bbf52c5c16432ce0cc856e7c0",
+        "sha256": "65e26166571b28740d80da622ec0bf971de879978d8403e7f1135fd364639e38",
         "contentHash": "af3381a1fa5abf063c60ca9369bd083df77f52c53b702a86f964f103166dd13c",
         "events": 0,
         "projects": 0
@@ -92,12 +92,12 @@
     "forced": 1,
     "companyDbCreated": false,
     "duplicateRows": 0,
-    "durationMs": 53952
+    "durationMs": 51589
   },
   "agentLeg": {
     "passed": true,
     "tool": "review",
-    "issueCount": 3
+    "issueCount": 7
   },
   "signature": {
     "statement": "验收通过（含已知偏差）",
@@ -107,8 +107,10 @@
   "knownDeviations": [
     "复用本机已有 DeepSeek Key（MODEL_VAULT_DIR 显式传入，运行后删除副本）",
     "复核 Agent 是 claude -p --tools \"\" 的本地 MCP 桥，不是 claude mcp serve",
-    "列表页 3 场活动均写入；只打开 1 场详情，events[1..2] 复用该详情 URL",
-    "2 个单位名被页面截断，review 已标 high；未编造",
-    "原始页面截图含联系方式，仅保留本机 Documents 备份路径（不入库）"
+    "列表页 3 场活动均写入；只打开 1 场详情",
+    "2 个单位名被页面截断；review 已标 high，未编造",
+    "冲突用例为 out-of-band 改 1 行（不触发写网关/审计），不是界面修改",
+    "review 返回 7 个问题（2 high、3 medium、2 low：截断单位名/标题/场地、非匹配活动 sourceUrl 留空）；建议制，不修改写入集",
+    "原始页面截图含联系方式，已备份到本机 SCREENSHOT_BACKUP_DIR（不入库）"
   ]
 }
