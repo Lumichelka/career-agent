@@ -37,6 +37,7 @@ import {handleAudit, handleAuditClear, handleAuditExport} from '../writes/audit-
 import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
 import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
 import {createSourceCheckService} from '../source-check/pipeline.mjs';
+import {createOperatorService} from '../source-check/operator.mjs';
 import {createExternalReviewer} from '../source-check/review.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
@@ -100,6 +101,13 @@ const sourceCheckService = createSourceCheckService({
       emit
     });
   })
+});
+// 来源操作员：复用同一个任务管理器与证据目录；浏览器启动可在测试中注入，不启动真实窗口。
+const operatorService = createOperatorService({
+  dataDir,
+  taskManager,
+  ...(sourceCheck?.operator?.launch ? {launch: sourceCheck.operator.launch} : {}),
+  ...(sourceCheck?.operator?.maxActiveMs ? {maxActiveMs: sourceCheck.operator.maxActiveMs} : {})
 });
 let actualPort = Number(port);
 let localOrigin = 'http://127.0.0.1:' + actualPort;
@@ -248,7 +256,7 @@ async function activeTaskIdForSession(userId, sessionId) {
   if (!sessionId) return '';
   try {
     const {tasks = []} = await taskManager.list(userId, {sessionId});
-    const active = tasks.find(task => ['queued', 'running', 'waiting_confirmation', 'blocked'].includes(task.state));
+    const active = tasks.find(task => ['queued', 'running', 'running_operator', 'waiting_login', 'waiting_human', 'waiting_confirmation', 'blocked'].includes(task.state));
     return active?.id || '';
   } catch { return ''; }
 }
@@ -585,9 +593,24 @@ const server = http.createServer(async (req, res) => {
         return send(res, out.json, out.status);
       }
 
+      // 来源操作（AI 采集）入口：打开应用内可见 profile，任务在后台运行/等待人工接管。
+      if (url.pathname === '/api/source-check/operator/start') {
+        const out = await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps});
+        return send(res, out.json, out.status || 200);
+      }
+      if (url.pathname === '/api/source-check/operator/continue') {
+        const out = operatorService.continueRun({userId: user.id, taskId: body.taskId});
+        return send(res, out.json, out.status || 200);
+      }
+      if (url.pathname === '/api/source-check/operator/confirm') {
+        const out = operatorService.confirm({userId: user.id, taskId: body.taskId, decision: body.decision});
+        return send(res, out.json, out.status || 200);
+      }
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
       if (url.pathname === '/api/source-check/start') {
-        const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId, url: body.url});
+        const out = body.mode === 'operator'
+          ? await operatorService.start({user, sourceId: body.sourceId, url: body.url, steps: body.steps})
+          : await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId, url: body.url});
         return send(res, out.json, out.status || 200);
       }
       // 清空审计：必须原样输入指定短语；只删本人的审计与确认记录，幂等行保留到 TTL。

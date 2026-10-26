@@ -7,6 +7,9 @@ const escape = zx.escape || (value => String(value ?? ''));
 const STATE_LABELS = {
   queued: '排队中',
   running: '运行中',
+  running_operator: '操作中',
+  waiting_login: '等待登录',
+  waiting_human: '待你处理',
   waiting_confirmation: '待确认',
   blocked: '受阻',
   succeeded: '成功',
@@ -18,7 +21,7 @@ const STATE_LABELS = {
 // 一张任务只进一个分组，避免同一张卡在抽屉里出现两次。
 const GROUPS = [
   {id: 'running', label: '运行中'},
-  {id: 'waiting', label: '待确认'},
+  {id: 'waiting', label: '待你处理'},
   {id: 'drafts', label: '草稿'},
   {id: 'undo', label: '可撤销'},
   {id: 'failed', label: '失败'}
@@ -80,8 +83,8 @@ let refreshing = null;
 let pollTimer = null;
 
 function groupOf(task) {
-  if (task.state === 'queued' || task.state === 'running') return 'running';
-  if (task.state === 'waiting_confirmation' || task.state === 'blocked') return 'waiting';
+  if (task.state === 'queued' || task.state === 'running' || task.state === 'running_operator') return 'running';
+  if (['waiting_confirmation', 'waiting_login', 'waiting_human', 'blocked'].includes(task.state)) return 'waiting';
   if (task.state === 'failed' || task.state === 'cancelled') return 'failed';
   if ((task.drafts || []).some(draft => draft.status === 'draft')) return 'drafts';
   return 'undo';
@@ -181,9 +184,61 @@ function reviewBlock(task) {
   return '<section class="task-block task-review" data-review="' + escape(review.status) + '"><details><summary>' + escape(summary) + '</summary>' + body + '</details></section>';
 }
 
+// 来源操作（operator）时间线：每步动作 + 截图 + 当前停点；等待登录/异常/危险动作时给人工接管入口。
+// 动作日志的事实来源在服务端 action.jsonl，前端只渲染任务记录里的摘要。
+const OPERATOR_ACTION_LABELS = {goto: '打开页面', click: '点击', fill: '填写', press: '按键', evaluate: '执行 JS', wait: '等待', screenshot: '截图', submit: '提交表单'};
+const OPERATOR_RESULT_LABELS = {ok: '完成', paused: '暂停后继续', blocked: '已拦截', rejected: '已拒绝'};
+
+function actorEvidenceUrl(taskId, file) {
+  return '/api/source-check/evidence?taskId=' + encodeURIComponent(taskId) + '&file=' + encodeURIComponent(file);
+}
+
+function operatorBlock(task) {
+  const op = task.operator;
+  if (!op) return '';
+  const actions = Array.isArray(op.actions) ? op.actions : [];
+  const total = Number(op.total) || actions.length;
+  const rows = actions.length
+    ? actions.slice(-10).map(item => {
+        const label = OPERATOR_ACTION_LABELS[item.action] || item.action || '动作';
+        const result = OPERATOR_RESULT_LABELS[item.result] || item.result || '';
+        const shot = item.screenshotRef
+          ? ' <a href="' + escape(actorEvidenceUrl(task.id, item.screenshotRef)) + '" target="_blank" rel="noopener noreferrer">截图</a>'
+          : '';
+        const target = item.target ? ' · ' + escape(String(item.target).slice(0, 80)) : '';
+        return '<li data-operator-step="' + escape(item.step) + '" data-result="' + escape(item.result || '') + '"><b>步骤 ' + escape(item.step) + '</b> ' + escape(label) + target + '<small>' + escape(result) + '</small>' + shot + '</li>';
+      }).join('')
+    : '<li class="placeholder">还没有动作。开始后每步会记录动作与截图。</li>';
+
+  const waiting = op.waiting;
+  let takeover = '';
+  if (waiting && waiting.kind === 'confirm') {
+    const reason = String(waiting.reason || '这一步需要你确认');
+    takeover = '<div class="task-operator-takeover" data-operator-waiting="confirm" role="status">'
+      + '<p>' + escape(reason) + '</p>'
+      + '<div class="task-actions"><button type="button" data-operator-confirm="accept" data-task-id="' + escape(task.id) + '">接受并继续</button>'
+      + '<button type="button" data-operator-confirm="reject" data-task-id="' + escape(task.id) + '">拒绝这一步</button></div></div>';
+  } else if (waiting) {
+    const login = waiting.kind === 'login';
+    const reason = String(waiting.reason || (login ? '页面需要登录。' : '需要你人工处理后继续。'));
+    const label = login ? '已登录，继续' : '已处理，继续';
+    takeover = '<div class="task-operator-takeover" data-operator-waiting="' + escape(waiting.kind || 'human') + '" role="status">'
+      + '<p>' + escape(reason) + '</p>'
+      + '<div class="task-actions"><button type="button" data-operator-action="continue" data-task-id="' + escape(task.id) + '">' + label + '</button></div></div>';
+  }
+
+  const progress = total ? ' · 进度 ' + actions.length + ' / ' + total : '';
+  return '<section class="task-block task-operator" data-operator-state="' + escape(op.state || '') + '">'
+    + '<h5>来源操作 · 人工接管' + escape(progress) + '</h5>'
+    + takeover
+    + '<ol class="task-operator-actions">' + rows + '</ol>'
+    + '<p class="placeholder">每步动作与截图是一份追加记录，只在本机任务证据里；关闭浏览器后登录态仍留在应用 profile。</p>'
+    + '</section>';
+}
+
 function card(task) {
   const counts = task.counts || {};
-  const canStop = ['queued', 'running', 'waiting_confirmation', 'blocked'].includes(task.state);
+  const canStop = ['queued', 'running', 'running_operator', 'waiting_confirmation', 'waiting_login', 'waiting_human', 'blocked'].includes(task.state);
   const error = task.error
     ? '<div class="task-error">' + escape(task.error.code ? task.error.code + ' · ' + task.error.message : task.error.message) + (task.error.recovery ? '（' + escape(task.error.recovery) + '）' : '') + '</div>'
     : '';
@@ -194,6 +249,7 @@ function card(task) {
     + '<p class="task-phase">' + escape(task.phase || '') + '</p>'
     + '<div class="task-meta">自动写入 ' + (Number(counts.writes) || 0) + ' 条 · 批次 ' + (Number(counts.batches) || 0) + ' · 工具 ' + (Number(counts.tools) || 0) + ' · 证据 ' + (Number(counts.evidence) || 0) + ' · 草稿 ' + (Number(counts.drafts) || 0) + '</div>'
     + error
+    + operatorBlock(task)
     + reviewBlock(task)
     + fallbackBlock(task)
     + confirmationBlock(task)
@@ -313,6 +369,45 @@ document.addEventListener('click', async event => {
       state.undoNotes[taskId] = undoResultText(out.counts);
       window.__audit?.refresh();
     }
+    await refresh();
+  } catch (error) {
+    state.error = error.message;
+    render();
+  } finally {
+    button.disabled = false;
+  }
+});
+
+
+// 人工接管：登录/异常/时间上限的「继续」与危险动作的接受/拒绝。
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-operator-action]');
+  if (!button || button.disabled) return;
+  const taskId = button.dataset.taskId;
+  if (!taskId) return;
+  button.disabled = true;
+  try {
+    await zx.api('source-check/operator/continue', {taskId});
+    state.error = '';
+    await refresh();
+  } catch (error) {
+    state.error = error.message;
+    render();
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-operator-confirm]');
+  if (!button || button.disabled) return;
+  const taskId = button.dataset.taskId;
+  const decision = button.dataset.operatorConfirm;
+  if (!taskId || !['accept', 'reject'].includes(decision)) return;
+  button.disabled = true;
+  try {
+    await zx.api('source-check/operator/confirm', {taskId, decision});
+    state.error = '';
     await refresh();
   } catch (error) {
     state.error = error.message;

@@ -33,6 +33,131 @@ async function launchBrowser(t, port) {
   }
 }
 
+
+function operatorPage({loginAfterGoto = true} = {}) {
+  const calls = [];
+  const handlers = new Map();
+  const listUrl = 'https://mp.weixin.qq.com/s/example';
+  let currentUrl = listUrl;
+  let loginSeen = 0;
+  const page = {
+    calls,
+    url: () => {
+      if (currentUrl.includes('/login')) {
+        loginSeen += 1;
+        // 第一次检测看到登录页；用户点「已登录，继续」后模拟登录完成。
+        if (loginSeen > 1) currentUrl = listUrl;
+      }
+      return currentUrl;
+    },
+    title: async () => (currentUrl.includes('/login') ? '登录' : '文章列表'),
+    goto: async url => { calls.push({action: 'goto', url}); currentUrl = loginAfterGoto ? 'https://mp.weixin.qq.com/login' : url; },
+    click: async selector => { calls.push({action: 'click', selector}); },
+    evaluate: async script => (typeof script === 'function' ? '文章列表' : '文章列表'),
+    screenshot: async ({path}) => { await writeFile(path, PNG); },
+    waitForTimeout: async () => {},
+    on: (name, handler) => { if (!handlers.has(name)) handlers.set(name, []); handlers.get(name).push(handler); return page; },
+    emit: async (name, value) => { for (const handler of handlers.get(name) || []) await handler(value); }
+  };
+  return page;
+}
+
+function operatorLauncher(page, capture) {
+  const context = {pages: () => [page], newPage: async () => page, route: async () => {}, on: () => {}, close: async () => { capture.closed = true; }};
+  return async options => { capture.options = options; return context; };
+}
+
+test('operator 任务卡：等待登录时显示动作时间线与人工接管，点「已登录，继续」后完成', {timeout: 180000}, async t => {
+  const pageModel = operatorPage({loginAfterGoto: true});
+  const capture = {};
+  const dir = await mkdtemp(join(tmpdir(), 'zx-ui-operator-'));
+  const app = await createApp({root, dataDir: dir, host: '127.0.0.1', port: 0, sourceCheck: {operator: {launch: operatorLauncher(pageModel, capture)}}});
+  t.after(async () => { await app.close(); await rm(dir, {recursive: true, force: true}); });
+
+  const browser = await launchBrowser(t, app.port);
+  if (!browser) return;
+  t.after(() => browser.close());
+  const context = await browser.newContext({viewport: {width: 390, height: 844}});
+  const page = await context.newPage();
+  await page.goto(app.origin + '/chat');
+  await page.waitForSelector('#account-name', {state: 'visible'});
+  await page.fill('#account-name', 'ui-operator');
+  await page.fill('#account-password', 'correct-horse-battery');
+  await page.click('#account-register');
+  await page.waitForFunction(() => document.querySelector('#account-screen')?.style.display === 'none', null, {timeout: 15000});
+
+  const cookie = (await context.cookies(app.origin)).map(item => item.name + '=' + item.value).join('; ');
+  const startedResponse = await fetch(app.origin + '/api/source-check/operator/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'x-career-token': app.token, cookie},
+    body: JSON.stringify({
+      url: 'https://mp.weixin.qq.com/s/example',
+      steps: [
+        {action: 'goto', url: 'https://mp.weixin.qq.com/s/example'},
+        {action: 'screenshot', label: '文章列表'}
+      ]
+    })
+  });
+  assert.equal(startedResponse.status, 200);
+  const started = await startedResponse.json();
+
+  await page.goto(app.origin + '/chat?session=' + started.sessionId + '&workflow=open');
+  await page.waitForSelector('#workflow-drawer .task-card[data-state="waiting_login"]', {state: 'visible', timeout: 30000});
+  const card = page.locator('#workflow-drawer .task-card').first();
+  const waitingText = await card.innerText();
+  assert.match(waitingText, /等待登录/);
+  assert.match(waitingText, /人工接管/);
+  assert.match(waitingText, /步骤 1/);
+  assert.match(waitingText, /打开页面/);
+  assert.match(waitingText, /页面需要登录/);
+  assert.equal(capture.options.options.headless, false, '任务卡对应的是可见浏览器 profile');
+  assert.ok(await card.locator('[data-operator-action="continue"]').count() === 1, '等待登录要有「已登录，继续」');
+
+  await card.locator('[data-operator-action="continue"]').click();
+  await page.waitForSelector('#workflow-drawer .task-card[data-state="succeeded"]', {timeout: 30000});
+  const finishedText = await page.locator('#workflow-drawer .task-card').first().innerText();
+  assert.match(finishedText, /步骤 2/);
+  assert.match(finishedText, /截图/);
+  assert.match(finishedText, /成功/);
+
+  const layout = await page.evaluate(() => {
+    const drawer = document.querySelector('#workflow-drawer').getBoundingClientRect();
+    const body = document.querySelector('#workflow-body');
+    return {scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, drawerWidth: drawer.width, bodyScroll: body.scrollWidth, bodyClient: body.clientWidth};
+  });
+  assert.ok(layout.scrollWidth <= 390, '390 宽不能横向溢出，实际 ' + layout.scrollWidth);
+  assert.ok(layout.drawerWidth <= 390.5);
+  assert.ok(layout.bodyScroll <= layout.bodyClient + 1, '任务卡时间线不能横向溢出');
+
+  // 第二条：危险动作在任务卡上硬确认；拒绝后不点击，任务继续完成。
+  const confirmResponse = await fetch(app.origin + '/api/source-check/operator/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'x-career-token': app.token, cookie},
+    body: JSON.stringify({
+      url: 'https://career.uibe.edu.cn/zhaopin/',
+      steps: [
+        {action: 'click', target: '#apply', text: '投递简历'},
+        {action: 'evaluate', script: 'document.title'}
+      ]
+    })
+  });
+  assert.equal(confirmResponse.status, 200);
+  const confirmStarted = await confirmResponse.json();
+  const confirmCardSelector = '#workflow-drawer .task-card[data-task-id="' + confirmStarted.taskId + '"]';
+  await page.waitForSelector(confirmCardSelector + '[data-state="waiting_confirmation"]', {state: 'visible', timeout: 30000});
+  const confirmCard = page.locator(confirmCardSelector);
+  const confirmText = await confirmCard.innerText();
+  assert.match(confirmText, /人工接管/);
+  assert.match(confirmText, /投递/);
+  assert.match(confirmText, /接受并继续/);
+  assert.match(confirmText, /拒绝这一步/);
+  await confirmCard.locator('[data-operator-confirm="reject"]').click();
+  await page.waitForSelector(confirmCardSelector + '[data-state="succeeded"]', {timeout: 30000});
+  assert.equal(pageModel.calls.filter(call => call.action === 'click').length, 0, '拒绝后危险点击不能执行');
+  const confirmFinished = await page.locator(confirmCardSelector).innerText();
+  assert.match(confirmFinished, /已拒绝/);
+});
+
 test('来源卡「来源校对」→ 切回对话并打开抽屉；390 宽不溢出；来源卡记最近手动读取', {timeout: 180000}, async t => {
   const reader = async ({source, evidenceDir}) => {
     // 留出时间让任务卡先显示「运行中」，再完成读取。

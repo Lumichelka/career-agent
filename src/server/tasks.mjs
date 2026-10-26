@@ -5,15 +5,18 @@ import {join, dirname} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {UserFairGate} from '../lib/fair-gate.mjs';
 
-export const TASK_STATES = ['queued', 'running', 'waiting_confirmation', 'blocked', 'succeeded', 'failed', 'cancelled', 'undone'];
-export const ACTIVE_TASK_STATES = ['queued', 'running', 'waiting_confirmation', 'blocked'];
+export const TASK_STATES = ['queued', 'running', 'running_operator', 'waiting_login', 'waiting_human', 'waiting_confirmation', 'blocked', 'succeeded', 'failed', 'cancelled', 'undone'];
+export const ACTIVE_TASK_STATES = ['queued', 'running', 'running_operator', 'waiting_login', 'waiting_human', 'waiting_confirmation', 'blocked'];
 export const FINAL_TASK_STATES = ['succeeded', 'failed', 'cancelled', 'undone'];
 // 顶栏徽标只统计「需要我现在处理」的任务；排队和终态都不进徽标。
-export const BADGE_TASK_STATES = ['running', 'waiting_confirmation'];
+export const BADGE_TASK_STATES = ['running', 'running_operator', 'waiting_login', 'waiting_human', 'waiting_confirmation'];
 
 export const TASK_STATE_LABELS = {
   queued: '排队中',
   running: '运行中',
+  running_operator: '操作中',
+  waiting_login: '等待登录',
+  waiting_human: '待你处理',
   waiting_confirmation: '待确认',
   blocked: '受阻',
   succeeded: '成功',
@@ -58,9 +61,10 @@ export class TaskGate extends UserFairGate {
 }
 
 export function summarizeTasks(tasks = []) {
-  const counts = {total: tasks.length, queued: 0, running: 0, waiting_confirmation: 0, blocked: 0, succeeded: 0, failed: 0, cancelled: 0, undone: 0};
+  const counts = {total: tasks.length, queued: 0, running: 0, running_operator: 0, waiting_login: 0, waiting_human: 0, waiting_confirmation: 0, blocked: 0, succeeded: 0, failed: 0, cancelled: 0, undone: 0};
   for (const task of tasks) if (counts[task.state] !== undefined) counts[task.state] += 1;
-  return {tasks, counts, badge: counts.running + counts.waiting_confirmation};
+  const badge = BADGE_TASK_STATES.reduce((sum, state) => sum + (counts[state] || 0), 0);
+  return {tasks, counts, badge};
 }
 
 const DEFAULT_MAX_DURATION_MS = 15 * 60 * 1000;
@@ -92,7 +96,12 @@ function abortRace(signal) {
 // 记录对外只保留任务本身；用户身份从认证里来，不跟随响应泄露。
 export function publicTask(task) {
   const {userId, ...rest} = task;
-  return {...rest, counts: {...task.counts}, evidence: [...(task.evidence || [])], drafts: (task.drafts || []).map(draft => ({...draft})), fallback: task.fallback ? {...task.fallback} : null, review: task.review ? {...task.review, issues: (task.review.issues || []).map(item => ({...item})), error: task.review.error ? {...task.review.error} : null, agent: task.review.agent ? {...task.review.agent} : null} : null};
+  const operator = task.operator ? {
+    ...task.operator,
+    actions: (task.operator.actions || []).map(action => ({...action})),
+    waiting: task.operator.waiting ? {...task.operator.waiting} : null
+  } : null;
+  return {...rest, operator, counts: {...task.counts}, evidence: [...(task.evidence || [])], drafts: (task.drafts || []).map(draft => ({...draft})), fallback: task.fallback ? {...task.fallback} : null, review: task.review ? {...task.review, issues: (task.review.issues || []).map(item => ({...item})), error: task.review.error ? {...task.review.error} : null, agent: task.review.agent ? {...task.review.agent} : null} : null};
 }
 
 export class TaskManager {
@@ -134,6 +143,7 @@ export class TaskManager {
       undo: null,
       fallback: null,
       review: null,
+      operator: null,
       createdAt: at,
       startedAt: null,
       updatedAt: at,
@@ -198,8 +208,8 @@ export class TaskManager {
     const task = await this.read(userId, String(taskId || ''));
     if (!task) return {ok: false, reason: 'missing'};
     if (FINAL_TASK_STATES.includes(task.state)) return {ok: false, reason: 'finished', task: publicTask(task)};
-    // 受阻任务已经没有执行体在跑：取消就是把它收尾为 cancelled，用户可自行重试。
-    if (task.state === 'blocked' || task.state === 'queued') {
+    // 受阻或等待人工接管的任务已经没有执行体在跑（例如服务重启后）：取消就是把它收尾为 cancelled。
+    if (['blocked', 'queued', 'waiting_login', 'waiting_human'].includes(task.state)) {
       task.state = 'cancelled';
       task.phase = '已取消';
       task.error = null;
@@ -404,6 +414,62 @@ export class TaskManager {
           case 'tool_progress':
             emitProgress({progress: event.progress, total: event.total, message: event.message});
             break;
+          // operator 动作时间线：只保留前端展示需要的字段，最多 100 步。
+          case 'operator_action': {
+            const previous = task.operator || {};
+            const entry = {
+              step: Math.max(0, Number(event.step) || 0),
+              action: String(event.action || '').slice(0, 40),
+              target: String(event.target || '').slice(0, 300),
+              url: String(event.url || '').slice(0, 500),
+              result: String(event.result || 'ok').slice(0, 40),
+              screenshotRef: String(event.screenshotRef || '').slice(0, 120),
+              at: String(event.at || nowIso())
+            };
+            task.operator = {
+              ...previous,
+              state: previous.state && !['waiting_login', 'waiting_human', 'waiting_confirmation'].includes(previous.state) ? previous.state : 'running_operator',
+              step: Math.max(Number(event.step) || 0, Number(previous.step) || 0),
+              total: Math.max(0, Number(event.total) || Number(previous.total) || 0),
+              waiting: null,
+              actions: [...(previous.actions || []), entry].slice(-100),
+              updatedAt: nowIso()
+            };
+            touch();
+            void this.persist(task);
+            emitProgress();
+            break;
+          }
+          case 'operator_waiting': {
+            const previous = task.operator || {};
+            const state = ['waiting_login', 'waiting_human', 'waiting_confirmation'].includes(event.state) ? event.state : 'waiting_human';
+            task.operator = {
+              ...previous,
+              state,
+              step: Math.max(0, Number(event.step) || 0),
+              total: Math.max(0, Number(event.total) || 0),
+              waiting: {
+                kind: String(event.kind || 'human').slice(0, 40),
+                reason: String(event.reason || '需要你处理').slice(0, 500),
+                step: Math.max(0, Number(event.step) || 0),
+                confirmId: event.confirmId ? String(event.confirmId) : '',
+                confirmKind: event.confirmKind ? String(event.confirmKind).slice(0, 40) : '',
+                target: String(event.target || '').slice(0, 300),
+                at: nowIso()
+              },
+              updatedAt: nowIso()
+            };
+            void deferState(state, {phase: String(event.reason || '等待你处理').slice(0, 200)});
+            break;
+          }
+          case 'operator_running': {
+            const previous = task.operator || {};
+            task.operator = {...previous, state: 'running_operator', waiting: null, updatedAt: nowIso()};
+            if (['waiting_login', 'waiting_human', 'waiting_confirmation'].includes(task.state)) {
+              void deferState('running_operator', {phase: String(event.phase || '继续执行操作').slice(0, 200)});
+            }
+            break;
+          }
           case 'review': {
             // 复核只存问题列表与失败码，不存调用记录（调用记录只挂助手消息）。
             const source = event.review && typeof event.review === 'object' ? event.review : null;
@@ -488,16 +554,35 @@ export class TaskManager {
       } catch { /* 任务记录不能反过来弄断执行 */ }
     };
 
+    // 人工接管可能等很久：操作中任务在等待期间暂停整任务计时，由 operator 自己的
+    // 单次 10 分钟上限兜底；否则用户还没来得及登录，任务就被总时长判失败。
+    let timerRemaining = this.maxDurationMs;
+    let timerStartedAt = 0;
+    const startTimer = ms => {
+      timerStartedAt = Date.now();
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, Math.max(1, ms));
+    };
+    const suspendTimeout = () => {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = null;
+      timerRemaining = Math.max(0, timerRemaining - (Date.now() - timerStartedAt));
+    };
+    const resumeTimeout = () => {
+      if (timer || timedOut) return;
+      startTimer(timerRemaining);
+    };
+
     try {
       await setState('queued', {phase: '排队等待执行'});
       release = await this.gate.acquire(userId, {signal: controller.signal});
       if (controller.signal.aborted) throw abortedError();
       task.startedAt = nowIso();
       await setState('running', {phase: '正在理解你的需求'});
-      timer = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-      }, this.maxDurationMs);
+      startTimer(this.maxDurationMs);
 
       const execution = Promise.resolve().then(() => execute({
         task: publicTask(task),
@@ -506,7 +591,9 @@ export class TaskManager {
         addDraft,
         addEvidence,
         setPhase,
-        setState
+        setState,
+        suspendTimeout,
+        resumeTimeout
       }));
       execution.catch(() => {});
       const result = await Promise.race([execution, abortRace(controller.signal)]);
@@ -522,11 +609,20 @@ export class TaskManager {
         emitTask();
         return {task: publicTask(task), result, error: null};
       }
+      // 人工接管是活动态：执行体返回时仍停在等待，就保持任务可续跑，不判失败。
+      if (task.state === 'waiting_login' || task.state === 'waiting_human') {
+        task.durationMs = Date.now() - started;
+        touch();
+        await this.persist(task);
+        emitTask();
+        return {task: publicTask(task), result, error: null};
+      }
       // blocked 是活动态（等用户取消/处理），不能被任务收尾改成 succeeded。
-      if (task.state === 'running' || task.state === 'waiting_confirmation') {
+      if (task.state === 'running' || task.state === 'running_operator' || task.state === 'waiting_confirmation') {
         task.state = 'succeeded';
         task.phase = '任务完成';
         task.undo = {available: false, summary: '本次任务没有自动写入记录。', undone: 0, conflicts: 0};
+        if (task.operator) task.operator = {...task.operator, state: 'succeeded', waiting: null, updatedAt: nowIso()};
       }
       task.finishedAt = nowIso();
       task.durationMs = Date.now() - started;
@@ -544,6 +640,7 @@ export class TaskManager {
     } catch (error) {
       task.finishedAt = nowIso();
       task.durationMs = Date.now() - started;
+      if (task.operator) task.operator = {...task.operator, state: timedOut ? 'failed' : controller.signal.aborted ? 'cancelled' : 'failed', waiting: null, updatedAt: nowIso()};
       if (timedOut) {
         task.state = 'failed';
         task.phase = '已停止';
