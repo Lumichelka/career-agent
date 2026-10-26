@@ -245,8 +245,10 @@ export async function runSourceCheck({dataDir, userId, task, source, models = {}
   const raw = extractor
     ? await extractor({screenshots: shots, source, models, signal})
     : await createVisionExtractor({config: models})({screenshots: shots, source, signal});
-  const detailUrl = screenshots.find(shot => shot.id === 'detail')?.url || '';
-  const extraction = normalizeExtraction(raw, {source, detailUrl});
+  const detailShot = screenshots.find(shot => shot.id === 'detail');
+  const detailUrl = detailShot?.url || '';
+  const detailTitle = detailShot?.title || '';
+  const extraction = normalizeExtraction(raw, {source, detailUrl, detailTitle});
   await writeFile(join(evidenceDir, 'extraction.json'), JSON.stringify(extraction, null, 2), 'utf8');
   const skipped = Number(extraction.skipped?.events || 0) + Number(extraction.skipped?.projects || 0);
   await addEvidence({

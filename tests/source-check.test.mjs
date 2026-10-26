@@ -9,7 +9,7 @@ import {createApp} from '../src/server/app.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {resolveSource, writeSourceCheck, SOURCE_CHECK_NOTES} from '../src/source-check/pipeline.mjs';
 import {SourceCheckBlockedError, BROWSER_LAUNCH_OPTIONS, BROWSER_CONTEXT_OPTIONS, detectBlock, openParticipantTab} from '../src/source-check/browser.mjs';
-import {stripContacts} from '../src/source-check/extract.mjs';
+import {normalizeExtraction, stripContacts} from '../src/source-check/extract.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
@@ -336,6 +336,29 @@ test('参会企业页签：找到并点击/滚动；swufe 必需时失败会抛�
   assert.equal(await openParticipantTab(page(0), {required: false}), false);
   await assert.rejects(() => openParticipantTab(page(0), {required: true}), /参会企业/);
   await assert.rejects(() => openParticipantTab(page(1, true), {required: true}), /参会企业|点击/);
+});
+
+
+test('抽取规范化：详情 URL 只给标题匹配的一场，其余留空', () => {
+  const raw = {
+    events: [
+      {title: '西南财经大学2026年秋季大型双选会', startAt: '2026-10-27T14:00:00+08:00'},
+      {title: '西南财经大学第八届律所专场校园招聘会', startAt: '2026-05-12T14:00:00+08:00'},
+      {title: '西南财经大学“校招市集”2026年秋季系列双选会（第一场）', startAt: '2026-09-29T14:00:00+08:00'}
+    ],
+    projects: []
+  };
+  const withTitle = normalizeExtraction(raw, {
+    source: {id: 'swufe-xjh'},
+    detailUrl: DETAIL_URL,
+    detailTitle: '西南财经大学2026年秋季大型双选会-现场双选会-西财智慧就业系统'
+  });
+  assert.equal(withTitle.events[0].sourceUrl, DETAIL_URL, '只有与详情标题匹配的那一场拿到详情 URL');
+  assert.equal(withTitle.events[1].sourceUrl, '', '其余活动不继承 event-0 的详情 URL');
+  assert.equal(withTitle.events[2].sourceUrl, '', '其余活动不继承 event-0 的详情 URL');
+
+  const withoutTitle = normalizeExtraction(raw, {source: {id: 'swufe-xjh'}, detailUrl: DETAIL_URL});
+  assert.deepEqual(withoutTitle.events.map(event => event.sourceUrl), ['', '', ''], '没有详情标题时不能猜 URL');
 });
 
 test('阻断识别与联系方式清洗：登录跳转/验证码停下，联系方式递归丢弃', () => {

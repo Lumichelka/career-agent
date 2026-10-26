@@ -13,6 +13,9 @@ const text = (value, max) => {
   return String(value).trim().slice(0, max);
 };
 
+// 标题比对去掉空白；详情页 title 通常带站点后缀，所以用「长标题包含短标题」判断。
+const titleKeyOf = value => String(value ?? '').replace(/\s+/g, '').trim();
+
 export function isContactField(key) {
   const normalized = String(key ?? '').toLowerCase().replace(/[\s_-]/g, '');
   return CONTACT_KEY.test(normalized);
@@ -46,13 +49,28 @@ export function buildExtractionPrompt(source = {}) {
 }
 
 // 只保留写入需要的事件/单位字段；跳过没有标题/开始时间的活动，跳过没有单位名/项目名的单位。
-export function normalizeExtraction(raw, {source = {}, detailUrl = ''} = {}) {
+export function normalizeExtraction(raw, {source = {}, detailUrl = '', detailTitle = ''} = {}) {
   const cleaned = stripContacts(raw && typeof raw === 'object' ? raw : {});
   const rawEvents = Array.isArray(cleaned.events) ? cleaned.events : [];
   const rawProjects = Array.isArray(cleaned.projects) ? cleaned.projects : [];
   const events = [];
   const indexMap = new Map();
   let skippedEvents = 0;
+  // 只有与详情页标题匹配的那一场才拿到详情 URL；其余留空，绝不把 event-0 的 URL 复制给所有活动。
+  const detailKey = titleKeyOf(detailTitle);
+  let detailIndex = -1;
+  let detailMatchLength = 3;
+  if (detailKey) {
+    rawEvents.forEach((event, index) => {
+      if (!event || typeof event !== 'object' || Array.isArray(event)) return;
+      const key = titleKeyOf(event.title);
+      if (!key || key.length < 4) return;
+      if ((detailKey.includes(key) || key.includes(detailKey)) && key.length > detailMatchLength) {
+        detailMatchLength = key.length;
+        detailIndex = index;
+      }
+    });
+  }
   for (let index = 0; index < rawEvents.length; index++) {
     const input = rawEvents[index];
     if (!input || typeof input !== 'object' || Array.isArray(input)) { skippedEvents++; continue; }
@@ -68,7 +86,7 @@ export function normalizeExtraction(raw, {source = {}, detailUrl = ''} = {}) {
       school: text(input.school, 60) || '西南财经大学',
       city: text(input.city, 20) || '成都',
       kind: text(input.kind, 20) || '双选会',
-      sourceUrl: detailUrl || text(input.sourceUrl, 500)
+      sourceUrl: index === detailIndex && detailUrl ? detailUrl : ''
     });
   }
   const projects = [];
