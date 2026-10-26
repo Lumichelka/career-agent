@@ -2,10 +2,26 @@
 // 不启用 stealth / 反检测参数，不伪装 UA/指纹；不翻页、不并发、不绕过登录或验证码。
 import {chromium} from 'playwright';
 import {join} from 'node:path';
+import {sourceCheckConfig, selectDetailHref} from './config.mjs';
 
 // 启动与上下文参数是公开契约：测试据此断言没有 stealth 与 UA 伪装。
 export const BROWSER_LAUNCH_OPTIONS = {channel: 'msedge', headless: true};
 export const BROWSER_CONTEXT_OPTIONS = {locale: 'zh-CN', viewport: {width: 1366, height: 900}};
+
+// 页面内取链接的脚本以字符串下发：Playwright 无法把函数参数序列化进页面，
+// 详情链接的挑选（pattern/启发式）留在 Node 侧执行。
+export const COLLECT_LINKS_SCRIPT = '[...document.querySelectorAll(\'a[href]\')].map(a => ({href: a.href, text: (a.innerText || a.textContent || \'\').trim()}))';
+
+// 列表页 → 详情链接：脚本只取原始链接，selectDetailHref 在 Node 侧跑；失败返回空串。
+export async function findDetailHref(page, {pattern = ''} = {}) {
+  let links = [];
+  try {
+    links = await page.evaluate(COLLECT_LINKS_SCRIPT);
+  } catch {
+    links = [];
+  }
+  return selectDetailHref(Array.isArray(links) ? links : [], {pattern});
+}
 
 const BLOCK_URL = /\/(login|signin|passport|sso|captcha|verify|auth)(\b|[/?#])/i;
 const BLOCK_TEXT = /(请输入验证码|验证码|安全验证|人机验证|访问过于频繁|访问受限|403\s*Forbidden|Access\s*Denied|captcha)/i;
@@ -75,24 +91,25 @@ async function readPage(page, url, {signal, textLimit = 8000} = {}) {
 
 // 详情页默认停在「招聘会详情」；「参会企业」是同一页内的页签，点开才能看到单位列表。
 // 这不算翻页/批量：仍是一次详情读取、一张截图，只是把单位列表滚进截图。
-export async function openParticipantTab(page, {required = false} = {}) {
+export async function openParticipantTab(page, {required = false, label = '参会企业'} = {}) {
+  const tabLabel = String(label || '参会企业');
   let count = 0;
-  try { count = await page.getByText('参会企业', {exact: true}).first().count(); } catch { count = 0; }
+  try { count = await page.getByText(tabLabel, {exact: true}).first().count(); } catch { count = 0; }
   if (!count) {
-    if (required) throw new SourceCheckError('SOURCE_NO_PARTICIPANTS', '详情页没有找到「参会企业」页签，无法确认单位列表；已停止，不写入空单位。', '在普通浏览器人工打开详情页核对；或确认来源页结构变化。');
+    if (required) throw new SourceCheckError('SOURCE_NO_PARTICIPANTS', '详情页没有找到「' + tabLabel + '」页签，无法确认单位列表；已停止，不写入空单位。', '在普通浏览器人工打开详情页核对；或确认来源页结构变化。');
     return false;
   }
   try {
-    await page.getByText('参会企业', {exact: true}).first().click({timeout: 10000});
+    await page.getByText(tabLabel, {exact: true}).first().click({timeout: 10000});
     await page.waitForTimeout(1200);
-    await page.evaluate(() => {
-      const tab = [...document.querySelectorAll('*')].find(node => node.textContent?.trim() === '参会企业');
+    await page.evaluate(label => {
+      const tab = [...document.querySelectorAll('*')].find(node => node.textContent?.trim() === label);
       tab?.scrollIntoView({block: 'start'});
-    });
+    }, tabLabel);
     await page.waitForTimeout(400);
     return true;
   } catch (error) {
-    if (required) throw new SourceCheckError('SOURCE_PARTICIPANTS_FAILED', '「参会企业」页签点击失败，无法确认单位列表；已停止，不写入空单位。', '在普通浏览器人工打开详情页核对，或稍后重试。');
+    if (required) throw new SourceCheckError('SOURCE_PARTICIPANTS_FAILED', '「' + tabLabel + '」页签点击失败，无法确认单位列表；已停止，不写入空单位。', '在普通浏览器人工打开详情页核对，或稍后重试。');
     return false;
   }
 }
@@ -100,6 +117,10 @@ export async function openParticipantTab(page, {required = false} = {}) {
 // 默认读取器：Playwright + 本机 Edge，列表 1 次 + 详情 1 次，各截图一次。
 export async function readSourcePages({source, evidenceDir, signal} = {}) {
   if (!source?.listUrl) throw new SourceCheckError('INVALID_SOURCE', '这个来源没有可读取的列表地址。', '改用手动导入。');
+  const cfg = sourceCheckConfig(source) || {};
+  const detailPattern = cfg.detailPattern || '';
+  const participantTab = cfg.participantTab || '';
+  const participantRequired = cfg.participantRequired === true;
   const browser = await openBrowser();
   try {
     const context = await browser.newContext(BROWSER_CONTEXT_OPTIONS);
@@ -111,17 +132,17 @@ export async function readSourcePages({source, evidenceDir, signal} = {}) {
     await page.screenshot({path: listFile});
     const listAt = new Date().toISOString();
 
-    const detailHref = await page.evaluate(() => {
-      const links = [...document.querySelectorAll('a[href]')];
-      const hit = links.find(link => /jobfair-show-\d+\.htm/i.test(link.getAttribute('href') || '') || /jobfair-show-\d+\.htm/i.test(link.href || ''));
-      return hit ? hit.href : '';
-    }).catch(() => '');
+    // 详情链接：显式 pattern 优先（swufe 等），否则用通用启发式挑第一条「活动详情」链接。
+    // 注意不要把函数传给 page.evaluate：Playwright 只会序列化参数值，函数会直接报错。
+    const detailHref = await findDetailHref(page, {pattern: detailPattern});
     if (!detailHref) {
       throw new SourceCheckError('SOURCE_NO_DETAIL', '列表页没有找到可打开的活动详情链接，已停止，未写入任何数据。', '在普通浏览器人工打开活动后手动导入。');
     }
 
     const detail = await readPage(page, detailHref, {signal});
-    await openParticipantTab(page, {required: source.id === 'swufe-xjh'});
+    if (participantTab) {
+      await openParticipantTab(page, {required: participantRequired, label: participantTab});
+    }
     await page.screenshot({path: detailFile});
     const detailAt = new Date().toISOString();
 

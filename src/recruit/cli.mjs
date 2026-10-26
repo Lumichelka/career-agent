@@ -8,34 +8,22 @@
 //   node recruit/cli.mjs probe
 //   node recruit/cli.mjs verify
 import {join, resolve} from 'node:path';
-import {writeFileSync, readFileSync, existsSync} from 'node:fs';
-import {SOURCES, sourceById} from './sources/index.mjs';
+import {writeFileSync} from 'node:fs';
+import {SOURCES, REMOVED_SOURCES, sourceById} from './sources/index.mjs';
 import {runCollection, collectSource} from './collect.mjs';
 import {RecruitStore} from './store.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
-import {resolveDataDir} from '../config/paths.mjs';
+import {verifyEvent} from './verify.mjs';
+import {defaultUserDataDir} from '../config/paths.mjs';
 
 const argv = process.argv.slice(2);
 const command = argv[0] || 'help';
 const flag = name => { const i = argv.indexOf('--' + name); return i >= 0 ? argv[i + 1] : ''; };
 const many = name => argv.reduce((acc, v, i) => (v === '--' + name && argv[i + 1] ? [...acc, argv[i + 1]] : acc), []);
-// 默认写到网页里 owner 账号的数据目录，这样命令行采集的结果网页也能看到。
-function defaultDataDir() {
-  const base = resolveDataDir();
-  try {
-    const accounts = JSON.parse(readFileSync(join(base, 'accounts.json'), 'utf8'));
-    if (accounts.length === 1) {
-      const dir = join(base, 'users', accounts[0].id, '.data');
-      if (existsSync(dir)) return dir;
-    }
-  } catch { /* 还没初始化过账号 */ }
-  return base;
-}
-
 const days = Number(flag('days') || 30);
-const dataDir = resolve(flag('data') || defaultDataDir());
-const openStore = () => { const s = RecruitStore.open(join(dataDir, 'recruit.db')); s.syncSources(SOURCES); return s; };
+const dataDir = resolve(flag('data') || defaultUserDataDir());
+const openStore = () => { const s = RecruitStore.open(join(dataDir, 'recruit.db')); s.syncSources(SOURCES, REMOVED_SOURCES); return s; };
 const line = '─'.repeat(66);
 
 function fmt(iso) {
@@ -52,7 +40,7 @@ if (command === 'sources') {
   let category = '';
   for (const s of states) {
     if (s.category !== category) { category = s.category; console.log('\n【' + category + '】'); }
-    const flagText = s.enabled ? (s.last_status ? '最近：' + s.last_status : '已接入') : '未接入';
+    const flagText = s.orphaned ? '来源已下线' : (s.enabled ? (s.last_status ? '最近：' + s.last_status : '已接入') : '未接入');
     console.log(` ${s.id.padEnd(18)} ${s.name.padEnd(28)} ${String(flagText).padEnd(12)} ${s.mode}`);
     if (!s.enabled && s.note) console.log(`   └ ${s.note}`);
   }
@@ -98,12 +86,12 @@ if (command === 'sources') {
   let ok = 0, bad = 0;
   for (const e of events) {
     if (!e.sourceUrl) continue;
-    const res = await fetchText(e.sourceUrl, {timeout: 15000, retries: 0});
-    const hit = e.title.replace(/\s+/g, '').slice(0, 12);
-    const pass = res.ok && res.text.replace(/\s+/g, '').includes(hit);
-    store.setVerified(e.id, pass ? 1 : 0, pass ? '来源页面仍包含该活动' : '来源页面已变化');
-    if (pass) ok++; else bad++;
-    console.log(`${pass ? '✔' : '✘'} ${fmt(e.startAt)} ${e.school} ${e.title.slice(0, 30)}`);
+    let source;
+    try { source = sourceById(e.sourceId); } catch { source = {id: e.sourceId || 'unknown', listUrl: e.sourceUrl}; }
+    const r = await verifyEvent(source, e);
+    store.setVerified(e.id, r.ok ? 1 : 0, r.reason);
+    if (r.ok) ok++; else bad++;
+    console.log(`${r.ok ? '✔' : '✘'} ${fmt(e.startAt)} ${e.school} ${e.title.slice(0, 30)}  ${r.reason}`);
   }
   console.log(`\n复核完成：${ok} 条仍然有效，${bad} 条需人工确认。`);
   store.close();

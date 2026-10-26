@@ -15,3 +15,5 @@ async function bridge(action, args, ctx) {
 export const status = (args, ctx) => bridge('status', args, ctx);
 export const search = (args, ctx) => bridge('search', args, ctx);
 export const read = (args, ctx) => bridge('read', args, ctx);
+export const jobs = (args, ctx) => bridge('jobs', args, ctx);
+export const jobsSave = (args, ctx) => bridge('jobsSave', args, ctx);

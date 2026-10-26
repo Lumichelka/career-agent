@@ -9,17 +9,42 @@
       "scale": "150-500人",
       "city_name": "成都市",
       "field_no": "A01",
-      "publish_type": "现场招聘"
+      "publish_type": "现场招聘",
+      "job_name": "管培生（研发）",
+      "degree_require": "本科及以上",
+      "job_number": "2",
+      "salary": "8K-12K/月",
+      "about_major": "电气工程及其自动化，自动化，电子信息工程，通信工程，计算机科学与技术"
     },
     {
       "jobfair_apply_job_id": "6763299",
+      "company_id": "189188",
+      "company_name": "深圳市朗驰欣创科技股份有限公司成都分公司",
+      "industry_category": "信息传输、软件和信息技术服务业",
+      "scale": "150-500人",
+      "city_name": "成都市",
+      "field_no": "A01",
+      "publish_type": "现场招聘",
+      "job_name": "管培生（营销）",
+      "degree_require": "本科及以上",
+      "job_number": "2",
+      "salary": "6K-8K/月",
+      "about_major": "不限专业"
+    },
+    {
+      "jobfair_apply_job_id": "6763300",
       "company_id": "189189",
       "company_name": "成都某某制造有限公司",
       "industry_category": "制造业",
       "scale": "500-1000人",
       "city_name": "成都市",
       "field_no": "A02",
-      "publish_type": "现场招聘"
+      "publish_type": "",
+      "job_name": "",
+      "degree_require": "",
+      "job_number": "",
+      "salary": "",
+      "about_major": ""
     }
   ]
 }

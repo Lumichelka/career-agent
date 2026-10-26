@@ -21,6 +21,8 @@ export const HANDLERS = {
   'platform.status': platform.status,
   'platform.search': platform.search,
   'platform.read': platform.read,
+  'platform.jobs': platform.jobs,
+  'platform.jobsSave': platform.jobsSave,
   'resume.list': resume.list,
   'resume.read': resume.read,
   'interview.list': interview.list,

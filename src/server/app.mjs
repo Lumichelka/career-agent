@@ -5,9 +5,11 @@ import {BACKEND_CHOICES, MAX_IMAGE_BYTES, BackendChoice, isImageAttachment, norm
 import {runApiModel, probeApi} from '../model/api-model.mjs';
 import {runDiagnostics} from '../model/diag.mjs';
 import {KeyVault} from '../model/keyvault.mjs';
+import {makeFetch} from '../model/proxy-fetch.mjs';
 import {PlatformBrowser} from '../platform/platforms.mjs';
 import {PLATFORM_SITES} from '../platform/sites.mjs';
 import {handleRecruit} from '../recruit/api.mjs';
+import {listPlatformJobs, savePlatformJobs} from '../recruit/platform-jobs-service.mjs';
 import {handleResume} from '../resume/api.mjs';
 import {handleCompany} from '../company/api.mjs';
 import {handleWechat} from '../wechat/api.mjs';
@@ -241,6 +243,37 @@ async function platformReadForTask(platforms, action, body) {
   return {...result, message: choice === 'skip' ? '用户选择暂不登录。请说明缺少平台来源，使用公开资料完成可行部分。' : choice === 'timeout' ? '等待本人登录超时，本次未取得平台资料。' : '用户已停止任务。'};
 }
 
+// 平台桥只带会话 id；确认记录要绑到当前任务 id，任务卡才按任务取得到。
+async function activeTaskIdForSession(userId, sessionId) {
+  if (!sessionId) return '';
+  try {
+    const {tasks = []} = await taskManager.list(userId, {sessionId});
+    const active = tasks.find(task => ['queued', 'running', 'waiting_confirmation', 'blocked'].includes(task.state));
+    return active?.id || '';
+  } catch { return ''; }
+}
+
+// 平台桥与网页共用：jobs 只返回本机清单；jobsSave 先生成待确认记录，用户接受后由服务端重放写入。
+// 桥身份只来自正在运行的任务（见下方早期分支），网页走登录 cookie，两条路都落到同一个租户目录。
+async function platformJobsAction(action, {dir, userId, platforms, body}) {
+  if (action === 'jobs') {
+    return listPlatformJobs({dir, q: body.q || '', city: body.city || '', platform: body.platform || '', limit: body.limit});
+  }
+  const sessionId = String(body.taskId || '');
+  const taskId = await activeTaskIdForSession(userId, sessionId) || sessionId;
+  const snapshot = PLATFORM_SITES[body.platform] ? platforms.lastRead(body.platform) : null;
+  const result = await savePlatformJobs({
+    dir, userId, taskId, platform: body.platform,
+    city: body.city || '', query: body.query || '', sourceUrls: body.sourceUrls,
+    snapshot, idempotencyKey: body.idempotencyKey, confirmId: body.confirmId || ''
+  });
+  // Codex 这类外部执行体的工具结果不会触发任务卡；由服务端补一条待确认事件。
+  if (result.status === 'confirm_required' && sessionId) {
+    taskEvents.get(sessionId)?.({type: 'confirm_required', taskId, tool: 'career_platform_jobs_save', confirmId: result.confirmId, preview: result.preview, expiresAt: result.expiresAt});
+  }
+  return result;
+}
+
 // 首次出网确认（按 (user, agent)）：任务在等待期间是 waiting_confirmation，接受后本轮继续；拒绝则不发内容。
 const OUTBOUND_TIMEOUT_MS = 300000;
 function askOutboundConsent({userId, taskId, agent, emit, signal}) {
@@ -334,8 +367,8 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
 
-    if (req.method === 'GET' && ['/ui-model.js', '/liveness.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/agents.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
-      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/liveness.js': 'src/web/liveness.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/audit.js': 'src/web/audit.js', '/backends.js': 'src/web/backends.js', '/agents.js': 'src/web/agents.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
+    if (req.method === 'GET' && ['/ui-model.js', '/liveness.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/agents.js', '/recruit-cards.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {
+      const assets = {'/ui-model.js': 'src/web/ui-model.js', '/recruit-cards.js': 'src/web/recruit-cards.js', '/liveness.js': 'src/web/liveness.js', '/inbound.js': 'src/web/inbound.js', '/capabilities.js': 'src/web/capabilities.js', '/memory.js': 'src/web/memory.js', '/artifact.js': 'src/web/artifact.js', '/workflow.js': 'src/web/workflow.js', '/audit.js': 'src/web/audit.js', '/backends.js': 'src/web/backends.js', '/agents.js': 'src/web/agents.js', '/vendor/mammoth.js': 'node_modules/mammoth/mammoth.browser.min.js', '/vendor/pdf.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.mjs', '/vendor/pdf.worker.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs'};
       const content = await readFile(join(root, assets[url.pathname]));
       res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff'});
       return res.end(content);
@@ -362,14 +395,18 @@ const server = http.createServer(async (req, res) => {
 
     let user = accounts.authenticate(req.headers.cookie);
     // The model bridge may only access the tenant of a currently running task.
-    if (!user && req.method === 'POST' && ['/api/platform/status', '/api/platform/search', '/api/platform/read'].includes(url.pathname)) {
+    if (!user && req.method === 'POST' && ['/api/platform/status', '/api/platform/search', '/api/platform/read', '/api/platform/jobs', '/api/platform/jobsSave'].includes(url.pathname)) {
       let raw = '';
-      for await (const b of req) { raw += b; if (raw.length > 4096) return send(res, {error: '请求过长'}, 413); }
+      const bodyLimit = url.pathname.endsWith('/jobsSave') ? 65536 : 4096;
+      for await (const b of req) { raw += b; if (raw.length > bodyLimit) return send(res, {error: '请求过长'}, 413); }
       const b = JSON.parse(raw || '{}');
       user = owners.get(b.taskId);
       if (bridgeTokens.get(req.headers['x-career-token']) !== b.taskId || !user || !running.has(b.taskId)) return send(res, {error: '任务无权访问'}, 403);
       const t = await tenant(user);
-      return send(res, url.pathname.endsWith('/status') ? {platforms: await t.platforms.statuses()} : await platformReadForTask(t.platforms, url.pathname.split('/').pop(), b));
+      const action = url.pathname.split('/').pop();
+      if (action === 'status') return send(res, {platforms: await t.platforms.statuses()});
+      if (action === 'jobs' || action === 'jobsSave') return send(res, await platformJobsAction(action, {dir: t.dir, userId: user.id, platforms: t.platforms, body: b}));
+      return send(res, await platformReadForTask(t.platforms, action, b));
     }
     if (!user) return send(res, {error: '请先登录自己的测试账号'}, 401);
 
@@ -473,7 +510,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, out.json, out.status || 200);
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/wechat')) {
-      const out = await handleWechat({method: 'GET', pathname: url.pathname.slice('/api/wechat/'.length), url, dir});
+      const out = await handleWechat({method: 'GET', pathname: url.pathname.slice('/api/wechat/'.length), url, dir, userId: user.id});
       if (!out) return send(res, {error: '未知的公众号接口'}, 404);
       return send(res, out.json, out.status || 200);
     }
@@ -550,7 +587,7 @@ const server = http.createServer(async (req, res) => {
 
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
       if (url.pathname === '/api/source-check/start') {
-        const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId});
+        const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId, url: body.url});
         return send(res, out.json, out.status || 200);
       }
       // 清空审计：必须原样输入指定短语；只删本人的审计与确认记录，幂等行保留到 TTL。
@@ -637,12 +674,12 @@ const server = http.createServer(async (req, res) => {
         return send(res, out.json, out.status || 200);
       }
       if (url.pathname.startsWith('/api/wechat')) {
-        const out = await handleWechat({method: 'POST', pathname: url.pathname.slice('/api/wechat/'.length), body, dir});
+        const out = await handleWechat({method: 'POST', pathname: url.pathname.slice('/api/wechat/'.length), body, dir, userId: user.id, actorType: 'model'});
         if (!out) return send(res, {error: '未知的公众号接口'}, 404);
         return send(res, out.json, out.status || 200);
       }
       if (url.pathname.startsWith('/api/companies')) {
-        const out = await handleCompany({method: 'POST', pathname: url.pathname.slice('/api/'.length), body, dir});
+        const out = await handleCompany({method: 'POST', pathname: url.pathname.slice('/api/'.length), body, dir, searchUrl: models.snapshot().searchUrl, fetchImpl: samplingFetch || makeFetch(models.snapshot().proxy)});
         if (!out) return send(res, {error: '未知的公司档案接口'}, 404);
         return send(res, out.json, out.status || 200);
       }
@@ -710,6 +747,9 @@ const server = http.createServer(async (req, res) => {
           if (!pending) return send(res, {error: '当前没有等待登录的任务'}, 409);
           pending(action);
           return send(res, {ok: true});
+        }
+        if (action === 'jobs' || action === 'jobsSave') {
+          return send(res, await platformJobsAction(action, {dir, userId: user.id, platforms, body}));
         }
         if (body.taskId) await load(dir, body.taskId);
         if (action === 'read' || action === 'search') return send(res, await platformReadForTask(platforms, action, body));

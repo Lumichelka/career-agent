@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp, rm, mkdir, writeFile, readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {resolveDataDir, prepareDataDir, legacyDataDir} from '../src/config/paths.mjs';
+import {resolveDataDir, prepareDataDir, legacyDataDir, defaultUserDataDir} from '../src/config/paths.mjs';
 
 test('数据目录：环境变量优先', () => {
   const custom = join(tmpdir(), 'zx-custom-data');
@@ -17,6 +17,19 @@ test('数据目录：Windows 默认放 LOCALAPPDATA', () => {
 
 test('数据目录：非 Windows 用 home', () => {
   assert.ok(resolveDataDir({env: {}, platform: 'linux', home: '/home/demo'}).endsWith('.zhixiang'));
+});
+
+test('CLI 默认数据目录：单账号下钻到 users/<id>/.data，多账号/目录不存在时回退 base', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'zx-base-'));
+  try {
+    assert.equal(defaultUserDataDir({base}), base, '没有 accounts.json 时回退 base');
+    const userId = '12345678-1234-1234-1234-123456789abc';
+    await mkdir(join(base, 'users', userId, '.data'), {recursive: true});
+    await writeFile(join(base, 'accounts.json'), JSON.stringify([{id: userId}]), 'utf8');
+    assert.equal(defaultUserDataDir({base}), join(base, 'users', userId, '.data'));
+    await writeFile(join(base, 'accounts.json'), JSON.stringify([{id: userId}, {id: 'other'}]), 'utf8');
+    assert.equal(defaultUserDataDir({base}), base, '多账号不猜');
+  } finally { await rm(base, {recursive: true, force: true}); }
 });
 
 test('旧数据迁移：复制账号与文件，不删除旧目录', async () => {

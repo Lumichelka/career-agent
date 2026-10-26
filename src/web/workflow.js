@@ -27,12 +27,19 @@ const GROUPS = [
 const state = {tasks: [], confirmations: [], counts: {}, badge: 0, open: false, error: '', confirmError: '', loaded: false, undoNotes: {}};
 
 // 敏感写入确认：待确认区展示脱敏预览与接受/拒绝；已处理记录并入审计区且不可撤销。
-const TOOL_LABELS = {career_profile_write: '写入长期画像'};
+const TOOL_LABELS = {career_profile_write: '写入长期画像', career_platform_jobs_save: '平台岗位入库'};
 const toolLabel = name => TOOL_LABELS[name] || name || '敏感写入';
 
 function previewText(preview) {
   if (!preview) return '（没有可预览的内容）';
   if (Array.isArray(preview.facts)) return preview.facts.map(fact => (fact.key || '要点') + '：' + (fact.value ?? '')).join('\n');
+  if (Array.isArray(preview.jobs)) {
+    const head = '平台：' + (preview.platformName || preview.platform || '—')
+      + (preview.city ? ' · 城市 ' + preview.city : '')
+      + ' · 共 ' + (preview.total ?? preview.jobs.length) + ' 个岗位（只保存页面实际读到的摘要，不代投递）';
+    const rows = preview.jobs.map(job => [job.company, job.title, job.city, job.positions].filter(Boolean).join(' · ') + (job.sourceUrl ? '\n' + job.sourceUrl : '')).join('\n');
+    return head + '\n' + rows;
+  }
   return JSON.stringify(preview, null, 1);
 }
 

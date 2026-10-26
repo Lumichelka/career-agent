@@ -2,13 +2,16 @@
 // 这里只负责"算出结果"，写响应的细节交给 server.mjs。
 import {join} from 'node:path';
 import {RecruitStore} from './store.mjs';
-import {SOURCES, sourceById} from './sources/index.mjs';
+import {SOURCES, REMOVED_SOURCES, sourceById} from './sources/index.mjs';
 import {runCollection, htmlToText, normalize} from './collect.mjs';
 import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
+import {verifyEvent} from './verify.mjs';
 import {parseRenderedText} from './browser.mjs';
 import {WeChatStore} from '../wechat/store.mjs';
+import {listPlatformJobs} from './platform-jobs-service.mjs';
+import {sourceCheckEnabled} from '../source-check/config.mjs';
 
 const MAX_DAYS = 180;
 
@@ -21,7 +24,7 @@ function range(url) {
 
 function withStore(dir, fn) {
   const store = RecruitStore.open(join(dir, 'recruit.db'));
-  try { store.syncSources(SOURCES); return fn(store); } finally { store.close(); }
+  try { store.syncSources(SOURCES, REMOVED_SOURCES); return fn(store); } finally { store.close(); }
 }
 
 async function concurrent(items, size, fn) {
@@ -37,7 +40,7 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
   if (method === 'GET') {
     if (pathname === 'sources') {
       const data = withStore(dir, store => ({sources: store.sourceStates(), runs: store.recentRuns(10), stats: store.stats(), manualReads: store.manualReads()}));
-      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', sourceCheck: s.id === 'swufe-xjh', capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: true}}]));
+      const catalog = Object.fromEntries(SOURCES.map(s => [s.id, {category: s.category, channel: s.channel, fallback: s.fallback || '', note: s.note || '', sourceCheck: sourceCheckEnabled(s), loginRequired: s.loginRequired === true, manualConfirm: s.manualConfirm === true, collectMode: s.collectMode || 'auto', capabilities: {...(s.capabilities || {list: s.mode, detail: s.detail ? 'http' : 'none', projects: typeof s.fetchProjects === 'function' ? 'custom' : 'none'}), manual: true}}]));
       let wechat = {accounts: [], stats: {accounts: 0, articles: 0}};
       try {
         const ws = WeChatStore.open(join(dir, 'wechat.db'));
@@ -71,6 +74,15 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
         day.events.push(e);
       }
       return {json: {month, days, stats: {events: events.length, projects: events.reduce((n, e) => n + (e.projects?.length || 0), 0)}}};
+    }
+    if (pathname === 'platform-jobs') {
+      return {json: listPlatformJobs({
+        dir,
+        q: url.searchParams.get('q') || '',
+        city: url.searchParams.get('city') || '',
+        platform: url.searchParams.get('platform') || '',
+        limit: Number(url.searchParams.get('limit')) || 50
+      })};
     }
     if (pathname.startsWith('projects/')) {
       const id = pathname.split('/')[1];
@@ -211,16 +223,11 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
       const event = withStore(dir, store => store.getEvent(id));
       if (!event) return {status: 404, json: {error: '没有这条记录'}};
       if (!event.sourceUrl) return {status: 400, json: {error: '这条记录没有来源链接，无法复核'}};
-      const res = await fetchText(event.sourceUrl, {timeout: 20000, retries: 0});
-      if (!res.ok) {
-        withStore(dir, store => store.setVerified(id, 0, '复核失败：' + res.message));
-        return {json: {ok: false, message: '来源链接打不开：' + res.message}};
-      }
-      const text = htmlToText(res.text).replace(/\s+/g, '');
-      const hit = event.title.replace(/\s+/g, '').slice(0, 12);
-      const ok = hit.length >= 4 && text.includes(hit);
-      withStore(dir, store => store.setVerified(id, ok ? 1 : 0, ok ? '来源页面仍包含该活动' : '来源页面已变化，未找到活动标题'));
-      return {json: {ok, message: ok ? '已复核：来源页面仍包含该活动' : '来源页面已变化，请点开链接人工确认'}};
+      let source;
+      try { source = sourceById(event.sourceId); } catch { source = {id: event.sourceId || 'unknown', listUrl: event.sourceUrl}; }
+      const r = await verifyEvent(source, event);
+      withStore(dir, store => store.setVerified(id, r.ok ? 1 : 0, r.reason));
+      return {json: {ok: r.ok, category: r.category, message: r.ok ? '已复核：' + r.reason : r.reason}};
     }
 
     if (pathname === 'probe') {
@@ -237,4 +244,3 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
 
   return null;
 }
-

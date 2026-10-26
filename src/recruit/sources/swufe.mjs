@@ -13,6 +13,7 @@ export default {
   capabilities: {list: 'static', detail: 'none', projects: 'none'},
   enabled: false,
   listUrl: 'https://job3.swufe.edu.cn/jobfair/jobfair-list-.htm',
+  sourceCheck: {enabled: true, detailPattern: 'jobfair-show-\\d+\\.htm', participantTab: '参会企业', participantRequired: true},
   note: "robots 禁止抓取；只保留公众号作为学校来源。",
   fallback: '官方微信公众号「西南财经大学就业指导中心」+ 人工转发链接',
   parseList(html, source) {

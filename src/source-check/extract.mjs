@@ -45,12 +45,21 @@ export const EXTRACTION_PROMPT = [
 ].join('\n');
 
 export function buildExtractionPrompt(source = {}) {
-  return EXTRACTION_PROMPT + '\n来源：' + String(source.name || source.school || '未知来源') + '；学校默认西南财经大学，城市默认成都，类型默认双选会。';
+  const school = text(source.school, 60);
+  const city = text(source.city, 20);
+  const kind = text(source.kind, 20);
+  const defaults = (school || city || kind)
+    ? '学校默认' + (school || '（无）') + '，城市默认' + (city || '（无）') + '，类型默认' + (kind || '（无）') + '；截图上读不到的字段留空，不要硬套默认值。'
+    : '没有已知默认学校/城市/类型；以截图为准，读不到就留空，不要猜测。';
+  return EXTRACTION_PROMPT + '\n来源：' + String(source.name || source.school || '未知来源') + '；' + defaults;
 }
 
 // 只保留写入需要的事件/单位字段；跳过没有标题/开始时间的活动，跳过没有单位名/项目名的单位。
 export function normalizeExtraction(raw, {source = {}, detailUrl = '', detailTitle = ''} = {}) {
   const cleaned = stripContacts(raw && typeof raw === 'object' ? raw : {});
+  const defaultSchool = text(source.school, 60);
+  const defaultCity = text(source.city, 20);
+  const defaultKind = text(source.kind, 20);
   const rawEvents = Array.isArray(cleaned.events) ? cleaned.events : [];
   const rawProjects = Array.isArray(cleaned.projects) ? cleaned.projects : [];
   const events = [];
@@ -83,9 +92,9 @@ export function normalizeExtraction(raw, {source = {}, detailUrl = '', detailTit
       startAt,
       endAt: text(input.endAt, 40),
       venue: text(input.venue, 200),
-      school: text(input.school, 60) || '西南财经大学',
-      city: text(input.city, 20) || '成都',
-      kind: text(input.kind, 20) || '双选会',
+      school: text(input.school, 60) || defaultSchool,
+      city: text(input.city, 20) || defaultCity,
+      kind: text(input.kind, 20) || defaultKind,
       sourceUrl: index === detailIndex && detailUrl ? detailUrl : ''
     });
   }

@@ -14,14 +14,46 @@ export const SOURCES = modules
   .filter(Boolean)
   .sort((a, b) => a.id.localeCompare(b.id));
 
+// 已下线来源（墓碑）：源码文件已移除，但库里仍有历史活动。
+// 对账时用它们把孤儿源留在 sources 表里并标 orphaned，保证活动能追到历史来源，而不是删除谱系。
+export const REMOVED_SOURCES = [
+  {
+    id: 'nankai-recruitment',
+    name: '南开大学 · 双选会信息',
+    school: '南开大学',
+    city: '天津',
+    category: '财经强校',
+    channel: '就业信息网',
+    kind: '双选会',
+    mode: 'static',
+    listUrl: 'https://career.nankai.edu.cn/recruitment/index.html',
+    enabled: false,
+    note: '来源已下线：历史活动保留，不再采集。'
+  },
+  {
+    id: 'sysu-home',
+    name: '中山大学 · 首页宣讲会摘要',
+    school: '中山大学',
+    city: '广州',
+    category: '财经强校',
+    channel: '就业信息网',
+    kind: '宣讲会',
+    mode: 'static',
+    listUrl: 'https://career.sysu.edu.cn/',
+    enabled: false,
+    note: '来源已下线：历史活动保留，不再采集。'
+  }
+];
+
 export function sourceById(id) {
   const source = SOURCES.find(s => s.id === id);
   if (!source) throw new Error('未知信息源：' + id);
   return source;
 }
 
+// 自动采集源：enabled 但 collectMode='manual' 的浏览器登录源需要人工确认，不进入默认批量采集。
 export function enabledSources() {
-  return SOURCES.filter(s => s.enabled);
+  return SOURCES.filter(s => s.enabled && s.collectMode !== 'manual');
 }
 
 export function sourceHealth(source) {
@@ -33,6 +65,9 @@ export function sourceHealth(source) {
     category: source.category,
     note: source.note || '',
     fallback: source.fallback || '',
+    loginRequired: source.loginRequired === true,
+    manualConfirm: source.manualConfirm === true,
+    collectMode: source.collectMode || 'auto',
     capabilities: {
       ...(source.capabilities || {list: source.mode, detail: source.detail ? 'http' : 'none', projects: typeof source.fetchProjects === 'function' ? 'custom' : 'none'}),
       manual: true

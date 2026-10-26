@@ -2,7 +2,7 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {fetchText} from './fetch.mjs';
-import {SOURCES, sourceById, guessKind, guessCompany, normalizeCity} from './sources/index.mjs';
+import {SOURCES, REMOVED_SOURCES, sourceById, enabledSources, guessKind, guessCompany, normalizeCity} from './sources/index.mjs';
 import {browserText, parseRenderedText} from './browser.mjs';
 import {RecruitStore} from './store.mjs';
 
@@ -98,12 +98,18 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
   const store = persist ? RecruitStore.open(join(dir, 'recruit.db')) : null;
-  if (store) store.syncSources(SOURCES);
+  if (store) store.syncSources(SOURCES, REMOVED_SOURCES);
   const result = {id: source.id, name: source.name, status: 'ok', fetched: 0, created: 0, updated: 0, projects: 0, projectEvents: 0, projectErrors: 0, message: '', durationMs: 0};
   try {
     if (!source.enabled) {
       result.status = 'disabled';
       result.message = source.note || '该信息源尚未接入';
+      return result;
+    }
+    // 登录型 browser 源：明确停止，不自动登录/不绕过验证；人工用来源校对或手动导入。
+    if (source.collectMode === 'manual' || source.loginRequired) {
+      result.status = 'blocked';
+      result.message = '需要登录/人工确认：不自动采集、不绕过登录；请用来源校对或手动导入。';
       return result;
     }
     onLog?.({source: source.id, text: '开始采集：' + source.name});
@@ -239,7 +245,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     result.durationMs = Date.now() - t0;
     if (store) {
       try {
-        store.markSource(source.id, {status: result.status, error: result.message, count: result.fetched});
+        store.markSource(source.id, {status: result.status, error: result.message, count: result.fetched, fetched: result.fetched, created: result.created, updated: result.updated});
         store.recordRun({id: randomUUID(), sourceId: source.id, startedAt, finishedAt: new Date().toISOString(), status: result.status, fetched: result.fetched, created: result.created, updated: result.updated, message: result.message + (result.projects ? `；项目 ${result.projects}` : '')});
       } catch { /* 记录失败不掩盖采集结果 */ }
       store.close();
@@ -250,7 +256,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
 }
 
 export async function runCollection({dir, sourceIds, limit = 20, concurrency = 2, onLog}) {
-  const ids = sourceIds?.length ? sourceIds : SOURCES.filter(s => s.enabled).map(s => s.id);
+  const ids = sourceIds?.length ? sourceIds : enabledSources().map(s => s.id);
   const results = new Array(ids.length).fill(null);
   const width = Math.max(1, Math.min(4, Math.floor(concurrency) || 1, ids.length));
   let cursor = 0;

@@ -94,7 +94,7 @@ export const TOOLS = [
   {
     name: 'career_recruit_projects',
     title: '查询招聘项目',
-    description: '从本机已采集的活动下查询招聘项目（单位/岗位/要求/投递/来源）。项目来源是高校就业网或公众号；平台工具只用于研究岗位要求和薪资，不在这里登记岗位或投递。',
+    description: '从本机已采集的活动下查询招聘项目（单位/岗位/要求/投递/来源）。项目来源是高校就业网、公众号或本人确认入库的平台岗位（平台岗位用 career_platform_jobs 查询）；这里不投递。',
     permission: 'read',
     handler: 'recruit.projects',
     timeoutMs: 8000,
@@ -264,6 +264,46 @@ export const TOOLS = [
       type: 'object',
       properties: {platform: {...platform, description: '平台'}},
       required: ['platform'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'career_platform_jobs',
+    title: '查询平台岗位',
+    description: '按岗位/单位关键词、城市、平台查询本机已入库的平台岗位，返回来源链接、抓取时间与置信度。平台岗位只来自本人登录后的只读浏览，不代表已投递。',
+    permission: 'read',
+    handler: 'platform.jobs',
+    timeoutMs: 8000,
+    parameters: {
+      type: 'object',
+      properties: {
+        q: {type: 'string', maxLength: 60, description: '岗位/单位/要求关键词，可选'},
+        city: {type: 'string', maxLength: 20, description: '城市，可选'},
+        platform: {...platform, description: '平台，可选'},
+        limit: {type: 'number', minimum: 1, maximum: 100, description: '最多返回条数，默认 50'}
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'career_platform_jobs_save',
+    title: '平台岗位入库',
+    description: '把刚在登录型网站只读读到的岗位保存到本机招聘项目表。只保存浏览器实际读到的岗位；写入前必须由用户在任务卡确认，不补造单位/城市/薪资，不写投递方式，不代投递。',
+    permission: 'write',
+    sensitivity: 'sensitive',
+    writeDomain: 'recruit',
+    handler: 'platform.jobsSave',
+    timeoutMs: 15000,
+    parameters: {
+      type: 'object',
+      properties: {
+        platform: {...platform, description: '平台'},
+        city: {type: 'string', maxLength: 20, description: '城市，可选；页面没写城市时作为这批岗位的城市'},
+        sourceUrls: {type: 'array', description: '只入库这些来源链接（可选，最多 50 条）'},
+        idempotencyKey: {type: 'string', maxLength: 200, description: '幂等键：同一次写入重试必须复用'},
+        confirmId: {type: 'string', maxLength: 64, description: '确认接口内部使用；模型不要填写'}
+      },
+      required: ['platform', 'idempotencyKey'],
       additionalProperties: false
     }
   }

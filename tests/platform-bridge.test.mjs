@@ -55,15 +55,27 @@ for (const mode of ['legacy', 'auto']) {
 
     const {tools} = await client.listTools();
     const names = tools.map(tool => tool.name);
-    assert.deepEqual(names, ['career_platform_status', 'career_platform_search', 'career_platform_read']);
+    assert.deepEqual(names, ['career_platform_status', 'career_platform_search', 'career_platform_read', 'career_platform_jobs', 'career_platform_jobs_save']);
     assert.equal(tools[0].annotations?.readOnlyHint, true);
+    const saveTool = tools.find(tool => tool.name === 'career_platform_jobs_save');
+    assert.equal(saveTool.annotations?.readOnlyHint, false, '岗位入库不是只读工具');
 
     const result = await client.callTool({name: 'career_platform_status', arguments: {}});
     assert.ok(!result.isError, '成功调用不应标记 isError');
     assert.equal(result.content[0].type, 'text');
     assert.equal(JSON.parse(result.content[0].text).status, 'readable');
 
-    assert.equal(backend.requests.length, 1);
+    const listed = await client.callTool({name: 'career_platform_jobs', arguments: {q: '数据'}});
+    assert.equal(listed.isError, undefined);
+    assert.equal(backend.requests.at(-1).url, '/api/platform/jobs');
+    assert.equal(backend.requests.at(-1).body.q, '数据');
+
+    const saved = await client.callTool({name: 'career_platform_jobs_save', arguments: {platform: 'boss', idempotencyKey: 'save-1'}});
+    assert.equal(saved.isError, undefined);
+    assert.equal(backend.requests.at(-1).url, '/api/platform/jobsSave');
+    assert.equal(backend.requests.at(-1).body.platform, 'boss');
+
+    assert.equal(backend.requests.length, 3);
     assert.equal(backend.requests[0].url, '/api/platform/status');
     assert.equal(backend.requests[0].token, 'bridge-test-token');
     assert.equal(backend.requests[0].body.taskId, 'task-1');
@@ -79,7 +91,7 @@ test('后端 401：桥把失败作为 isError 结果返回，连接不断', asyn
   assert.match(result.content[0].text, /unauthorized|error/i);
 
   const {tools} = await client.listTools();
-  assert.equal(tools.length, 3, '失败一次后连接仍可用');
+  assert.equal(tools.length, 5, '失败一次后连接仍可用');
 });
 
 test('未知工具名：报错而不是转发到后端', async t => {
@@ -113,7 +125,7 @@ test('Codex 启动参数仍挂内部任务桥（解析后断言，不锁书写�
   assert.match(script, /platform[\\/]mcp\.mjs$/, '应指向内部任务桥脚本');
   assert.deepEqual(JSON.parse(pairs['mcp_servers.career_platform.env_vars']), ['CAREER_BRIDGE_URL', 'CAREER_BRIDGE_TOKEN', 'CAREER_TASK_ID']);
   assert.equal(pairs['mcp_servers.career_platform.tool_timeout_sec'], '420');
-  assert.deepEqual(JSON.parse(pairs['mcp_servers.career_platform.enabled_tools']), ['career_platform_status', 'career_platform_search', 'career_platform_read']);
+  assert.deepEqual(JSON.parse(pairs['mcp_servers.career_platform.enabled_tools']), ['career_platform_status', 'career_platform_search', 'career_platform_read', 'career_platform_jobs', 'career_platform_jobs_save']);
 
   const bridgeUrl = 'http://127.0.0.1:1';
   assert.deepEqual(attachCodexBridge(['tail'], {root, search: true, bridgeUrl}).slice(-1), ['tail']);
@@ -164,7 +176,7 @@ test('不依赖 SDK 的 2025 时代客户端（模拟 Codex）能完成初始化
   raw.send({jsonrpc: '2.0', method: 'notifications/initialized'});
   raw.send({jsonrpc: '2.0', id: 2, method: 'tools/list', params: {}});
   const listed = await raw.next();
-  assert.equal(listed.result.tools.length, 3);
+  assert.equal(listed.result.tools.length, 5);
 
   raw.send({jsonrpc: '2.0', id: 3, method: 'tools/call', params: {name: 'career_platform_status', arguments: {}}});
   const called = await raw.next();

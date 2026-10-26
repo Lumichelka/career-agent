@@ -9,21 +9,39 @@ function secondsIso(seconds) {
   return new Date(n * 1000 + 8 * 3600 * 1000).toISOString().slice(0, 19) + '+08:00';
 }
 
+// list_jobfair_company 按「岗位」返回记录：一个单位多个岗位会拆成多行。
+// 岗位/要求/投递方式优先取真实字段；读不到就留空并在 notes 标「未公布」，不编造。
 export function parseCompanies(json) {
   return (json?.data || []).map(r => {
     const company = String(r.company_name || '').trim();
     if (!company) return null;
+    const jobName = String(r.job_name || r.job_recruitment || '').trim();
+    const degree = String(r.degree_require || '').trim();
+    const major = String(r.about_major || r.professionals || '').trim();
+    const salary = String(r.salary || '').trim();
+    const jobNumber = String(r.job_number || '').trim();
+    const publishType = String(r.publish_type || '').trim();
+    // 岗位：岗位名称 + 招聘人数 + 薪资（可筛岗、可搜索）
+    const positions = [jobName, salary ? '薪资 ' + salary : '', jobNumber ? '招聘 ' + jobNumber + ' 人' : ''].filter(Boolean).join('；');
+    // 要求：学历 + 专业
+    const requirements = [degree ? '学历 ' + degree : '', major ? '专业 ' + major : ''].filter(Boolean).join('；');
+    // 投递方式：双选会默认为现场；publish_type 标注网络招聘时改为网申。
+    const applyMode = /网络/.test(publishType) ? '网申' : '现场';
     const notes = [
       r.industry_category ? '行业：' + r.industry_category : '',
       r.scale ? '规模：' + r.scale : '',
       r.city_name ? '城市：' + r.city_name : '',
-      r.field_no ? '展位：' + r.field_no : ''
+      r.field_no ? '展位：' + r.field_no : '',
+      publishType ? '招聘方式：' + publishType : '',
+      !jobName ? '岗位未公布' : '',
+      !requirements ? '要求未公布' : ''
     ].filter(Boolean).join('；');
     return {
       company,
-      title: String(r.job_recruitment || '').trim(),
-      positions: String(r.professionals || '').trim(),
-      applyMode: '现场',
+      title: jobName,
+      positions,
+      requirements,
+      applyMode,
       applyUrl: r.company_id ? `${BASE}/detail/company?company_id=${r.company_id}` : '',
       sourceUrl: r.company_id ? `${BASE}/detail/company?company_id=${r.company_id}` : '',
       sourceKey: String(r.jobfair_apply_job_id || r.company_id || company),
@@ -72,17 +90,20 @@ export default {
       };
     }).filter(Boolean);
   },
-  async fetchProjects(item) {
+  async fetchProjects(item, _event, options = {}) {
+    const fetch = options.fetchText || fetchText;
+    const base = options.base || BASE;
     let fairId = '';
     try { fairId = new URL(item.url).searchParams.get('id') || ''; } catch { /* 忽略 */ }
     if (!fairId) return {status: 'blocked', message: '双选会详情缺少 fair_id', projects: []};
     const pageSize = 50;
-    const maxPages = Math.min(6, Math.max(1, Math.ceil((Number(item.projectCount) || 0) / pageSize)));
+    // 接口按「岗位」返回记录，页数不能用单位数推算；以「不足一页」终止，上限放宽到 40 页（2000 条）。
+    const maxPages = 40;
     const projects = [];
     const seen = new Set();
     for (let page = 1; page <= maxPages; page++) {
-      const url = `${BASE}/module/list_jobfair_company?is_total=0&start_page=1&start=${page}&count=${pageSize}&fair_id=${encodeURIComponent(fairId)}&type=`;
-      const res = await fetchText(url, {headers: {referer: item.url}, timeout: 20000, retries: 1});
+      const url = `${base}/module/list_jobfair_company?is_total=0&start_page=1&start=${page}&count=${pageSize}&fair_id=${encodeURIComponent(fairId)}&type=`;
+      const res = await fetch(url, {headers: {referer: item.url}, timeout: 20000, retries: 1});
       if (!res.ok) return {status: 'blocked', message: '参会单位接口失败：' + res.message, projects};
       let json;
       try { json = JSON.parse(res.text); } catch { return {status: 'blocked', message: '参会单位接口不是 JSON', projects}; }

@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {RecruitStore} from '../src/recruit/store.mjs';
 import {extractInterview} from '../src/recruit/collect.mjs';
+import {SOURCES, REMOVED_SOURCES} from '../src/recruit/sources/index.mjs';
 
 const now = () => new Date().toISOString();
 const baseEvent = (over = {}) => ({
@@ -139,3 +140,180 @@ test('多源合并时保留已有的环节/类型', async () => {
     } finally { store.close(); }
   });
 });
+
+test('旧库迁移：event_projects 缺 source_id/source_key 时先加列再建唯一索引，不因索引报错', async () => {
+  await withStore(async file => {
+    const legacy = new DatabaseSync(file);
+    legacy.exec(`CREATE TABLE event_projects(
+      id TEXT PRIMARY KEY, event_id TEXT, company TEXT, title TEXT, positions TEXT, requirements TEXT,
+      apply_mode TEXT, apply_url TEXT, source_url TEXT, notes TEXT, created_at TEXT, updated_at TEXT)`);
+    legacy.prepare('INSERT INTO event_projects(id,event_id,company,title,created_at,updated_at) VALUES(?,?,?,?,?,?)')
+      .run('legacy-project', null, '旧单位', '旧岗位', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    legacy.close();
+
+    const store = RecruitStore.open(file);
+    try {
+      const cols = new Set(store.db.prepare('PRAGMA table_info(event_projects)').all().map(r => r.name));
+      assert.ok(cols.has('source_id'), '迁移后要有 source_id');
+      assert.ok(cols.has('source_key'), '迁移后要有 source_key');
+      const index = store.db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_projects_platform'").get();
+      assert.ok(index, '平台岗位部分唯一索引必须建出来');
+      assert.match(index.sql, /WHERE event_id IS NULL/i);
+      const kept = store.getProject('legacy-project');
+      assert.equal(kept.company, '旧单位', '历史项目不丢');
+      assert.equal(kept.sourceId, '');
+
+      const saved = store.savePlatformJobs({
+        platform: 'boss', city: '成都', fetchedAt: '2026-10-26T10:00:00.000Z',
+        jobs: [{company: '甲公司', title: '数据分析师', sourceUrl: 'https://www.zhipin.com/job_detail/a.html', sourceKey: 'boss-1', fetchedAt: '2026-10-26T10:00:00.000Z'}]
+      });
+      assert.equal(saved.created, 1, '加列后平台岗位可以正常写入并命中唯一索引');
+    } finally { store.close(); }
+  });
+});
+
+// —— 来源生命周期与谱系（#47）——
+
+// 稳定的活动 id（24 位逐条唯一）；source_id 决定学校/城市/类型。
+const mkEvent = (i, sourceId, over = {}) => ({
+  id: String(i).padStart(24, '0'),
+  sourceId,
+  school: sourceId === 'nankai-recruitment' ? '南开大学' : '中山大学',
+  city: sourceId === 'nankai-recruitment' ? '天津' : '广州',
+  kind: sourceId === 'nankai-recruitment' ? '双选会' : '宣讲会',
+  title: '测试活动' + i,
+  company: '',
+  startAt: '2026-11-01T09:00:00+08:00',
+  endAt: '',
+  venue: '',
+  fetchedAt: now(),
+  confidence: 0.6,
+  ...over
+});
+
+test('来源对账：注册表源保持 active，墓碑源保留并标 orphaned', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      const states = store.sourceStates();
+      const byId = Object.fromEntries(states.map(s => [s.id, s]));
+      assert.equal(states.length, SOURCES.length + REMOVED_SOURCES.length);
+      assert.equal(byId['scu-employ'].orphaned, 0);
+      assert.equal(byId['nankai-recruitment'].orphaned, 1);
+      assert.equal(byId['nankai-recruitment'].enabled, 0);
+      assert.equal(byId['nankai-recruitment'].name, '南开大学 · 双选会信息');
+      assert.equal(byId['sysu-home'].orphaned, 1);
+    } finally { store.close(); }
+  });
+});
+
+test('来源对账：表里有但不在注册表/墓碑的源标 orphaned，不删除', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      // 模拟漂移：下一次同步时某源从注册表消失，且没有墓碑
+      const trimmed = SOURCES.filter(s => s.id !== 'cufe-scc');
+      store.syncSources(trimmed, REMOVED_SOURCES);
+      const byId = Object.fromEntries(store.sourceStates().map(s => [s.id, s]));
+      assert.equal(byId['cufe-scc'].orphaned, 1);
+      assert.equal(byId['cufe-scc'].enabled, 0);
+    } finally { store.close(); }
+  });
+});
+
+test('谱系迁移：孤儿源活动标 orphaned，重复执行幂等', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.upsertEvent(mkEvent(1, 'nankai-recruitment'));
+      store.upsertEvent(mkEvent(2, 'sysu-home'));
+      assert.equal(store.getEvent(String(1).padStart(24, '0')).status, 'active');
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      assert.equal(store.getEvent(String(1).padStart(24, '0')).status, 'orphaned');
+      assert.equal(store.getEvent(String(2).padStart(24, '0')).status, 'orphaned');
+      // 幂等：再跑一次结果不变
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      assert.equal(store.getEvent(String(1).padStart(24, '0')).status, 'orphaned');
+    } finally { store.close(); }
+  });
+});
+
+test('谱系迁移：取消活动即使来自孤儿源也保持 cancelled', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      store.upsertEvent(mkEvent(1, 'nankai-recruitment', {status: 'cancelled', title: '活动取消通知'}));
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      assert.equal(store.getEvent(String(1).padStart(24, '0')).status, 'cancelled');
+    } finally { store.close(); }
+  });
+});
+
+test('旧库迁移：20 南开 + 9 中山活动在缺少来源行时也能补墓碑并逐条追溯', async () => {
+  await withStore(async file => {
+    const legacy = new DatabaseSync(file);
+    // 模拟 #47 的真实旧库：sources 表还没有 orphaned 列，南开/中山的源行已不存在。
+    legacy.exec(`CREATE TABLE sources(
+      id TEXT PRIMARY KEY, name TEXT, school TEXT, city TEXT, category TEXT, channel TEXT,
+      list_url TEXT, mode TEXT, enabled INTEGER, note TEXT,
+      last_run TEXT, last_status TEXT, last_error TEXT, last_count INTEGER DEFAULT 0)`);
+    legacy.exec(`CREATE TABLE events(id TEXT PRIMARY KEY, source_id TEXT, school TEXT, city TEXT, kind TEXT,
+      title TEXT, company TEXT, start_at TEXT, end_at TEXT, venue TEXT, address TEXT, industry TEXT,
+      company_size TEXT, positions TEXT, requirements TEXT, apply_mode TEXT, apply_url TEXT, source_url TEXT,
+      published_at TEXT, fetched_at TEXT, confidence REAL, verified INTEGER, raw_text TEXT, notes TEXT)`);
+    const insert = legacy.prepare('INSERT INTO events(id,source_id,school,city,kind,title,start_at,fetched_at,confidence,verified) VALUES(?,?,?,?,?,?,?,?,?,?)');
+    for (let i = 1; i <= 20; i++) insert.run(String(i).padStart(24, '0'), 'nankai-recruitment', '南开大学', '天津', '双选会', '南开旧活动' + i, '2026-11-01T09:00:00+08:00', '2026-09-01T00:00:00.000Z', 0.5, 0);
+    for (let i = 21; i <= 29; i++) insert.run(String(i).padStart(24, '0'), 'sysu-home', '中山大学', '广州', '宣讲会', '中山旧活动' + i, '2026-11-01T09:00:00+08:00', '2026-09-01T00:00:00.000Z', 0.5, 0);
+    legacy.close();
+
+    const store = RecruitStore.open(file);
+    try {
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      const states = Object.fromEntries(store.sourceStates().map(s => [s.id, s]));
+      assert.equal(states['nankai-recruitment'].orphaned, 1);
+      assert.equal(states['sysu-home'].orphaned, 1);
+      let nankai = 0, sysu = 0, orphaned = 0;
+      for (let i = 1; i <= 29; i++) {
+        const event = store.getEvent(String(i).padStart(24, '0'));
+        assert.equal(event.status, 'orphaned', '旧库活动要标 orphaned');
+        assert.ok(states[event.sourceId], '每条活动都能追到历史来源行：' + event.sourceId);
+        assert.equal(states[event.sourceId].orphaned, 1);
+        if (event.sourceId === 'nankai-recruitment') nankai++; else sysu++;
+        orphaned++;
+      }
+      assert.deepEqual({nankai, sysu, orphaned}, {nankai: 20, sysu: 9, orphaned: 29});
+      const dangling = store.db.prepare('SELECT DISTINCT source_id FROM events WHERE source_id NOT IN (SELECT id FROM sources)').all();
+      assert.deepEqual(dangling, [], '0 条活动缺来源行');
+    } finally { store.close(); }
+  });
+});
+
+test('谱系验收：孤儿活动都能追溯到历史来源（source_id 有 orphaned 行）', async () => {
+  await withStore(async file => {
+    const store = RecruitStore.open(file);
+    try {
+      for (let i = 1; i <= 20; i++) store.upsertEvent(mkEvent(i, 'nankai-recruitment'));
+      for (let i = 21; i <= 29; i++) store.upsertEvent(mkEvent(i, 'sysu-home'));
+      store.syncSources(SOURCES, REMOVED_SOURCES);
+      const byId = Object.fromEntries(store.sourceStates().map(s => [s.id, s]));
+      let orphaned = 0;
+      for (let i = 1; i <= 29; i++) {
+        const e = store.getEvent(String(i).padStart(24, '0'));
+        assert.equal(e.status, 'orphaned');
+        const src = byId[e.sourceId];
+        assert.ok(src, '缺少历史来源行：' + e.sourceId);
+        assert.equal(src.orphaned, 1);
+        orphaned++;
+      }
+      assert.equal(orphaned, 29);
+      // 0 个「有数据但来源表不存在」的源：每个 events.source_id 都能解析到行
+      const ids = new Set(store.db.prepare('SELECT DISTINCT source_id FROM events').all().map(r => r.source_id));
+      for (const id of ids) {
+        assert.ok(byId[id] || SOURCES.some(s => s.id === id), '存在无来源行的 source_id：' + id);
+      }
+    } finally { store.close(); }
+  });
+});
+

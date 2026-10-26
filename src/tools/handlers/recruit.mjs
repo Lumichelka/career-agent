@@ -1,5 +1,5 @@
 import {join} from 'node:path';
-import {SOURCES, sourceHealth} from '../../recruit/sources/index.mjs';
+import {SOURCES, REMOVED_SOURCES, sourceHealth} from '../../recruit/sources/index.mjs';
 import {createWriteGateway} from '../../writes/gateway.mjs';
 import {writeFailure} from '../../writes/errors.mjs';
 import {bulkWriteRows, normalizeSource, validateBulkPayload} from '../../recruit/bulk.mjs';
@@ -34,7 +34,7 @@ export async function projects(args, ctx) {
     }
     return {
       status: out.length ? 'readable' : 'empty',
-      notice: '项目来自高校就业网/公众号；平台仅用于研究岗位要求和薪资，不在这里登记岗位或投递。',
+      notice: '项目来自高校就业网/公众号；平台岗位由用户确认后入库，用 career_platform_jobs 查询，不代投递。',
       count: out.length,
       projects: out.slice(0, Math.min(100, Number(args.limit) || 50))
     };
@@ -60,13 +60,13 @@ export async function sourceStates(args, ctx) {
   const {RecruitStore} = await import('../../recruit/store.mjs');
   const store = RecruitStore.open(join(dir, 'recruit.db'));
   try {
-    store.syncSources(SOURCES);
+    store.syncSources(SOURCES, REMOVED_SOURCES);
     const states = store.sourceStates();
     return {
       status: 'readable',
       notice: 'ok 只在列表解析成功时使用；项目阶段失败会标 list_only 或给出原因。',
       count: states.length,
-      sources: states.map(s => ({...sourceHealth(SOURCES.find(x => x.id === s.id) || {id: s.id, name: s.name, enabled: !!s.enabled, mode: s.mode, category: s.category}), lastStatus: s.last_status, lastCount: s.last_count, lastError: s.last_error, lastRun: s.last_run}))
+      sources: states.map(s => ({...sourceHealth(SOURCES.find(x => x.id === s.id) || {id: s.id, name: s.name, enabled: !!s.enabled, mode: s.mode, category: s.category}), orphaned: !!s.orphaned, lastStatus: s.last_status, lastCount: s.last_count, lastError: s.last_error, lastRun: s.last_run}))
     };
   } finally { store.close(); }
 }
