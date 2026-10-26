@@ -15,6 +15,8 @@ import {sanitizeRawText} from '../recruit/feed.mjs';
 export const WECHAT_OPERATOR_TOOL = 'career_wechat_operator_write';
 export const WECHAT_OPERATOR_SCHEMA = 'wechat_operator.v1';
 export const WECHAT_ARTICLE_LIMIT = 5;
+// 验收下限：一次公众号 AI 采集至少落 3 条记录（活动 + 单位），不足即 failed/needs_review。
+export const WECHAT_MIN_RECORDS = 3;
 export const WECHAT_PREFERRED_ACCOUNTS = ['西财校招', '西财就业', '上海财经大学就业', '上财就业'];
 export const WECHAT_LIST_EVIDENCE = 'wechat-list.json';
 export const WECHAT_SUMMARY_EVIDENCE = 'wechat-operator.json';
@@ -280,6 +282,8 @@ export async function runWechatOperator({
   const published = [];
   const skipped = [];
   let written = 0;
+  // 验收计数包含幂等重放：重跑同一篇文章时数据已经存在，不能因为「本次新增 0」判失败。
+  let accounted = 0;
   try {
     for (let index = 0; index < collected.bodies.length; index += 1) {
       const entry = collected.bodies[index];
@@ -374,6 +378,7 @@ export async function runWechatOperator({
       const projectCount = Array.isArray(outcome.projects) ? outcome.projects.length : 0;
       const rows = outcome.duplicate ? 0 : 1 + projectCount;
       written += rows;
+      accounted += 1 + projectCount;
       record.published = {
         event_id: outcome.event?.id || '',
         batch_id: outcome.batchId || '',
@@ -413,16 +418,26 @@ export async function runWechatOperator({
       actions: operator.actions?.length || 0,
       screenshots: operator.screenshots?.length || 0,
       written,
+      accounted,
       published,
       skipped
     };
     await writeFile(join(evidenceDir, WECHAT_SUMMARY_EVIDENCE), JSON.stringify(summary, null, 2), 'utf8');
     await addEvidence({
       kind: 'wechat_summary',
-      label: '公众号操作完成：写入 ' + written + ' 条记录',
-      detail: '已写入 ' + published.length + ' 篇；跳过 ' + skipped.length + ' 篇。',
+      label: (written >= WECHAT_MIN_RECORDS ? '公众号操作完成：' : '公众号操作未达标：') + '写入 ' + written + ' 条记录',
+      detail: '已写入 ' + published.length + ' 篇；跳过 ' + skipped.length + ' 篇；验收下限 ' + WECHAT_MIN_RECORDS + ' 条。',
       url: evidenceUrl(taskId, WECHAT_SUMMARY_EVIDENCE)
     });
+    // 最小记录门禁：0 编造的前提下，不足 3 条说明账号/文章/时间没读全，标 failed 并给恢复建议，
+    // 不能把「只读到 1 条」当成成功验收。幂等重放的已有记录计入 accounted，不算新增。
+    if (accounted < WECHAT_MIN_RECORDS) {
+      throw new OperatorError(
+        'WECHAT_MIN_RECORDS',
+        '本次只写入/确认 ' + accounted + ' 条记录，少于验收下限 ' + WECHAT_MIN_RECORDS + ' 条。',
+        '确认打开的是目标公众号的文章列表且正文含单位与开始时间；补到至少 ' + WECHAT_MIN_RECORDS + ' 条后重试，或改用文章链接手动导入。'
+      );
+    }
     setPhase('公众号操作完成：写入 ' + written + ' 条记录（活动 + 单位）。');
     return {
       ok: true,

@@ -104,7 +104,9 @@ export async function writeSourceCheck({dataDir, userId, taskId, extraction, sou
   try {
     const detail = screenshots.find(shot => shot.id === 'detail') || screenshots.at(-1) || null;
     const detailUrl = source.detailUrl || detail?.url || extraction?.source?.detailUrl || source.listUrl || '';
-    const sourceMeta = {sourceId: 'manual', sourceUrl: detailUrl, notes: SOURCE_CHECK_NOTES};
+    // 来源 id 跟随实际来源（uibe-career/swufe-xjh/wechat:<id>），任意 URL 仍是合成的 manual；
+    // 这样兜底/对照记录能被 career_feed({sourceId}) 过滤，而不是全部压成 manual。
+    const sourceMeta = {sourceId: String(source.id || 'manual').slice(0, 80), sourceUrl: detailUrl, notes: SOURCE_CHECK_NOTES};
     const detailFile = String(detail?.file || '02-detail.png');
     const sourceRef = 'artifact:' + basename(detailFile);
     const gateway = createWriteGateway({
@@ -250,7 +252,7 @@ function screenshotMeta(shot) {
 export async function runExtractionAndWrite({
   dataDir, userId, task, source = {}, shots = [], models = {}, extractor = null, reviewer = null,
   actorRef = '', signal, emit = () => {}, addEvidence = async () => {}, setPhase = () => {},
-  evidenceDir = '', addScreenshotEvidence = true, label = '来源校对'
+  evidenceDir = '', addScreenshotEvidence = true, label = '来源校对', playbook = null
 } = {}) {
   const dir = evidenceDir || evidenceDirFor(dataDir, userId, task.id);
   await mkdir(dir, {recursive: true});
@@ -276,8 +278,8 @@ export async function runExtractionAndWrite({
 
   setPhase('正在用视觉模型 API 依据截图抽取活动与单位…');
   const raw = extractor
-    ? await extractor({screenshots: usable, source, models, signal})
-    : await createVisionExtractor({config: models})({screenshots: usable, source, signal});
+    ? await extractor({screenshots: usable, source, models, signal, playbook})
+    : await createVisionExtractor({config: models})({screenshots: usable, source, signal, playbook});
   const detailShot = screenshots.find(shot => shot.id === 'detail');
   const detailUrl = detailShot?.url || '';
   const detailTitle = detailShot?.title || '';

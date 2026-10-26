@@ -169,6 +169,38 @@ export class TaskManager {
     return next;
   }
 
+  // 服务重启后，waiting_login / waiting_human 任务没有执行体与 waiter 可续跑，
+  // 留在 active 会永久占徽标、点「继续」也只会 404。启动时统一收尾为 failed，
+  // 给可执行的重试建议；不伪造成功，也不跨重启恢复浏览器上下文。
+  async recoverInterrupted({states = ['waiting_login', 'waiting_human'], code = 'OPERATOR_RESTART', recovery = '重新发起 AI 采集/兜底；登录与人工处理需要在新任务里重新完成。'} = {}) {
+    let users = [];
+    try { users = await readdir(join(this.dataDir, 'users')); } catch { return {recovered: 0, tasks: []}; }
+    const wanted = new Set(states);
+    const recovered = [];
+    for (const userId of users) {
+      if (!/^[A-Za-z0-9._-]{1,120}$/.test(userId)) continue;
+      let names = [];
+      try { names = await readdir(this.dirFor(userId)); } catch { continue; }
+      for (const name of names) {
+        if (!name.endsWith('.json')) continue;
+        const taskId = name.slice(0, -5);
+        if (!UUID.test(taskId)) continue;
+        const task = await this.read(userId, taskId);
+        if (!task || !wanted.has(task.state)) continue;
+        task.state = 'failed';
+        task.phase = '服务重启，任务已中断';
+        task.error = {code: String(code).slice(0, 60), message: '服务重启后没有可续跑的执行体；等待中的登录/人工处理已失效。', recovery: String(recovery).slice(0, 200)};
+        if (task.operator) task.operator = {...task.operator, state: 'failed', waiting: null, updatedAt: nowIso()};
+        task.finishedAt = nowIso();
+        task.updatedAt = nowIso();
+        task.durationMs = task.startedAt ? Date.now() - Date.parse(task.startedAt) : 0;
+        await this.persist(task);
+        recovered.push(taskId);
+      }
+    }
+    return {recovered: recovered.length, tasks: recovered};
+  }
+
   async read(userId, taskId) {
     try {
       const task = JSON.parse(await readFile(this.fileFor(userId, taskId), 'utf8'));
@@ -571,6 +603,7 @@ export class TaskManager {
       timer = null;
       timerRemaining = Math.max(0, timerRemaining - (Date.now() - timerStartedAt));
     };
+    // 人工继续后重新挂起整任务 watchdog：暂停时间不计入总时长，但剩余额度不会被清零。
     const resumeTimeout = () => {
       if (timer || timedOut) return;
       startTimer(timerRemaining);

@@ -3,6 +3,19 @@
 > 每个阶段一行，方便你对照"什么时候改了什么、能不能回退"。
 > 回退：`git checkout <tag>` 或 `git reset --hard <tag>`（数据在 `%LOCALAPPDATA%\ZhiXiang`，不受影响）。
 
+## v3.3.0 · 2026-10-27
+
+**AI 来源操作员与 career_feed（#55–#60 + 评审修复）**
+
+- 新增手动 AI 来源操作员：可见窗口 profile、动作日志/每步截图、登录/异常/时间上限转人工接管、硬确认。
+- 新增 `career_feed`：规范化 events/projects/companies + 证据指针 + 只增不减 cursor（/chat 与入站 MCP 共用）。
+- 新增 UIBE 确定性解析器与 UIBE/SWUFE/WeChat playbook；AI 兜底是手动入口，不自动切换。
+- 评审修复：HTTP 拒绝客户端 steps/evaluate + 每次确认；10 分钟按总活跃时间；重启遗留等待任务标 failed；
+  forbiddenActions 合并；同页兜底失败关闭；source_id 跟随实际来源；feed 快照 offset/证据根/脱敏/operation_id/30 天清理；
+  UIBE 不猜年月/时间且默认关闭等待 robots 确认；公众号最小 3 条门禁；SWUFE 归一化去重。
+- 已知限制：UIBE robots 待人工确认、WeChat DOM 依赖、DNS rebinding、公司记录不进增量、重启不续跑。
+- 回退 `v3.2.7`。
+
 ## v3.2.7 · 2026-10-25
 
 **来源阅读双通道 runbook**

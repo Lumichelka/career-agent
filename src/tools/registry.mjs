@@ -158,7 +158,7 @@ export const TOOLS = [
   {
     name: 'career_feed',
     title: '招聘信息流',
-    description: '读取本机招聘库的规范化信息流（活动/项目/公司），带来源证据指针与只增不减的 cursor。不传 since 返回当前快照；传上次返回的 nextCursor 返回增量，upsert/delete/undo 都能看见。默认不返回原文；只有 includeRawText:true 才返回已脱敏、单条不超过 8000 字的原文，且不返回 HTML 或截图字节。证据 30 天后 evidence_available:false，但条目与 cursor 保留。',
+    description: '读取本机招聘库的规范化信息流（活动/项目/公司），带来源证据指针与只增不减的 cursor。不传 since 返回当前快照；快照被 limit 截断时用 nextOffset 继续取，取完后 nextCursor 才是增量起点。传上次返回的 nextCursor 返回增量，upsert/delete/undo 都能看见。默认不返回原文；只有 includeRawText:true 才返回已脱敏、单条不超过 8000 字的原文，且不返回 HTML 或截图字节。证据 30 天后 evidence_available:false，但条目与 cursor 保留。公司记录只在快照可见，不承诺进增量。',
     permission: 'read',
     handler: 'recruit.feed',
     timeoutMs: 8000,
@@ -166,6 +166,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         since: {type: 'number', minimum: 0, description: '上次返回的 nextCursor；不传返回当前快照'},
+        offset: {type: 'number', minimum: 0, description: '快照分页偏移；只用 nextOffset 继续，增量模式不支持'},
         types: {type: 'array', items: {type: 'string', enum: ['event', 'project', 'company']}, description: '记录类型，可选；默认全部'},
         sourceId: {type: 'string', maxLength: 80, description: '按来源 id 过滤，可选'},
         limit: {type: 'number', minimum: 1, maximum: 200, description: '最多返回条数，默认 50'},

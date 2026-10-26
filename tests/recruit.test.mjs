@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, rm, mkdir, writeFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {callTool} from '../src/tools/execute.mjs';
@@ -149,7 +150,7 @@ test('career_feed 快照：规范化记录、证据指针、脱敏原文与 curs
     assert.equal(event.record.title, 'AI 信息流宣讲会');
     assert.equal(event.record.source_id, 'manual');
     assert.equal(event.record.source_url, 'https://example.edu/detail');
-    assert.equal(event.record.operation_id, taskId);
+    assert.match(event.record.operation_id, new RegExp('^' + taskId + ':\\d+$'), 'operation_id = taskId:runSeq');
     assert.equal(event.record.evidence_ref, 'artifact:02-detail.png');
     assert.equal(event.record.evidence_available, true);
     assert.equal(event.record.schema_version, 'career_feed.v1');
@@ -269,6 +270,25 @@ test('career_feed 增量：upsert/delete/undo 可见，cursor 只增不减', asy
     assert.deepEqual(empty.entries, []);
     assert.equal(empty.nextCursor, future, '未来 cursor 不得回退');
 
+    // 快照分页：limit 截断后必须能用 nextOffset 继续取，而不是跳到不可达的 maxSeq。
+    const full = await callTool('career_feed', {types: ['event', 'project'], limit: 200}, {config});
+    assert.equal(full.hasMore, false);
+    const walked = [];
+    let snapPage = await callTool('career_feed', {types: ['event', 'project'], limit: 2}, {config});
+    while (true) {
+      assert.equal(snapPage.mode, 'snapshot');
+      walked.push(...snapPage.entries.map(entry => entry.id));
+      if (!snapPage.hasMore) {
+        assert.equal(typeof snapPage.nextCursor, 'number', '快照取完后才给增量 cursor');
+        assert.equal(snapPage.nextOffset, null);
+        break;
+      }
+      assert.equal(snapPage.nextCursor, null, '快照截断时 nextCursor 不能是不可达的 maxSeq');
+      assert.ok(Number.isInteger(snapPage.nextOffset));
+      snapPage = await callTool('career_feed', {types: ['event', 'project'], limit: 2, offset: snapPage.nextOffset}, {config});
+    }
+    assert.deepEqual(walked, full.entries.map(entry => entry.id), 'offset 分页必须取全快照且不重复');
+
     // 清空审计后 cursor 仍然只增不减（sqlite_sequence 高水位）。
     const {clearAudit} = await import('../src/writes/audit-api.mjs');
     const beforeClear = (await callTool('career_feed', {}, {config})).nextCursor;
@@ -314,6 +334,10 @@ test('career_feed：类型过滤、公司快照与 8k 原文上限', async () =>
     assert.ok(eventOnly.entries.length >= 1);
     assert.ok(eventOnly.entries.every(entry => entry.type === 'event'));
 
+    // 公司记录没有 write_audit 行，只在快照可见；增量（since）不承诺包含公司写入。
+    const companyIncremental = await callTool('career_feed', {types: ['company'], since: 0}, {config});
+    assert.deepEqual(companyIncremental.entries, [], '公司写入不进增量：已知限制（见 README/plan 28）');
+
     const bad = await callTool('career_feed', {types: ['unknown']}, {config});
     assert.equal(bad.status, 'error');
     assert.equal(bad.code, 'INVALID_ARGUMENTS');
@@ -356,8 +380,134 @@ test('career_feed：聊天租户 .data 目录也能解析同用户的证据指�
     const entry = feed.entries.find(item => item.type === 'event');
     assert.equal(entry.record.evidence_ref, 'artifact:02-detail.png');
     assert.equal(entry.record.evidence_available, true, '租户 .data 的上一级 tasks 目录应被识别');
-    assert.equal(entry.record.operation_id, taskId);
+    assert.match(entry.record.operation_id, new RegExp('^' + taskId + ':\\d+$'), 'operation_id = taskId:runSeq');
   } finally { await rm(root, {recursive: true, force: true}); }
+});
+
+test('career_feed 脱敏：先解 HTML 实体，再覆盖空格/连字符手机号、身份证与微信', async () => {
+  const {sanitizeRawText} = await import('../src/recruit/feed.mjs');
+  const raw = '&lt;b&gt;联系&lt;/b&gt; 手机 138&#48;013&#56;000 备用 138-0013-8000 座机 010-88886666\n身份证 110101&#49;9900101&#49;234 微信 wxid_abc12345 联系人 张三';
+  const text = sanitizeRawText(raw);
+  for (const secret of ['13800138000', '138-0013-8000', '110101199001011234', 'wxid_abc12345', '张三', '<b>']) {
+    assert.ok(!text.includes(secret), '原文不得包含 ' + secret + '：' + text);
+  }
+  assert.ok(text.includes('联系'), '正常文本保留');
+  assert.equal(sanitizeRawText('&lt;script&gt;alert(1)&lt;/script&gt;hello').includes('alert'), false, '实体转义出来的脚本也要删');
+  assert.equal(sanitizeRawText('x'.repeat(9000)).length, 8000, '8k 上限不变');
+  const {EVIDENCE_TTL_MS} = await import('../src/recruit/feed.mjs');
+  assert.equal(EVIDENCE_TTL_MS, 30 * 24 * 3600 * 1000, '证据 30 天 TTL 不变');
+});
+
+test('career_feed 证据根限制在用户数据树内：dataDir/../tasks 不能跨出', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'zx-feed-escape-'));
+  try {
+    const userId = 'u-escape';
+    const taskId = 't-escape';
+    const dataDir = join(root, 'data');
+    await mkdir(dataDir, {recursive: true});
+    const outside = join(root, 'tasks', taskId, 'evidence');
+    await mkdir(outside, {recursive: true});
+    await writeFile(join(outside, '02-detail.png'), 'fake-png-bytes');
+    const store = RecruitStore.open(join(dataDir, 'recruit.db'));
+    try {
+      const {createWriteGateway} = await import('../src/writes/gateway.mjs');
+      const gateway = createWriteGateway({db: store.db, domain: 'recruit', userId, taskId});
+      const row = {
+        id: 'b'.repeat(24), sourceId: 'manual', school: '测试大学', kind: '宣讲会',
+        title: '越界证据活动', startAt: '2026-12-13T09:00:00+08:00',
+        fetchedAt: new Date().toISOString(), confidence: 0.7
+      };
+      await gateway.write({
+        tool: 'career_recruit_bulk_write', sensitivity: 'auto', payload: {escape: true},
+        idempotencyKey: 'escape-feed-1', sourceRef: 'artifact:02-detail.png',
+        execute: () => {
+          store.upsertEvent(row);
+          return {changes: [{action: 'create', entity: 'events', entityId: row.id, oldValues: null, newValues: store.getEvent(row.id)}]};
+        }
+      });
+      const feed = await callTool('career_feed', {types: ['event']}, {config: {recruitDir: dataDir, dataDir, userId}});
+      const entry = feed.entries.find(item => item.type === 'event');
+      assert.equal(entry.record.evidence_ref, 'artifact:02-detail.png', '指针仍保留');
+      assert.equal(entry.record.evidence_available, false, 'dataDir/../tasks 不在用户数据树内，不能算可用证据');
+    } finally { store.close(); }
+  } finally { await rm(root, {recursive: true, force: true}); }
+});
+
+test('30 天证据清理：实际删除任务证据，审计与 feed 条目保留且 evidence_available:false', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'zx-feed-cleanup-'));
+  try {
+    const userId = 'u-cleanup';
+    const taskId = '11111111-2222-4333-8444-555555555555';
+    const dataDir = join(root, 'data');
+    const evidenceDir = join(dataDir, 'users', userId, 'tasks', taskId, 'evidence');
+    await mkdir(evidenceDir, {recursive: true});
+    await writeFile(join(evidenceDir, '02-detail.png'), 'fake-png-bytes');
+    const store = RecruitStore.open(join(dataDir, 'recruit.db'));
+    try {
+      const {createWriteGateway} = await import('../src/writes/gateway.mjs');
+      const gateway = createWriteGateway({db: store.db, domain: 'recruit', userId, taskId});
+      const row = {
+        id: 'c'.repeat(24), sourceId: 'manual', school: '测试大学', kind: '宣讲会',
+        title: '待清理证据活动', startAt: '2026-12-14T09:00:00+08:00',
+        fetchedAt: new Date().toISOString(), confidence: 0.7
+      };
+      await gateway.write({
+        tool: 'career_recruit_bulk_write', sensitivity: 'auto', payload: {cleanup: true},
+        idempotencyKey: 'cleanup-feed-1', sourceRef: 'artifact:02-detail.png',
+        execute: () => {
+          store.upsertEvent(row);
+          return {changes: [{action: 'create', entity: 'events', entityId: row.id, oldValues: null, newValues: store.getEvent(row.id)}]};
+        }
+      });
+      const before = await callTool('career_feed', {}, {config: {recruitDir: dataDir, dataDir, userId}});
+      const beforeEntry = before.entries.find(item => item.type === 'event');
+      assert.equal(beforeEntry.record.evidence_available, true);
+
+      const {purgeExpiredEvidence} = await import('../src/source-check/evidence-cleanup.mjs');
+      const later = Date.now() + 31 * 24 * 3600 * 1000;
+      const out = await purgeExpiredEvidence({dataDir, now: later});
+      assert.equal(out.removedFiles, 1);
+      assert.equal(existsSync(join(evidenceDir, '02-detail.png')), false, '过期证据必须真的删掉');
+      assert.equal(store.db.prepare('SELECT COUNT(*) c FROM write_audit').get().c, 1, '审计不能删');
+      assert.equal(store.db.prepare('SELECT COUNT(*) c FROM events').get().c, 1, '业务行不能删');
+
+      const after = await callTool('career_feed', {}, {config: {recruitDir: dataDir, dataDir, userId}});
+      const afterEntry = after.entries.find(item => item.type === 'event');
+      assert.equal(afterEntry.record.evidence_ref, 'artifact:02-detail.png', '指针保留');
+      assert.equal(afterEntry.record.evidence_available, false, '清理后 feed 必须标不可用');
+      assert.ok(afterEntry.record.operation_id, '条目仍可读');
+    } finally { store.close(); }
+  } finally { await rm(root, {recursive: true, force: true}); }
+});
+
+test('SWUFE 与兜底去重：归一化标题/时间/单位，容忍措辞差异，不写两条记录', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-dedupe-'));
+  try {
+    const {bulkWriteRows, normalizeEventTitle, normalizeEventMoment} = await import('../src/recruit/bulk.mjs');
+    assert.equal(normalizeEventTitle('西南财经大学 2026 届秋季双选会（邀请函）'), normalizeEventTitle('西南财经大学2026届秋季双选会'));
+    assert.equal(normalizeEventMoment('2026-11-05T01:00:00Z'), normalizeEventMoment('2026-11-05T09:00:00+08:00'));
+    const store = RecruitStore.open(join(dir, 'recruit.db'));
+    try {
+      const source = {sourceId: 'swufe-xjh', notes: '来源校对'};
+      const base = {title: '西南财经大学2026届秋季双选会', startAt: '2026-11-05T09:00:00+08:00', school: '西南财经大学', city: '成都', kind: '双选会'};
+      const first = bulkWriteRows({store, events: [base], projects: [], source});
+      assert.equal(first.changes[0].action, 'create');
+      const variant = {...base, title: '西南财经大学 2026 届秋季双选会（邀请函）', startAt: '2026-11-05T01:00:00Z'};
+      const second = bulkWriteRows({store, events: [variant], projects: [], source});
+      assert.equal(second.result.events[0].id, first.result.events[0].id, '同一场活动必须复用 id');
+      assert.equal(second.changes[0].action, 'update');
+      assert.equal(store.db.prepare('SELECT COUNT(*) c FROM events').get().c, 1);
+
+      // AI 补了单位、确定性源没写：仍视为同一场活动。
+      const withUnit = {...base, company: '甲单位'};
+      const third = bulkWriteRows({store, events: [withUnit], projects: [], source});
+      assert.equal(third.result.events[0].id, first.result.events[0].id, 'AI 补单位不能判成新活动');
+      // 双方都有单位且不同，才视为不同活动。
+      const otherUnit = {...base, company: '乙单位'};
+      bulkWriteRows({store, events: [otherUnit], projects: [], source});
+      assert.equal(store.db.prepare('SELECT COUNT(*) c FROM events').get().c, 2, '单位明确不同视为不同活动');
+    } finally { store.close(); }
+  } finally { await rm(dir, {recursive: true, force: true}); }
 });
 
 test('工具参数校验拒绝多余字段', async () => {

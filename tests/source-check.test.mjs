@@ -221,11 +221,11 @@ test('来源校对：浏览器读两页 + 视觉抽取 + 只写 events/event_pro
   }));
   assert.equal(rows.events.length, 1);
   assert.equal(rows.projects.length, 3);
-  assert.equal(rows.events[0].source_id, 'manual');
+  assert.equal(rows.events[0].source_id, 'swufe-xjh', '来源 id 跟随实际来源');
   assert.equal(rows.events[0].source_url, DETAIL_URL);
   assert.match(rows.events[0].notes, /浏览器截图读取（非采集器）/);
   for (const project of rows.projects) {
-    assert.equal(project.source_id, 'manual');
+    assert.equal(project.source_id, 'swufe-xjh');
     assert.match(project.notes, /浏览器截图读取（非采集器）/);
   }
   assert.equal(rows.runs, 0, '不调用采集器，不产生采集运行记录');

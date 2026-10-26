@@ -10,12 +10,14 @@ import {collectSource, htmlToText} from '../src/recruit/collect.mjs';
 import uibe, {decryptUibePayload, parseUibePageMeta, parseUibeListJson, parseUibeListHtml, parseUibeDetail, nextUibePage, collectUibePages} from '../src/recruit/sources/uibe.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 
-test('源注册表：自动发现 13 个源，id 唯一；对外经贸接入后自动采集 9 个', () => {
+test('源注册表：自动发现 13 个源，id 唯一；默认自动采集 8 个（对外经贸待 robots 确认）', () => {
   assert.equal(SOURCES.length, 13);
   const ids = SOURCES.map(s => s.id);
   assert.equal(new Set(ids).size, ids.length);
-  assert.equal(SOURCES.filter(s => s.enabled).length, 11, '24365/国聘作为 browser 源开放；对外经贸已接入确定性解析器');
-  assert.equal(enabledSources().length, 9, '默认采集不包含需登录的人工源；对外经贸进入默认采集');
+  assert.equal(SOURCES.filter(s => s.enabled).length, 10, '24365/国聘作为 browser 源开放；对外经贸默认关闭等待 robots 确认');
+  assert.equal(enabledSources().length, 8, '默认采集不包含需登录的人工源，也不含 robots 未确认的对外经贸');
+  assert.equal(enabledSources().some(s => s.id === 'uibe-career'), false);
+  assert.equal(sourceById('uibe-career').sourceCheck.enabled, true, '保留来源校对/解析器');
 });
 
 test('24365/国聘：browser 源骨架开放，但明确需登录/人工确认，不自动采集也不绕过登录', async () => {
@@ -185,10 +187,23 @@ test('对外经贸：渲染列表 HTML 可解析，缺年份时不伪造日期',
   assert.equal(noYear.length, 20);
   assert.equal(noYear[0].startAt, '', '页面没有年份，不拿当前年份冒充');
   assert.match(noYear[0].notes, /年份/);
+
+  // 页面别处出现 ISO 日期也不能拿来猜年份；列表没有时间也不能伪造 09:00。
+  const html = '<ul id="zph-list-content"><li><span class="create-time">10月27日</span><a href="/front/zph.jspa?tid=1">中化能源宣讲会</a></li></ul><div>更新时间 2026-10-20</div>';
+  const guessed = parseUibeListHtml(html, uibe);
+  assert.equal(guessed[0].startAt, '', '不能从页面其他日期猜年份');
+  assert.match(guessed[0].notes, /年份/);
+  const noClockHtml = '<ul id="zph-list-content"><li><span class="create-time">10月27日</span><a href="/front/zph.jspa?tid=1">中化能源宣讲会</a></li></ul>';
+  const noClock = parseUibeListHtml(noClockHtml, uibe, {year: 2026});
+  assert.equal(noClock[0].startAt, '', '缺具体时间就留空，不能伪造 09:00');
+  assert.match(noClock[0].notes, /具体时间/);
 });
 
-test('对外经贸：源已启用，列表/详情解析器齐全，页面入口为公开列表', () => {
-  assert.equal(uibe.enabled, true);
+test('对外经贸：默认关闭自动采集（页面 JS 仍 POST robots 禁止的接口），解析器齐全', () => {
+  assert.equal(uibe.enabled, false, 'robots 未人工确认前不能默认自动采集');
+  assert.match(uibe.note, /robots/, '必须标注需人工确认 robots');
+  assert.equal(uibe.detailDelayMs, 1200, '详情抓取间隔 1.2s');
+  assert.match(uibe.note, /20 条|202 页/, '保留每页 20/共 202 页的说明');
   assert.equal(uibe.mode, 'browser');
   assert.equal(uibe.capabilities.list, 'browser');
   assert.equal(uibe.capabilities.detail, 'http');
@@ -218,7 +233,7 @@ test('对外经贸：接入采集器后一次采集 3 条，单位和正文来�
       const parsed = new URL(item.url);
       return {...item, url: base + parsed.pathname + parsed.search};
     });
-    const source = {...uibe, id: 'uibe-test', listUrl: base + '/list', fetchList: async () => ({items: detail, pageCount: 202, pages: 1})};
+    const source = {...uibe, id: 'uibe-test', enabled: true, listUrl: base + '/list', fetchList: async () => ({items: detail, pageCount: 202, pages: 1})};
     const result = await collectSource(source, {dir, limit: 3, detailLimit: 3});
     assert.equal(result.status, 'ok', result.message);
     assert.equal(result.created, 3);

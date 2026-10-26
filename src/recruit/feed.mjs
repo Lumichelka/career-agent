@@ -2,7 +2,7 @@
 // 权威仍是本地审计库：cursor 用 write_audit.seq（AUTOINCREMENT，只增不减），不建 AI 私有库。
 // 默认不返回原文；includeRawText 时脱敏（手机/邮箱/身份证/微信/联系人）并截断到 8k，绝不返回 HTML/截图字节。
 import {existsSync, readdirSync, statSync} from 'node:fs';
-import {join, basename} from 'node:path';
+import {join, basename, dirname, resolve} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {hasAuditSchema} from '../writes/audit-store.mjs';
 
@@ -34,20 +34,37 @@ export function normalizeTypes(types) {
   return out;
 }
 
-// 原文脱敏：先去掉 HTML（脚本/样式整段删除，其余标签去掉），再抹联系方式，最后截断。
+// HTML 实体解码必须在去标签之前：否则 &lt;b&gt; 这类转义会绕过标签清理，
+// &#49;38... 这类数字实体也会绕过手机号/身份证脱敏。只解常见命名实体与数字实体。
+function decodePoint(value) {
+  try { return String.fromCodePoint(Number(value)); } catch { return ''; }
+}
+
+function decodeHtmlEntities(text) {
+  return String(text ?? '')
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, hex) => decodePoint(parseInt(hex, 16)))
+    .replace(/&#([0-9]{1,7});/g, (_, dec) => decodePoint(parseInt(dec, 10)))
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'");
+}
+
+// 原文脱敏：先解 HTML 实体，再删脚本/样式与标签，再抹联系方式（含空格/连字符变体），最后截断。
 export function sanitizeRawText(value) {
-  let text = String(value ?? '');
+  let text = decodeHtmlEntities(value);
   if (!text) return '';
   text = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ');
   text = text.replace(/<[^>]*>/g, ' ');
-  text = text
-    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'");
-  text = text.replace(/\b1[3-9]\d{9}\b/g, '***');
+  // 手机号：11 位；允许 138 0013 8000 / 138-0013-8000 这类排版。
+  text = text.replace(/(?<!\d)1[3-9]\d(?:[\s-]?\d{4}){2}(?!\d)/g, '***');
   text = text.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '***');
+  // 身份证：18 位（末位 X）与 15 位；同样允许分组空格/连字符。
+  text = text.replace(/(?<!\d)\d{6}[\s-]?\d{8}[\s-]?\d{3}[\dXx](?!\d)/g, '***');
   text = text.replace(/(?<!\d)\d{17}[\dXx](?!\d)/g, '***');
+  text = text.replace(/(?<!\d)\d{6}[\s-]?\d{6}[\s-]?\d{3}(?!\d)/g, '***');
   text = text.replace(/(?<!\d)\d{15}(?!\d)/g, '***');
+  // 微信：带“微信/wechat/wx”前缀的号，以及裸的 wxid_ 标识。
   text = text.replace(/((?:微信|wechat|weixin|wx|vx)\s*(?:号|id)?\s*[:：=]?\s*)([A-Za-z][-_A-Za-z0-9]{5,19})/gi, '$1***');
+  text = text.replace(/\bwxid_[A-Za-z0-9_-]{5,}\b/gi, '***');
   text = text.replace(/(联系人\s*[:：]?\s*)([^\s，,。;；\n]{1,20})/g, '$1***');
   text = text.replace(/((?:联系电话|电话|手机号|手机|tel)\s*[:：]?\s*)(\+?\d[\d\s-]{6,})/gi, '$1***');
   text = text.replace(/[ \t\u00a0]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
@@ -188,15 +205,30 @@ function safeSegment(value, max = 100) {
   return /^[A-Za-z0-9._-]{1,100}$/.test(text) && text.length <= max ? text : '';
 }
 
-// 任务证据目录有两种装配约定：/users/<id>/tasks（根目录）与 <tenant .data>/../tasks（聊天租户）。
-// 依次尝试，找到存在的那个；都清理掉了就保留指针并标 evidence_available:false。
-function evidenceRoots(dataDir, userId) {
+// 任务证据目录的装配约定：
+// - 服务端根目录：<dataDir>/users/<userId>/tasks；
+// - 用户 home：<dataDir>/tasks（仅当 dataDir 本身的 basename 就是 userId）；
+// - 聊天租户：<dataDir> = .../users/<userId>/.data，证据在同级 users/<userId>/tasks。
+// 只有能证明「用户目录 basename=userId」时才接受它；否则不猜、不向上跨越，
+// 绝不让 dataDir/../tasks 把证据根带到别处（#54 评审 P0）。
+function userTasksRoot(dataDir, userId) {
+  const root = resolve(String(dataDir));
+  const user = String(userId || '');
+  if (!user) return null;
+  let userDir;
+  if (basename(root) === '.data' && basename(dirname(root)) === user) userDir = dirname(root);
+  else if (basename(root) === user) userDir = root;
+  else userDir = join(root, 'users', user);
+  if (basename(userDir) !== user) return null;
+  return join(userDir, 'tasks');
+}
+
+export function evidenceRoots(dataDir, userId) {
   if (!dataDir) return [];
-  const roots = [];
-  if (userId) roots.push(join(String(dataDir), 'users', String(userId), 'tasks'));
-  roots.push(join(String(dataDir), 'tasks'));
-  roots.push(join(String(dataDir), '..', 'tasks'));
-  return [...new Set(roots.map(root => join(root)))];
+  const userRoot = userTasksRoot(dataDir, userId);
+  if (userRoot) return [userRoot];
+  // 没有 userId：只接受 dataDir 自己的 tasks（不向上跨出）。
+  return [join(resolve(String(dataDir)), 'tasks')];
 }
 
 // 证据指针只认 artifact:<file> 或 task:<taskId>；只检查本地证据文件是否存在/未过期，从不读取字节。
@@ -230,7 +262,10 @@ function evidenceMeta(auditRow, {dataDir, userId, now}) {
       }
     } catch { available = false; }
   }
-  return {operationId: taskId || '', evidenceRef: ref, evidenceAvailable: available};
+  // operation_id = taskId:runSeq（#54 评审）：runSeq 用该审计行的 seq，保证同任务多次写入可区分，
+  // 且与 cursor 同源、只增不减。没有审计行就没有 operation_id。
+  const runSeq = Number(auditRow?.seq) || 0;
+  return {operationId: taskId ? taskId + ':' + runSeq : '', evidenceRef: ref, evidenceAvailable: available};
 }
 
 function applyAuditMeta(record, auditRow, artifactRow, options) {
@@ -405,23 +440,33 @@ function incrementalEntries({db, dataDir, userId, since, types, sourceFilter, li
   return {entries: collected.slice(0, limit), hasMore, maxSeq: maxAuditSeq(db, userId)};
 }
 
-export function readFeed({db, companyDir = '', dataDir = '', userId = '', since, types, sourceId = '', limit = 50, includeRawText = false, now = Date.now()} = {}) {
+export function readFeed({db, companyDir = '', dataDir = '', userId = '', since, types, sourceId = '', limit = 50, includeRawText = false, now = Date.now(), offset = 0} = {}) {
   const normalizedTypes = normalizeTypes(types);
   const capped = Math.max(1, Math.min(MAX_LIMIT, Number(limit) || 50));
   const sourceFilter = String(sourceId || '').trim();
   const options = {dataDir, userId, now};
   if (since === undefined || since === null) {
+    const start = Number(offset);
+    if (!Number.isInteger(start) || start < 0) throw inputError('offset 必须是非负整数');
     const all = snapshotEntries({db, companyDir, dataDir, userId, types: normalizedTypes, sourceFilter, includeRawText: includeRawText === true, options});
     const maxSeq = hasAuditSchema(db) ? maxAuditSeq(db, userId) : 0;
+    const entries = all.slice(start, start + capped);
+    const hasMore = start + entries.length < all.length;
     return {
       status: 'readable',
       schema_version: FEED_SCHEMA_VERSION,
-      entries: all.slice(0, capped),
-      nextCursor: Math.max(0, maxSeq),
-      hasMore: all.length > capped,
-      count: Math.min(all.length, capped)
+      mode: 'snapshot',
+      entries,
+      offset: start,
+      // 快照被 limit 截断时 nextCursor 没有意义（跳到 maxSeq 会漏掉快照里剩余的条目）；
+      // 用 nextOffset 继续取快照，等 hasMore=false 后 nextCursor 才是可用的增量起点。
+      nextOffset: hasMore ? start + entries.length : null,
+      nextCursor: hasMore ? null : Math.max(0, maxSeq),
+      hasMore,
+      count: entries.length
     };
   }
+  if (offset !== undefined && offset !== 0) throw inputError('增量模式不支持 offset；用 nextCursor 继续');
   const sinceNumber = Number(since);
   if (!Number.isInteger(sinceNumber) || sinceNumber < 0) throw inputError('since 必须是非负整数');
   const {entries, hasMore, maxSeq} = incrementalEntries({

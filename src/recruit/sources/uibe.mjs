@@ -85,12 +85,12 @@ function pad(value) {
   return String(value).padStart(2, '0');
 }
 
-// 手动粘贴渲染后的列表页时用。页面只显示“10月27日”，没有年份；没有显式年份就不填开始时间。
+// 手动粘贴渲染后的列表页时用。页面只显示“10月27日”，没有年份；不猜年份、不用 09:00 占位。
+// 只有调用方显式给 year，且列表确实写了时间，才产出 startAt；否则留空并在 notes 说明原因。
 export function parseUibeListHtml(html, source = {}, {year = ''} = {}) {
   const raw = String(html || '');
   const list = raw.match(/<ul[^>]*id=["']zph-list-content["'][^>]*>([\s\S]*?)<\/ul>/i)?.[1] || '';
-  const yearInPage = (raw.match(/\b(20\d{2})-\d{1,2}-\d{1,2}\b/) || [])[1] || '';
-  const useYear = String(year || yearInPage || '').trim();
+  const useYear = String(year || '').trim();
   const out = [];
   for (const match of list.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
     const li = match[1];
@@ -102,23 +102,26 @@ export function parseUibeListHtml(html, source = {}, {year = ''} = {}) {
     if (!title || !date) continue;
     const times = parseTimeRange(strip(timeHtml));
     const day = useYear ? useYear + '-' + pad(date[1]) + '-' + pad(date[2]) : '';
-    const noTimeNote = times?.[0] ? '' : '列表页没有具体时间，按 09:00 占位；请点开详情核对';
+    const clock = times?.[0] || '';
     let url = '';
     try {
       const resolved = new URL(link[1], UIBE_ORIGIN);
       url = resolved.origin === UIBE_ORIGIN ? resolved.href : '';
     } catch { /* 非 http 链接直接丢弃 */ }
     if (!url) continue;
+    const notes = [];
+    if (!day) notes.push('列表页没有年份，未填开始时间；请点开详情核对');
+    else if (!clock) notes.push('列表页没有具体时间，未填开始时间；请点开详情核对');
     out.push({
       title,
       company: '',
-      startAt: day ? day + 'T' + (times?.[0] || '09:00') + ':00+08:00' : '',
-      endAt: day && times?.[1] ? day + 'T' + times[1] + ':00+08:00' : '',
+      startAt: day && clock ? day + 'T' + clock + ':00+08:00' : '',
+      endAt: day && clock && times?.[1] ? day + 'T' + times[1] + ':00+08:00' : '',
       venue: strip(li.match(/<span[^>]*class=["'][^"']*region[^"']*["'][^>]*>([\s\S]*?)<\/span>/i)?.[1] || ''),
       city: source.city || '北京',
       url,
       kind: guessKind(title, source.kind || '宣讲会'),
-      notes: [day ? '' : '列表页没有年份，未填开始时间；请点开详情核对', day ? noTimeNote : ''].filter(Boolean).join('；')
+      notes: notes.join('；')
     });
   }
   return out;
@@ -287,12 +290,15 @@ export default {
   kind: '宣讲会',
   mode: 'browser',
   capabilities: {list: 'browser', detail: 'http', projects: 'none'},
-  enabled: true,
+  // 页面自己的 JS 仍会 POST /front/zp_query/，而 robots.txt 明确 Disallow 该路径。
+  // 「不直连」不等于合规：默认关闭自动采集，等人工确认 robots/站点授权后再打开。
+  enabled: false,
   detail: 'http',
   detailAll: true,
+  detailDelayMs: 1200,
   listUrl: UIBE_LIST_URL,
   sourceCheck: {enabled: true},
-  note: '列表由站点 JS 渲染（每页 20 条、共 202 页），用应用内浏览器打开公开列表页读取站点已解密的数据；robots 禁止直连 /front/zp_query/，因此不直连查询接口。详情页静态可读，含单位/地点/时间/正文；解析不到字段就留空，不猜。',
+  note: '需人工确认 robots：列表页由站点 JS 渲染（每页 20 条、共 202 页），页面自身会 POST /front/zp_query/，而 robots.txt 禁止该路径；因此默认 enabled=false，不声称「不直连」等于合规。解析器与来源校对保留；确认合规后再打开自动采集。详情页静态可读，含单位/地点/时间/正文；解析不到字段就留空，不猜。',
   fallback: '手动 AI 兜底由 #58 接入；结构变化时也可用来源校对或手动导入。',
   parseList(input, source = {}, json = null) {
     if (json && typeof json === 'object') return parseUibeListJson(json, source);

@@ -54,7 +54,8 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
         const ws = WeChatStore.open(join(dir, 'wechat.db'));
         try {
           wechat = {
-            accounts: ws.listAccounts().map(a => ({...a, sourceId: 'wechat:' + a.id, sourceType: 'wechat', enabled: true, aiFallback: aiFallback(playbookFor('wechat'))})),
+            // 公众号只保留账号级「AI 采集」（/api/wechat/operator/start）；不再暴露 mp 首页的通用 AI 兜底。
+            accounts: ws.listAccounts().map(a => ({...a, sourceId: 'wechat:' + a.id, sourceType: 'wechat', enabled: true, aiFallback: {available: false, playbookId: '', note: ''}})),
             stats: ws.stats()
           };
         } finally { ws.close(); }

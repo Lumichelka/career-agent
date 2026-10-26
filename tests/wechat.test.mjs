@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, rm, readdir, writeFile} from 'node:fs/promises';
+import {mkdtemp, rm, readdir, writeFile, readFile} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -19,7 +19,7 @@ import {
   OperatorError, OPERATOR_LAUNCH_OPTIONS
 } from '../src/source-check/operator.mjs';
 import {
-  WECHAT_OPERATOR_TOOL, WECHAT_ARTICLE_LIMIT,
+  WECHAT_OPERATOR_TOOL, WECHAT_ARTICLE_LIMIT, WECHAT_SUMMARY_EVIDENCE,
   pickWechatOperatorAccount, normalizeWechatOperatorArticles, wechatProfileUrl,
   runWechatOperator
 } from '../src/wechat/operator.mjs';
@@ -713,7 +713,7 @@ test('公众号 AI 操作员：fixture 文章列表+正文 → 活动/项目/证
         assert.ok(record.confidence > 0);
         assert.equal(record.evidence_ref, 'artifact:wechat-article-001.json');
         assert.equal(record.evidence_available, true);
-        assert.equal(record.operation_id, taskId);
+        assert.match(record.operation_id, new RegExp('^' + taskId + ':\\d+$'), 'operation_id = taskId:runSeq');
       }
     } finally { rs.close(); }
 
@@ -733,6 +733,39 @@ test('公众号 AI 操作员：fixture 文章列表+正文 → 活动/项目/证
       const incremental = readFeed({db: after.db, dataDir: dir, userId: 'user-59', types: ['event', 'project'], since: 0});
       assert.ok(incremental.entries.some(entry => entry.op === 'undo'));
     } finally { after.close(); }
+  });
+});
+
+test('公众号 AI 操作员：不足 3 条记录判 failed 并给恢复建议（最小记录门禁）', {timeout: 30000}, async () => {
+  await withDir(async dir => {
+    const account = xicaiAccount(dir);
+    const readers = fixtureWechatReaders();
+    // 只读一篇、只抽 1 个单位：1 活动 + 1 单位 = 2 条，低于验收下限。
+    readers.list = async () => [{title: '西南财经大学2027届秋季双选会邀请函', url: WECHAT_ARTICLE_URLS.jobfair}];
+    const analyze = () => ({
+      hasRecruitment: 'yes',
+      summary: '双选会',
+      draft: {startAt: '2026-11-20T14:00:00+08:00', title: '西南财经大学2027届秋季双选会'},
+      projects: [{company: '中国工商银行股份有限公司', title: '管理培训生'}],
+      warnings: []
+    });
+    const page = fakeWechatPage();
+    const capture = {};
+    await assert.rejects(runWechatOperator({
+      dataDir: dir, wechatDir: dir, userId: 'user-59-min', task: {id: '99999999-9999-4999-8999-999999999999'}, account,
+      launch: fakeWechatLauncher(page, capture), readers, analyze,
+      emit: () => {}, addEvidence: async () => {}, setPhase: () => {},
+      askHuman: async () => { throw new Error('fixture 流程不应暂停'); }
+    }), error => {
+      assert.equal(error?.code, 'WECHAT_MIN_RECORDS');
+      assert.match(error.recovery, /至少 3 条|手动导入/);
+      return true;
+    });
+    const evidenceDir = join(dir, 'users', 'user-59-min', 'tasks', '99999999-9999-4999-8999-999999999999', 'evidence');
+    const summary = JSON.parse(await readFile(join(evidenceDir, WECHAT_SUMMARY_EVIDENCE), 'utf8'));
+    assert.equal(summary.written, 2);
+    assert.equal(summary.accounted, 2, '门禁看写入/确认的记录数');
+    assert.ok(summary.published.length >= 1, '已写入的记录与证据保留，便于用户核对');
   });
 });
 

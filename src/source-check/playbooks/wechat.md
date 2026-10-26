@@ -10,6 +10,7 @@ aliases:
   - 微信公众号
 entry:
   - https://mp.weixin.qq.com/
+detailSelector: a[href*="mp.weixin.qq.com/s"]
 domains:
   - mp.weixin.qq.com
 successMarkers:
@@ -53,4 +54,7 @@ extractHints:
 ## 边界
 
 - 只读文章列表与正文；关注、发消息、支付等动作一律不点（硬确认兜底）。
-- 单次 <10 分钟；到时暂停，用户处理后从停点继续。
+- 单次总活跃时间 <10 分钟；到时暂停，用户处理后从停点继续，额度不清零。
+- 公众号只走**账号级「AI 采集」**（必须带 accountId）：本 playbook 不再作为 mp 首页的通用兜底入口。
+- 一次采集至少 3 条记录（活动 + 单位）才算通过；不足 3 条标 failed 并给恢复建议。
+- 文章列表/正文依赖微信 DOM（#js_content、#activity-name 等），微信改版会导致读取失败；失败时明确报错，不猜。

@@ -35,5 +35,7 @@ export default {
 ## 注意
 
 - 只读公开页面；遵守 robots.txt 与同域限速；
+- 「不直连查询接口」不等于合规：如果页面自身 JS 会 POST robots 禁止的接口（例如 UIBE 的
+  /front/zp_query/），默认 `enabled:false` 并在 `note` 标「需人工确认 robots」，不要声称已合规；
 - 抓不到就 `enabled: false` 并写 `note`，不要把"没抓到"显示成"没有活动"；
 - 返回的 `startAt` 必须是带 `+08:00` 的 ISO 时间，否则会被丢弃。

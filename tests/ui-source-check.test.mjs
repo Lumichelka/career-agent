@@ -35,25 +35,21 @@ async function launchBrowser(t, port) {
 }
 
 
-function operatorPage({loginAfterGoto = true} = {}) {
+function operatorPage({loginAfterGoto = true, onAfter = {}} = {}) {
   const calls = [];
   const handlers = new Map();
   const listUrl = 'https://mp.weixin.qq.com/s/example';
   let currentUrl = listUrl;
-  let loginSeen = 0;
   const page = {
     calls,
-    url: () => {
-      if (currentUrl.includes('/login')) {
-        loginSeen += 1;
-        // 第一次检测看到登录页；用户点「已登录，继续」后模拟登录完成。
-        if (loginSeen > 1) currentUrl = listUrl;
-      }
-      return currentUrl;
-    },
+    url: () => currentUrl,
+    setUrl: value => { currentUrl = String(value); },
     title: async () => (currentUrl.includes('/login') ? '登录' : '文章列表'),
     goto: async url => { calls.push({action: 'goto', url}); currentUrl = loginAfterGoto ? 'https://mp.weixin.qq.com/login' : url; },
-    click: async selector => { calls.push({action: 'click', selector}); },
+    click: async selector => {
+      calls.push({action: 'click', selector});
+      if (onAfter[selector]) await onAfter[selector](page);
+    },
     evaluate: async script => (typeof script === 'function' ? '文章列表' : '文章列表'),
     screenshot: async ({path}) => { await writeFile(path, PNG); },
     waitForTimeout: async () => {},
@@ -88,16 +84,11 @@ test('operator 任务卡：等待登录时显示动作时间线与人工接管�
   await page.waitForFunction(() => document.querySelector('#account-screen')?.style.display === 'none', null, {timeout: 15000});
 
   const cookie = (await context.cookies(app.origin)).map(item => item.name + '=' + item.value).join('; ');
+  // HTTP 不接受客户端 steps：只给 URL + confirm，服务端生成默认两步计划。
   const startedResponse = await fetch(app.origin + '/api/source-check/operator/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json', 'x-career-token': app.token, cookie},
-    body: JSON.stringify({
-      url: 'https://mp.weixin.qq.com/s/example',
-      steps: [
-        {action: 'goto', url: 'https://mp.weixin.qq.com/s/example'},
-        {action: 'screenshot', label: '文章列表'}
-      ]
-    })
+    body: JSON.stringify({url: 'https://mp.weixin.qq.com/s/example', confirm: true})
   });
   assert.equal(startedResponse.status, 200);
   const started = await startedResponse.json();
@@ -114,6 +105,7 @@ test('operator 任务卡：等待登录时显示动作时间线与人工接管�
   assert.equal(capture.options.options.headless, false, '任务卡对应的是可见浏览器 profile');
   assert.ok(await card.locator('[data-operator-action="continue"]').count() === 1, '等待登录要有「已登录，继续」');
 
+  pageModel.setUrl('https://mp.weixin.qq.com/s/example');
   await card.locator('[data-operator-action="continue"]').click();
   await page.waitForSelector('#workflow-drawer .task-card[data-state="succeeded"]', {timeout: 30000});
   const finishedText = await page.locator('#workflow-drawer .task-card').first().innerText();
@@ -131,19 +123,19 @@ test('operator 任务卡：等待登录时显示动作时间线与人工接管�
   assert.ok(layout.bodyScroll <= layout.bodyClient + 1, '任务卡时间线不能横向溢出');
 
   // 第二条：危险动作在任务卡上硬确认；拒绝后不点击，任务继续完成。
-  const confirmResponse = await fetch(app.origin + '/api/source-check/operator/start', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json', 'x-career-token': app.token, cookie},
-    body: JSON.stringify({
-      url: 'https://career.uibe.edu.cn/zhaopin/',
-      steps: [
-        {action: 'click', target: '#apply', text: '投递简历'},
-        {action: 'evaluate', script: 'document.title'}
-      ]
-    })
+  // 自定义步骤只能由服务端注入（HTTP 已拒绝 steps），这里直接调进程内服务。
+  const me = await (await fetch(app.origin + '/api/auth/me', {headers: {'x-career-token': app.token, cookie}})).json();
+  const confirmOut = await app.operator.start({
+    user: {id: me.user.id},
+    url: 'https://career.uibe.edu.cn/zhaopin/',
+    confirm: true,
+    steps: [
+      {action: 'click', target: '#apply', text: '投递简历'},
+      {action: 'evaluate', script: 'document.title'}
+    ]
   });
-  assert.equal(confirmResponse.status, 200);
-  const confirmStarted = await confirmResponse.json();
+  assert.equal(confirmOut.status, 200);
+  const confirmStarted = confirmOut.json;
   const confirmCardSelector = '#workflow-drawer .task-card[data-task-id="' + confirmStarted.taskId + '"]';
   await page.waitForSelector(confirmCardSelector + '[data-state="waiting_confirmation"]', {state: 'visible', timeout: 30000});
   const confirmCard = page.locator(confirmCardSelector);
@@ -257,8 +249,12 @@ test('来源卡「来源校对」→ 切回对话并打开抽屉；390 宽不溢
   assert.ok(!updatedText.includes('已接入'), '记了手动读取也不能显示已接入');
 });
 
-test('来源卡「AI 兜底」：手动入口、明示不是自动采集、阻断后不自动切换、点击才跑 operator 任务', {timeout: 180000}, async t => {
-  const pageModel = operatorPage({loginAfterGoto: false});
+test('来源卡「AI 兜底」：手动入口、明示不是自动采集、阻断后不自动切换、点击确认后才跑 operator 任务', {timeout: 180000}, async t => {
+  const swufeDetail = 'https://job3.swufe.edu.cn/jobfair/jobfair-show-123.htm';
+  const pageModel = operatorPage({
+    loginAfterGoto: false,
+    onAfter: {'a[href*="/jobfair/jobfair-show-"]': async target => target.setUrl(swufeDetail)}
+  });
   const capture = {};
   const blockedReader = async () => { throw new SourceCheckBlockedError('来源页需要登录或验证，已停止读取。'); };
   // 兜底跑完动作后复用 source-check 的视觉抽取/写入；UI 测试同样不调模型 API。
@@ -284,7 +280,7 @@ test('来源卡「AI 兜底」：手动入口、明示不是自动采集、阻�
   const cookie = (await context.cookies(app.origin)).map(item => item.name + '=' + item.value).join('; ');
   const apiHeaders = {'Content-Type': 'application/json', 'x-career-token': app.token, cookie};
 
-  // 公众号账号也要有「AI 兜底」（复用 wechat playbook）。
+  // 公众号账号用于验证「通用 AI 兜底入口已移除」。
   const accountResponse = await fetch(app.origin + '/api/wechat/accounts', {method: 'POST', headers: apiHeaders, body: JSON.stringify({name: '西财校招', school: '西南财经大学'})});
   assert.equal(accountResponse.status, 200);
   const account = (await accountResponse.json()).account;
@@ -325,13 +321,14 @@ test('来源卡「AI 兜底」：手动入口、明示不是自动采集、阻�
   assert.equal(await swufeButton.getAttribute('data-playbook'), 'swufe-xjh');
   assert.match(await swufeButton.getAttribute('title'), /不是自动采集/);
 
-  // 公众号账号行也有入口，并指向 wechat playbook。
-  const wxRow = page.locator('#sources .src-row', {has: page.locator('[data-ai-fallback="wechat:' + account.id + '"]')});
+  // 公众号只保留账号级「AI 采集」：账号行不再有 mp 首页的通用 AI 兜底入口。
+  const wxRow = page.locator('#sources .src-row', {hasText: '西财校招'});
   await wxRow.waitFor({state: 'visible', timeout: 15000});
-  assert.match(await wxRow.innerText(), /西财校招/);
-  assert.equal(await page.locator('[data-ai-fallback="wechat:' + account.id + '"]').getAttribute('data-playbook'), 'wechat');
+  assert.equal(await page.locator('[data-ai-fallback="wechat:' + account.id + '"]').count(), 0, '公众号不能再用通用 wechat playbook 兜底');
 
-  // 用户点击才运行：复用 operator 任务，playbook 入口成为第一步。
+  // 用户点击后先弹一次确认；确认才运行，playbook 入口成为第一步。
+  const dialogs = [];
+  page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.accept(); });
   await swufeButton.click();
   await page.waitForURL(url => url.pathname === '/chat' && url.searchParams.get('workflow') === 'open' && !!url.searchParams.get('session'), {timeout: 20000});
   const succeededCard = page.locator('#workflow-drawer .task-card[data-state="succeeded"]');
@@ -341,6 +338,8 @@ test('来源卡「AI 兜底」：手动入口、明示不是自动采集、阻�
   assert.match(cardText, /西南财经大学/);
   assert.match(cardText, /打开页面/);
   assert.match(cardText, /成功/);
+  assert.equal(dialogs.length, 1, 'AI 兜底起任务前必须确认一次');
+  assert.match(dialogs[0], /AI 兜底|确认/);
 
   const after = (await (await fetch(app.origin + '/api/tasks', {headers: apiHeaders})).json()).tasks;
   assert.equal(after.length, 2, '点击后恰好新增一个兜底任务');
