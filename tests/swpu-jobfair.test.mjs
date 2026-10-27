@@ -123,7 +123,7 @@ test('SWPU 双选会：第一页全过去时翻到第二页取未来场次', asy
     const seed = RecruitStore.open(join(dir, 'recruit.db'));
     try { seed.upsertEvent(normalize({title: oldTitle, startAt: oldStartAt, city: testSource.city, kind: '双选会'}, testSource)); } finally { seed.close(); }
     const result = await collectSource(testSource, {dir});
-    assert.equal(result.status, 'ok', result.message);
+    assert.equal(result.status, 'connected', result.message);
     assert.equal(result.fetched, 23);
     const store = RecruitStore.open(join(dir, 'recruit.db'));
     try {

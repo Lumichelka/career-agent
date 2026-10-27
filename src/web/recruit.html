@@ -251,6 +251,7 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
 <div class="toast" id="toast"></div>
 <script type="module">
 import {projectCardMeta} from '/recruit-cards.js';
+import {sourceStatusLabel, sourceStatusTone} from '/source-status.js';
 const TOKEN='SESSION_TOKEN';
 const el=s=>document.querySelector(s);
 let catalog={},sourceState=[],sourceManual={};
@@ -313,15 +314,16 @@ function renderSources(sources,wechat){
   const fallbackHint=s=>{
     const read=sourceManual[s.id];
     if(read?.status==='blocked')return '确定性采集被阻断，可手动点「AI 兜底」';
-    if(s.failureStreak>0||/^(failed|error)$/i.test(String(s.last_status||'')))return '确定性采集失败'+(s.failureStreak?' '+s.failureStreak+' 次':'')+'，可手动点「AI 兜底」';
+    const st=String(s.last_status||'');
+    if(st==='network_error'||st==='blocked_robots')return '确定性采集失败'+(s.failureStreak?' '+s.failureStreak+' 次':'')+'，可手动点「AI 兜底」';
     return '';
   };
   const statusBadge=s=>{
     if(s.orphaned)return '<span class="badge err">来源已下线</span>';
-    if(!s.enabled)return '<span class="badge off">未接入</span>';
-    if(catalog[s.id]?.collectMode==='manual')return '<span class="badge off">需登录/人工</span>';
-    const st=s.last_status||'待采集';
-    return '<span class="badge '+(/^(ok|connected)$/.test(st)?'ok':'off')+'">'+esc(st)+'</span>';
+    if(!s.enabled)return '<span class="badge off">'+esc(sourceStatusLabel('disabled'))+'</span>';
+    if(catalog[s.id]?.collectMode==='manual')return '<span class="badge off">'+esc(sourceStatusLabel('needs_login'))+'</span>';
+    const st=s.last_status||'';
+    return '<span class="badge '+sourceStatusTone(st)+'" title="'+esc(st||'待采集')+'">'+esc(sourceStatusLabel(st))+'</span>';
   };
   const freshCell=s=>{
     const f=s.lastFetched??0, c=s.lastCreated??0, u=s.lastUpdated??0;

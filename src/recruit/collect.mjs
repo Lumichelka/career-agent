@@ -5,6 +5,7 @@ import {fetchText} from './fetch.mjs';
 import {SOURCES, REMOVED_SOURCES, sourceById, enabledSources, guessKind, guessCompany, normalizeCity} from './sources/index.mjs';
 import {browserText, parseRenderedText} from './browser.mjs';
 import {RecruitStore} from './store.mjs';
+import {isFailedSourceStatus, sourceStatusFromErrorKind, sourceStatusFromFetchReason} from './source-status.mjs';
 
 // 允许请求体写成函数（例如按当天日期生成查询参数）。
 function requestBody(source) {
@@ -102,7 +103,7 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
   const t0 = Date.now();
   const store = persist ? RecruitStore.open(join(dir, 'recruit.db')) : null;
   if (store) store.syncSources(SOURCES, REMOVED_SOURCES);
-  const result = {id: source.id, name: source.name, status: 'ok', fetched: 0, created: 0, updated: 0, projects: 0, projectEvents: 0, projectErrors: 0, message: '', durationMs: 0};
+  const result = {id: source.id, name: source.name, status: 'connected', fetched: 0, created: 0, updated: 0, projects: 0, projectEvents: 0, projectErrors: 0, projectEmpty: 0, message: '', durationMs: 0};
   try {
     if (!source.enabled) {
       result.status = 'disabled';
@@ -111,7 +112,7 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     }
     // 登录型 browser 源：明确停止，不自动登录/不绕过验证；人工用来源校对或手动导入。
     if (source.collectMode === 'manual' || source.loginRequired) {
-      result.status = 'blocked';
+      result.status = 'needs_login';
       result.message = '需要登录/人工确认：不自动采集、不绕过登录；请用来源校对或手动导入。';
       return result;
     }
@@ -138,7 +139,7 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     } else {
       const res = await fetchText(source.listUrl, {method: source.request?.method || 'GET', headers: {...(source.mode === 'json' ? {referer: source.listUrl} : {}), ...source.request?.headers}, body: requestBody(source)});
       if (!res.ok) {
-        result.status = res.reason === 'robots_disallowed' ? 'disallowed' : res.reason === 'blocked' ? 'blocked' : 'error';
+        result.status = sourceStatusFromFetchReason(res.reason);
         result.message = res.message;
         return result;
       }
@@ -211,7 +212,7 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     }
 
     const seen = [];
-    let projectEvents = 0, projectErrors = 0, projectTotal = 0;
+    let projectEvents = 0, projectErrors = 0, projectEmpty = 0, projectTotal = 0;
     for (const item of items) {
       const event = normalize(item, source);
       if (!event) continue;
@@ -226,11 +227,23 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
       if (store && typeof source.fetchProjects === 'function' && projectEvents < projectLimit) {
         try {
           const got = await source.fetchProjects(item, event, {source});
-          if (got?.status === 'ok' && got.projects?.length) {
-            const synced = store.syncProjects(event.id, source.id, got.projects);
-            projectTotal += synced.total;
+          const projectStatus = String(got?.status || '');
+          if (projectStatus === 'ok' || projectStatus === 'partial') {
+            const projects = Array.isArray(got?.projects) ? got.projects : [];
+            if (projects.length) {
+              const synced = store.syncProjects(event.id, source.id, projects);
+              projectTotal += synced.total;
+              onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目 ${synced.total} 个（新增 ${synced.created}，更新 ${synced.updated}）`});
+            } else {
+              projectEmpty++;
+              onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：接口可访问，但没有参会单位`});
+            }
             projectEvents++;
-            onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目 ${synced.total} 个（新增 ${synced.created}，更新 ${synced.updated}）`});
+          } else if (projectStatus === 'none' || projectStatus === 'empty') {
+            // 合法空项目：接口可用、只是没有参会单位，不是采集失败。
+            projectEmpty++;
+            projectEvents++;
+            onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目为空（${got?.message || '接口可访问，但没有参会单位'}）`});
           } else {
             projectErrors++;
             onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目未抓取（${got?.message || got?.status || '未知原因'}）`});
@@ -244,6 +257,7 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     result.projects = projectTotal;
     result.projectEvents = projectEvents;
     result.projectErrors = projectErrors;
+    result.projectEmpty = projectEmpty;
 
     // 来源页如果链接了公众号推文，顺手发现并分析（不批量刷公众号主页）。
     if (store && listText.includes('mp.weixin.qq.com')) {
@@ -263,16 +277,19 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     }
     if (!items.length) { result.status = 'empty'; result.message = '页面可访问，但没有解析到活动；可能需要浏览器模式或适配选择器。'; }
     else if (typeof source.fetchProjects === 'function') {
+      if (projectErrors) result.status = 'list_only';
       if (!projectEvents) {
-        result.status = 'list_only';
         result.message = `活动已入库，但项目阶段未成功（${projectErrors} 场失败）`;
       } else if (projectErrors) {
         result.message = `项目部分成功：${projectEvents} 场，${projectErrors} 场失败`;
+      } else if (projectEmpty && !projectTotal) {
+        result.message = '活动已入库；项目接口可访问，但没有参会单位';
+      } else if (projectEmpty) {
+        result.message = `项目阶段完成：有项目 ${projectEvents - projectEmpty} 场，空项目 ${projectEmpty} 场`;
       }
     }
   } catch (e) {
-    const kind = e?.kind;
-    result.status = kind === 'blocked' || kind === 'login_required' ? 'blocked' : kind === 'empty' ? 'empty' : 'error';
+    result.status = sourceStatusFromErrorKind(e?.kind);
     result.message = e.message;
   } finally {
     result.durationMs = Date.now() - t0;
@@ -310,6 +327,6 @@ export async function runCollection({dir, sourceIds, limit, concurrency = 2, onL
     updated: results.reduce((a, r) => a + (r.updated || 0), 0),
     wechatArticles: results.reduce((a, r) => a + (r.wechatArticles || 0), 0),
     projects: results.reduce((a, r) => a + (r.projects || 0), 0),
-    failed: results.filter(r => ['error', 'blocked', 'disallowed'].includes(r.status)).length
+    failed: results.filter(r => isFailedSourceStatus(r.status)).length
   }};
 }

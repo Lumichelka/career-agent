@@ -35,9 +35,9 @@ test('markSource：成功写最近尝试/成功与抓取、新增、更新数；
   store.syncSources(SOURCES);
   const id = 'scu-employ';
 
-  store.markSource(id, {status: 'ok', error: '', fetched: 15, created: 3, updated: 12});
+  store.markSource(id, {status: 'connected', error: '', fetched: 15, created: 3, updated: 12});
   let row = store.db.prepare('SELECT * FROM sources WHERE id=?').get(id);
-  assert.equal(row.last_status, 'ok');
+  assert.equal(row.last_status, 'connected');
   assert.ok(row.last_attempt, '成功要写最近尝试时间');
   assert.ok(row.last_success, '成功要写最近成功时间');
   assert.equal(row.last_fetched, 15);
@@ -47,9 +47,9 @@ test('markSource：成功写最近尝试/成功与抓取、新增、更新数；
 
   const firstSuccess = row.last_success;
   await new Promise(r => setTimeout(r, 5));
-  store.markSource(id, {status: 'error', error: '网络超时', fetched: 0});
+  store.markSource(id, {status: 'network_error', error: '网络超时', fetched: 0});
   row = store.db.prepare('SELECT * FROM sources WHERE id=?').get(id);
-  assert.equal(row.last_status, 'error');
+  assert.equal(row.last_status, 'network_error');
   assert.equal(row.last_success, firstSuccess, '失败要保留最近一次成功时间');
   assert.ok(row.last_attempt, '失败仍写最近尝试时间');
 });
@@ -60,13 +60,13 @@ test('failure_streak：连续失败递增，成功清零，API 透出', async t 
   try {
     store.syncSources(SOURCES);
     const id = 'scu-employ';
-    store.markSource(id, {status: 'ok', fetched: 2});
+    store.markSource(id, {status: 'connected', fetched: 2});
     assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 0);
-    store.markSource(id, {status: 'error', error: '超时'});
+    store.markSource(id, {status: 'network_error', error: '超时'});
     assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 1);
-    store.markSource(id, {status: 'blocked', error: '被拦截'});
+    store.markSource(id, {status: 'blocked_robots', error: '被拦截'});
     assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 2);
-    store.markSource(id, {status: 'timeout', error: '超时'});
+    store.markSource(id, {status: 'network_error', error: '超时'});
     assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 3);
     store.markSource(id, {status: 'empty', fetched: 0});
     assert.equal(store.sourceStates().find(s => s.id === id).failureStreak, 0, 'empty 属于成功采集，清零');
@@ -148,7 +148,7 @@ test('采集运行写最近尝试/成功与 fetched/created/updated', async t =>
   const store = RecruitStore.open(join(dir, 'recruit.db'));
   t.after(() => cleanup(dir, store));
   const row = store.db.prepare('SELECT * FROM sources WHERE id=?').get('scu-employ');
-  assert.equal(row.last_status, 'ok');
+  assert.equal(row.last_status, 'connected');
   assert.ok(row.last_attempt, '采集后要写最近尝试时间');
   assert.ok(row.last_success, '采集后要写最近成功时间');
   assert.equal(row.last_fetched, 1);
@@ -163,7 +163,7 @@ test('采集运行写最近尝试/成功与 fetched/created/updated', async t =>
 test('GET /api/recruit/sources 返回每源新鲜度字段', async t => {
   const {dir, store} = await openStore(t);
   store.syncSources(SOURCES);
-  store.markSource('scu-employ', {status: 'ok', fetched: 5, created: 2, updated: 3});
+  store.markSource('scu-employ', {status: 'connected', fetched: 5, created: 2, updated: 3});
   store.close();
   const {handleRecruit} = await import('../src/recruit/api.mjs');
   const res = await handleRecruit({method: 'GET', pathname: 'sources', url: new URL('http://x/sources'), body: null, dir});

@@ -32,7 +32,7 @@ test('24365/国聘：browser 源骨架开放，但明确需登录/人工确认�
     assert.match(source.note, /登录|人工/);
     assert.equal(source.capabilities.list, 'browser');
     const out = await collectSource(id, {dir: 'unused', persist: false});
-    assert.equal(out.status, 'blocked');
+    assert.equal(out.status, 'needs_login');
     assert.match(out.message, /登录|人工确认/);
   }
 });
@@ -235,7 +235,7 @@ test('对外经贸：接入采集器后一次采集 3 条，单位和正文来�
     });
     const source = {...uibe, id: 'uibe-test', enabled: true, listUrl: base + '/list', fetchList: async () => ({items: detail, pageCount: 202, pages: 1})};
     const result = await collectSource(source, {dir, limit: 3, detailLimit: 3});
-    assert.equal(result.status, 'ok', result.message);
+    assert.equal(result.status, 'connected', result.message);
     assert.equal(result.created, 3);
     const store = RecruitStore.open(join(dir, 'recruit.db'));
     try {

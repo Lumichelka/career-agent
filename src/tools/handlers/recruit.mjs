@@ -106,9 +106,9 @@ export async function sourceStates(args, ctx) {
     const states = store.sourceStates();
     return {
       status: 'readable',
-      notice: 'ok 只在列表解析成功时使用；项目阶段失败会标 list_only 或给出原因。',
+      notice: '来源状态用 connected/list_only/needs_login/blocked_robots/network_error/empty/disabled；list_only 表示活动列表成功但项目阶段失败；源不支持项目时只看活动列表。',
       count: states.length,
-      sources: states.map(s => ({...sourceHealth(SOURCES.find(x => x.id === s.id) || {id: s.id, name: s.name, enabled: !!s.enabled, mode: s.mode, category: s.category}), orphaned: !!s.orphaned, lastStatus: s.last_status, lastCount: s.last_count, lastError: s.last_error, lastRun: s.last_run}))
+      sources: states.map(s => ({...sourceHealth(SOURCES.find(x => x.id === s.id) || {id: s.id, name: s.name, enabled: !!s.enabled, mode: s.mode, category: s.category}), orphaned: !!s.orphaned, lastStatus: s.lastStatus, lastStatusLabel: s.lastStatusLabel, lastCount: s.last_count, lastError: s.last_error, lastRun: s.last_run}))
     };
   } finally { store.close(); }
 }

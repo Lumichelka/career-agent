@@ -40,7 +40,7 @@ if (command === 'sources') {
   let category = '';
   for (const s of states) {
     if (s.category !== category) { category = s.category; console.log('\n【' + category + '】'); }
-    const flagText = s.orphaned ? '来源已下线' : (s.enabled ? (s.last_status ? '最近：' + s.last_status : '已接入') : '未接入');
+    const flagText = s.orphaned ? '来源已下线' : (s.enabled ? (s.last_status ? '最近：' + s.lastStatusLabel : '已接入') : '未接入');
     console.log(` ${s.id.padEnd(18)} ${s.name.padEnd(28)} ${String(flagText).padEnd(12)} ${s.mode}`);
     if (!s.enabled && s.note) console.log(`   └ ${s.note}`);
   }

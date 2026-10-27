@@ -73,7 +73,7 @@ test('电子科大：整月日历超过 20 条时未来场次不被截断，活�
   try {
     const testSource = {...source, id: 'uestc-test', listUrl: base + '/career/api/home/calendar?month=2026-10'};
     const result = await collectSource(testSource, {dir});
-    assert.equal(result.status, 'ok', result.message);
+    assert.equal(result.status, 'connected', result.message);
     assert.equal(result.fetched, 23);
     const now = new Date(Date.now() + 8 * 3600 * 1000);
     const thisMonth = now.toISOString().slice(0, 7);

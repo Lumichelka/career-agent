@@ -10,6 +10,7 @@ import {dirname} from 'node:path';
 import {mkdirSync} from 'node:fs';
 import {randomUUID, createHash} from 'node:crypto';
 import {normalizePlatformJobs} from './platform-jobs.mjs';
+import {isSuccessfulSourceStatus, normalizeSourceStatus, sourceStatusLabel} from './source-status.mjs';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS sources(
@@ -70,7 +71,7 @@ const MIGRATIONS = [
 
 // 采集结果里「成功」指源可访问并完成解析（哪怕 0 条或项目阶段失败）；失败/禁用不更新最近成功。
 function isSuccessful(status) {
-  return ['ok', 'empty', 'list_only'].includes(String(status || ''));
+  return isSuccessfulSourceStatus(status);
 }
 
 export class RecruitStore {
@@ -205,8 +206,13 @@ export class RecruitStore {
       const lastSuccessMs = row.last_success ? Date.parse(row.last_success) : NaN;
       const dataAgeMinutes = Number.isFinite(lastSuccessMs) ? Math.max(0, Math.floor((now - lastSuccessMs) / 60000)) : null;
       const stale = withEventsToday.has(row.id) && (dataAgeMinutes === null || dataAgeMinutes > 24 * 60);
+      const lastStatus = row.last_status == null ? null : normalizeSourceStatus(row.last_status);
       return {
         ...row,
+        last_status: lastStatus,
+        lastStatus,
+        lastStatusLabel: sourceStatusLabel(lastStatus),
+        rawStatus: row.last_status || '',
         lastAttempt: row.last_attempt || '',
         lastSuccess: row.last_success || '',
         lastFetched: Number(row.last_fetched) || 0,
@@ -241,13 +247,14 @@ export class RecruitStore {
   markSource(id, {status, error = '', count = 0, fetched, created = 0, updated = 0}) {
     const now = new Date().toISOString();
     const f = Number(fetched ?? count) || 0;
+    const savedStatus = normalizeSourceStatus(status) || String(status || '');
     this.db.prepare('UPDATE sources SET last_run=?, last_status=?, last_error=?, last_count=?, last_attempt=? WHERE id=?')
-      .run(now, status, error, f, now, id);
-    if (isSuccessful(status)) {
+      .run(now, savedStatus, error, f, now, id);
+    if (isSuccessful(savedStatus)) {
       this.db.prepare('UPDATE sources SET last_success=?, last_fetched=?, last_created=?, last_updated=?, failure_streak=0 WHERE id=?')
         .run(now, f, Number(created) || 0, Number(updated) || 0, id);
     } else {
-      // 连续失败：成功（ok/empty/list_only）清零，其余每次 +1；供来源卡与告警判断。
+      // 连续失败：成功（connected/empty/list_only）清零，其余每次 +1；供来源卡与告警判断。
       this.db.prepare('UPDATE sources SET failure_streak=COALESCE(failure_streak,0)+1 WHERE id=?').run(id);
     }
   }
