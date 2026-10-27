@@ -43,6 +43,9 @@ function decide(body, state = {}) {
   if (body.tools?.length && /研究这个招聘项目/.test(userText)) {
     return {toolCalls: [{id: 'call_career_recruit_projects', name: 'career_recruit_projects', args: '{\"days\":30}'}]};
   }
+  if (body.tools?.length && /查公众号文章失败/.test(all) && /没有数据目录/.test(all)) {
+    return {text: JSON.stringify({...FINAL, reply: '没有数据目录，无法读取公众号文章；我不会编造文章或公司信息。'})};
+  }
   if (body.tools?.length && /查公众号文章/.test(userText)) {
     return {toolCalls: [{id: 'call_career_wechat_articles', name: 'career_wechat_articles', args: '{\"q\":\"双选会\",\"limit\":3}'}]};
   }

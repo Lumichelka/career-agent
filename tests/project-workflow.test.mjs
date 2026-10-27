@@ -26,3 +26,30 @@ test('项目研究链路：模型调用项目工具后才给结论', async () =>
     assert.ok(JSON.parse(out.raw).reply);
   } finally { await mock.close(); }
 });
+
+test('公众号文章查询失败：工具证据带原因，回复如实说明且不编造', async () => {
+  const mock = await startMockOpenAI();
+  try {
+    const config = {protocol: 'chat', baseUrl: mock.url, model: 'mock-model', stream: true, maxTokens: 2048};
+    let called = '';
+    const out = await runApiModel({
+      root,
+      prompt: '查公众号文章失败：看看有没有双选会招聘信息。',
+      search: true,
+      config,
+      toolCaller: async name => {
+        called = name;
+        return {status: 'unavailable', message: '没有数据目录，无法读取公众号文章'};
+      }
+    });
+    assert.equal(called, 'career_wechat_articles', '应调用公众号文章工具');
+    assert.ok(out.trace.some(t => t.label === 'career_wechat_articles'), 'trace 应记录工具调用');
+    const evidence = out.toolEvidence.join('\n');
+    assert.match(evidence, /没有数据目录/, '工具证据应保留失败原因');
+    assert.match(evidence, /unavailable/, '工具证据应保留失败状态');
+    const reply = JSON.parse(out.raw).reply;
+    assert.match(reply, /无法读取|不能读取/, '回复应明确说无法读取');
+    assert.match(reply, /不编造|不会编造|没有编造/, '回复应说明不编造');
+    assert.doesNotMatch(reply, /甲公司|乙公司|某公司/, '回复不应编造公司或文章');
+  } finally { await mock.close(); }
+});
