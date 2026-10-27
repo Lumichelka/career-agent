@@ -22,7 +22,7 @@ export default {
   },
   note: "双选会详情“已报名单位”在前端被注释；项目暂不支持，公众号兜底。",
   parseList(_html, source, json) {
-    const today = todayChina();
+    const today = source?.today || todayChina();
     const out = [];
     for (const group of json?.data || []) {
       for (const item of group.con || []) {

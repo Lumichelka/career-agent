@@ -8,6 +8,7 @@ import {join} from 'node:path';
 import {SOURCES, REMOVED_SOURCES, sourceById, enabledSources, CATEGORIES} from '../src/recruit/sources/index.mjs';
 import {collectSource, htmlToText} from '../src/recruit/collect.mjs';
 import uibe, {decryptUibePayload, parseUibePageMeta, parseUibeListJson, parseUibeListHtml, parseUibeDetail, nextUibePage, collectUibePages} from '../src/recruit/sources/uibe.mjs';
+import swjtu from '../src/recruit/sources/swjtu.mjs';
 import {RecruitStore} from '../src/recruit/store.mjs';
 
 test('源注册表：自动发现 13 个源，id 唯一；默认自动采集 8 个（对外经贸待 robots 确认）', () => {
@@ -75,6 +76,27 @@ test('已下线来源墓碑：南开/中山源码已移除但谱系保留', () =
     assert.ok(s.name && s.school && s.listUrl);
     assert.ok(!SOURCES.some(x => x.id === s.id), s.id + ' 不应同时出现在当前注册表');
   }
+});
+
+const swjtuCalendar = JSON.parse(readFileSync(new URL('./fixtures/swjtu-calendar.json', import.meta.url), 'utf8'));
+
+test('西南交大：日历 JSON 按北京时间过滤过去场次，未来场次保留', () => {
+  const items = swjtu.parseList('', {...swjtu, today: '2026-10-27'}, swjtuCalendar);
+  assert.deepEqual(items.map(item => item.title), [
+    '中国电科2027届校园招聘宣讲会',
+    '中国中车2027届双选会',
+    '京东方2027届校园招聘宣讲会'
+  ]);
+  assert.equal(items[0].startAt, '2026-10-27T19:00:00+08:00');
+  assert.equal(items[0].venue, '九里校区大学生会堂');
+  assert.equal(items[0].url, 'https://jiuye.swjtu.edu.cn/career/index/common/jyrlDetail?type=xjh&id=1002');
+  assert.equal(items[0].kind, '宣讲会');
+  assert.equal(items[1].kind, '双选会');
+  assert.equal(items[1].url, 'https://jiuye.swjtu.edu.cn/career/index/common/jyrlDetail?type=zph&id=1003');
+  assert.ok(!items.some(item => item.title.includes('中国中铁')), '过去场次不应入库');
+
+  const later = swjtu.parseList('', {...swjtu, today: '2026-11-01'}, swjtuCalendar);
+  assert.deepEqual(later.map(item => item.title), ['中国中车2027届双选会', '京东方2027届校园招聘宣讲会']);
 });
 
 const uibeFixture = name => readFileSync(new URL('./fixtures/uibe/' + name, import.meta.url), 'utf8');

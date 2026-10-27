@@ -1,0 +1,44 @@
+{
+  "data": [
+    {
+      "con": [
+        {
+          "mark": "2026-10-20 14:30",
+          "xjhzt": "中国中铁2027届校园招聘宣讲会",
+          "con": "中国中铁",
+          "cdmc": "犀浦校区四食堂三楼320",
+          "a": "/index/common/jyrlDetail?type=xjh&id=1001",
+          "type": "xjh"
+        },
+        {
+          "mark": "2026-10-27 19:00",
+          "xjhzt": "中国电科2027届校园招聘宣讲会",
+          "con": "中国电子科技集团",
+          "cdmc": "九里校区大学生会堂",
+          "a": "index/common/jyrlDetail?type=xjh&id=1002",
+          "type": "xjh"
+        },
+        {
+          "mark": "2026-11-05 09:30",
+          "xjhzt": "",
+          "con": "中国中车2027届双选会",
+          "cdmc": "犀浦校区体育馆",
+          "a": "/index/common/jyrlDetail?type=zph&id=1003",
+          "type": "zph"
+        }
+      ]
+    },
+    {
+      "con": [
+        {
+          "mark": "2026-11-12 15:00",
+          "xjhzt": "京东方2027届校园招聘宣讲会",
+          "con": "京东方",
+          "cdmc": "犀浦校区图书馆二号报告厅",
+          "a": "index/common/jyrlDetail?type=xjh&id=1004",
+          "type": "xjh"
+        }
+      ]
+    }
+  ]
+}
