@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {sourceById} from '../src/recruit/sources/index.mjs';
-import {verifyEvent, VERIFY_CATEGORY} from '../src/recruit/verify.mjs';
+import {verifyEvent, verifyNeedsSourceUrl, VERIFY_CATEGORY} from '../src/recruit/verify.mjs';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -132,6 +132,11 @@ test('西南交大：按事件日期 POST 日历接口，命中 → ok', async (
   assert.equal(r.ok, true);
   assert.equal(r.category, VERIFY_CATEGORY.OK);
   assert.equal(seen.body, 'date=' + day, '应按事件日期请求日历，而不是今天');
+});
+
+test('电子科大：列表级复核不需要 sourceUrl，其它源仍然需要', () => {
+  assert.equal(verifyNeedsSourceUrl('uestc-xjh'), false);
+  assert.equal(verifyNeedsSourceUrl('scu-employ'), true);
 });
 
 test('电子科大：无独立详情 URL，列表级复核命中/未命中', async () => {

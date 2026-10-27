@@ -143,6 +143,12 @@ async function verifyDetail(source, event, fetchText) {
   return {ok: false, category: VERIFY_CATEGORY.PAGE_CHANGED, reason: REASON.page_changed};
 }
 
+// 列表级复核的源（如电子科大）没有独立详情 URL，不需要 sourceUrl；
+// API/CLI 在调用 verifyEvent 前用它决定要不要因为空链接直接拒绝。
+export function verifyNeedsSourceUrl(sourceId) {
+  return LIST_VERIFY[sourceId]?.kind !== 'list-level';
+}
+
 // 校验单条活动：source 是源对象（含 parseList），event 是库里的活动行。deps.fetchText 可注入便于测试。
 export async function verifyEvent(source, event, deps = {}) {
   const fetchText = deps.fetchText || defaultFetchText;

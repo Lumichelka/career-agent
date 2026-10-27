@@ -7,7 +7,7 @@ import {runCollection, htmlToText, normalize} from './collect.mjs';
 import {parseManualInput} from './manual.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
-import {verifyEvent} from './verify.mjs';
+import {verifyEvent, verifyNeedsSourceUrl} from './verify.mjs';
 import {parseRenderedText} from './browser.mjs';
 import {WeChatStore} from '../wechat/store.mjs';
 import {listPlatformJobs} from './platform-jobs-service.mjs';
@@ -228,7 +228,9 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
 
     if (pathname === 'collect') {
       const sourceIds = Array.isArray(body?.sourceIds) ? body.sourceIds.filter(id => typeof id === 'string').slice(0, 12) : [];
-      const limit = Math.min(50, Math.max(1, Number(body?.limit) || 20));
+      // 不传 limit 时按每个源自己的采集窗口取全；显式 limit 仍用于抽样/冒烟。
+      const requested = Number(body?.limit);
+      const limit = Number.isFinite(requested) && requested > 0 ? Math.min(2000, Math.max(1, Math.floor(requested))) : undefined;
       const logs = [];
       const run = runCollection({dir, sourceIds, limit, onLog: e => logs.push(e.text)});
       const timeout = new Promise(resolve => setTimeout(() => resolve({results: [{id: '*', name: '超时', status: 'timeout', message: '采集超过 150 秒，已返回已完成部分'}], totals: {sources: 0, fetched: 0, created: 0, updated: 0, failed: 1}}), 150000));
@@ -241,7 +243,7 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
       if (!/^[a-f0-9]{24}$/.test(id)) return {status: 400, json: {error: '无效记录'}};
       const event = withStore(dir, store => store.getEvent(id));
       if (!event) return {status: 404, json: {error: '没有这条记录'}};
-      if (!event.sourceUrl) return {status: 400, json: {error: '这条记录没有来源链接，无法复核'}};
+      if (!event.sourceUrl && verifyNeedsSourceUrl(event.sourceId)) return {status: 400, json: {error: '这条记录没有来源链接，无法复核'}};
       let source;
       try { source = sourceById(event.sourceId); } catch { source = {id: event.sourceId || 'unknown', listUrl: event.sourceUrl}; }
       const r = await verifyEvent(source, event);

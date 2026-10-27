@@ -52,6 +52,9 @@ export function normalize(item, source) {
   const startAt = String(item.startAt || '').trim();
   if (!title || !startAt) return null;
   const kind = item.kind || guessKind(title, source.kind);
+  // 活动身份用源给出的原始标题（例如 SWPU 的“...#”），展示标题可以清洗；
+  // 这样清洗标题不会改变 eventId，旧行下次采集时原地更新而不是插入重复。
+  const identityTitle = String(item.identityTitle || title).trim();
   const iv = extractInterview([title, item.notes, item.rawText].filter(Boolean).join(' '));
   const event = {
     school: source.school,
@@ -69,7 +72,7 @@ export function normalize(item, source) {
     requirements: item.requirements || '',
     applyMode: item.applyMode || '',
     applyUrl: item.applyUrl || '',
-    sourceUrl: item.url || source.listUrl,
+    sourceUrl: item.url ?? source.listUrl,
     publishedAt: item.publishedAt || '',
     fetchedAt: new Date().toISOString(),
     confidence: item.confidence ?? 0.55,
@@ -80,7 +83,7 @@ export function normalize(item, source) {
     status: /取消|暂停举办|活动取消/.test(title) ? 'cancelled' : 'active',
     sourceId: source.id
   };
-  event.id = eventId(event);
+  event.id = eventId({...event, title: identityTitle});
   return event;
 }
 
@@ -89,11 +92,11 @@ function scoreConfidence(event) {
   if (event.venue) c += 0.15;
   if (event.endAt) c += 0.1;
   if (event.company) c += 0.05;
-  if (event.notes.includes('详情')) c += 0.1;
+  if (event.notes.includes('详情') && !event.notes.includes('无详情')) c += 0.1;
   return Math.min(0.95, Number(c.toFixed(2)));
 }
 
-export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 8, projectLimit = 12, onLog = () => {}, persist = true} = {}) {
+export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, projectLimit = 12, onLog = () => {}, persist = true} = {}) {
   const source = typeof sourceOrId === 'string' ? sourceById(sourceOrId) : sourceOrId;
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
@@ -114,11 +117,14 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     }
     onLog?.({source: source.id, text: '开始采集：' + source.name});
 
+    // 显式 limit 优先（--limit 5 冒烟/抽样）；未显式传时用源自己的默认采集窗口。
+    const requestedLimit = Number(limit);
+    const itemLimit = Math.max(1, Math.floor(requestedLimit > 0 ? requestedLimit : (Number(source.collectLimit) || 20)));
     let items = [];
     let listText = '';
     // 源自带列表抓取（例如 JS 渲染页用应用内浏览器）：返回数组，或 {items, pageCount, pages}。
     if (typeof source.fetchList === 'function') {
-      const fetched = await source.fetchList({source, limit, onLog});
+      const fetched = await source.fetchList({source, limit: itemLimit, onLog});
       items = Array.isArray(fetched) ? fetched : (fetched?.items || []);
       listText = Array.isArray(fetched) ? '' : String(fetched?.listText || '');
       if (!Array.isArray(fetched)) {
@@ -152,15 +158,15 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
           }
           const pageItems = source.parseList(pageRes.text, source, json);
           items.push(...pageItems);
-          if (!pageItems.length || items.length >= limit || (json.totalPage && p >= Number(json.totalPage))) break;
+          if (!pageItems.length || items.length >= itemLimit || (json.totalPage && p >= Number(json.totalPage))) break;
         }
       } else {
         items = source.parseList(res.text, source);
       }
     }
     const parsedCount = items.length;
-    const truncated = parsedCount >= limit;
-    items = items.slice(0, limit);
+    const truncated = parsedCount >= itemLimit;
+    items = items.slice(0, itemLimit);
     result.fetched = items.length;
     onLog?.({source: source.id, text: `列表解析到 ${items.length} 条`});
 
@@ -265,7 +271,8 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
       }
     }
   } catch (e) {
-    result.status = 'error';
+    const kind = e?.kind;
+    result.status = kind === 'blocked' || kind === 'login_required' ? 'blocked' : kind === 'empty' ? 'empty' : 'error';
     result.message = e.message;
   } finally {
     result.durationMs = Date.now() - t0;
@@ -281,7 +288,7 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
   return result;
 }
 
-export async function runCollection({dir, sourceIds, limit = 20, concurrency = 2, onLog}) {
+export async function runCollection({dir, sourceIds, limit, concurrency = 2, onLog}) {
   const ids = sourceIds?.length ? sourceIds : enabledSources().map(s => s.id);
   const results = new Array(ids.length).fill(null);
   const width = Math.max(1, Math.min(4, Math.floor(concurrency) || 1, ids.length));

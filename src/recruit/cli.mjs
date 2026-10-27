@@ -14,7 +14,7 @@ import {runCollection, collectSource} from './collect.mjs';
 import {RecruitStore} from './store.mjs';
 import {buildSchedule, toICS, toCSV, toMarkdown} from './schedule.mjs';
 import {fetchText} from './fetch.mjs';
-import {verifyEvent} from './verify.mjs';
+import {verifyEvent, verifyNeedsSourceUrl} from './verify.mjs';
 import {defaultUserDataDir} from '../config/paths.mjs';
 
 const argv = process.argv.slice(2);
@@ -48,7 +48,8 @@ if (command === 'sources') {
   store.close();
 } else if (command === 'collect') {
   const ids = many('source');
-  const limit = Number(flag('limit') || 20);
+  const requested = Number(flag('limit'));
+  const limit = Number.isFinite(requested) && requested > 0 ? requested : undefined;
   const result = await runCollection({dir: dataDir, sourceIds: ids, limit, onLog: e => console.log('· ' + e.text)});
   console.log('\n' + line);
   for (const r of result.results) console.log(`${(r.status || '').padEnd(10)} ${String(r.id).padEnd(18)} 新增 ${r.created}  更新 ${r.updated}  ${r.message || ''}`);
@@ -85,7 +86,7 @@ if (command === 'sources') {
   const events = store.listEvents({from: new Date().toISOString().slice(0, 10), to: new Date(Date.now() + 90 * 86400000).toISOString(), limit: 100});
   let ok = 0, bad = 0;
   for (const e of events) {
-    if (!e.sourceUrl) continue;
+    if (!e.sourceUrl && verifyNeedsSourceUrl(e.sourceId)) continue;
     let source;
     try { source = sourceById(e.sourceId); } catch { source = {id: e.sourceId || 'unknown', listUrl: e.sourceUrl}; }
     const r = await verifyEvent(source, e);
@@ -100,7 +101,7 @@ if (command === 'sources') {
 
   node recruit/cli.mjs sources                         查看信息源
   node recruit/cli.mjs probe                           检查各源是否可访问
-  node recruit/cli.mjs collect [--source id]... [--limit 20]
+  node recruit/cli.mjs collect [--source id]... [--limit N]
   node recruit/cli.mjs list [--days 30]                打印时间安排表
   node recruit/cli.mjs export --format ics|csv|md --days 30 --out schedule.ics
   node recruit/cli.mjs verify                          复核来源链接是否仍有效

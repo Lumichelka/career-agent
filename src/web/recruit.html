@@ -419,7 +419,7 @@ async function collect(ids,label){
   const buttons=[...document.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
   try{
     log.textContent='采集进行中，通常 5–30 秒…';
-    const r=await api('collect',{sourceIds:ids,limit:20});
+    const r=await api('collect',{sourceIds:ids});
     log.textContent=(r.logs||[]).join('\n')||'没有日志';
     toast(`${label}完成：新增 ${r.totals.created}，更新 ${r.totals.updated}`);
     await loadAll();

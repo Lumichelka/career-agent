@@ -1,5 +1,6 @@
 // 西南石油大学双选会：列表接口 + 参会单位接口（云研系统，均无需登录）。
 import {fetchText} from '../fetch.mjs';
+import {SourceError} from './error.mjs';
 
 const BASE = 'https://jyzx.swpu.edu.cn';
 
@@ -64,16 +65,21 @@ export default {
   enabled: true,
   acceptCode: [1],
   listUrl: BASE + '/module/getjobfairs?start=1&count=20&with_counts=1',
-  maxPages: 1,
+  maxPages: 100,
+  collectLimit: 2000,
   capabilities: {list: 'json', detail: 'http', projects: 'api'},
   note: '云研系统双选会接口；参会单位与展位从 list_jobfair_company 读取。',
   parseList(_html, source, json) {
     return (json?.data?.list || []).map(item => {
       const day = String(item.meet_day || '');
       const time = String(item.meet_time || '09:00').slice(0, 5);
-      if (!item.title || !day) return null;
+      const rawTitle = String(item.title || '').trim();
+      const title = rawTitle.replace(/\s*[#＃]+\s*$/, '');
+      if (!title || !day) return null;
       return {
-        title: String(item.title || '').trim(),
+        title,
+        // 身份仍用源标题（含尾部 #），清洗只改展示，避免旧行被当成新活动重复入库。
+        identityTitle: rawTitle,
         company: '',
         startAt: `${day}T${time}:00+08:00`,
         endAt: secondsIso(item.meet_end_time),
@@ -89,6 +95,45 @@ export default {
         projectCount: Number(item.fact_c_count) || 0
       };
     }).filter(Boolean);
+  },
+  async fetchList({source = this, limit, onLog = () => {}, fetchText: fetcher = fetchText} = {}) {
+    const pageSize = 20;
+    const cap = Math.max(1, Math.floor(Number(limit) || Number(source.collectLimit) || 2000));
+    const maxPages = Math.max(1, Number(source.maxPages) || 100);
+    let base = BASE;
+    try { base = new URL(source.listUrl).origin; } catch { /* 保持默认域名 */ }
+    const items = [];
+    const seen = new Set();
+    let pages = 0;
+    for (let page = 1; page <= maxPages; page++) {
+      const url = base + '/module/getjobfairs?start=' + page + '&count=' + pageSize + '&with_counts=1';
+      const res = await fetcher(url, {headers: {referer: source.listUrl}, timeout: 20000, retries: 1});
+      if (!res.ok) {
+        const kind = res.reason === 'blocked' || res.reason === 'robots_disallowed' ? 'blocked' : 'network';
+        throw new SourceError(kind, '双选会列表第 ' + page + ' 页失败：' + res.message);
+      }
+      let json;
+      try { json = JSON.parse(res.text); } catch {
+        throw new SourceError('parse', '双选会列表第 ' + page + ' 页不是 JSON');
+      }
+      const accepted = (source.acceptCode || [1]).map(Number);
+      if (json.code && !accepted.includes(Number(json.code))) {
+        throw new SourceError('changed', '双选会列表第 ' + page + ' 页返回 code=' + json.code + ' ' + (json.message || ''));
+      }
+      pages = page;
+      const pageItems = source.parseList('', source, json);
+      onLog?.({source: source.id, text: '双选会列表第 ' + page + ' 页：解析到 ' + pageItems.length + ' 条'});
+      for (const item of pageItems) {
+        const key = item.url || item.sourceKey || item.title + '|' + item.startAt;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push(item);
+        if (items.length >= cap) break;
+      }
+      if (pageItems.length < pageSize) break;
+      if (items.length >= cap) break;
+    }
+    return {items, pages, pageCount: pages};
   },
   async fetchProjects(item, _event, options = {}) {
     const fetch = options.fetchText || fetchText;
