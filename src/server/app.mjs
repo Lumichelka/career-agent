@@ -13,6 +13,8 @@ import {listPlatformJobs, savePlatformJobs} from '../recruit/platform-jobs-servi
 import {handleResume} from '../resume/api.mjs';
 import {handleCompany} from '../company/api.mjs';
 import {handleWechat} from '../wechat/api.mjs';
+import {WeChatStore} from '../wechat/store.mjs';
+import {runWechatOperator, pickWechatOperatorAccount, wechatProfileUrl} from '../wechat/operator.mjs';
 import http from 'node:http';
 import os from 'node:os';
 import {readFile, mkdir, writeFile, readdir, copyFile, unlink} from 'node:fs/promises';
@@ -37,7 +39,10 @@ import {handleAudit, handleAuditClear, handleAuditExport} from '../writes/audit-
 import {handleUndoBatch, handleUndoPreview, handleUndoTask, summarizeTaskUndo} from '../writes/undo.mjs';
 import {acceptConfirmation, listConfirmations, rejectConfirmation} from '../writes/confirmations.mjs';
 import {createSourceCheckService} from '../source-check/pipeline.mjs';
+import {createOperatorService} from '../source-check/operator.mjs';
 import {createExternalReviewer} from '../source-check/review.mjs';
+import {listPlaybooks} from '../source-check/playbook.mjs';
+import {purgeExpiredEvidence} from '../source-check/evidence-cleanup.mjs';
 import {listSkills, selectSkill} from '../skills/index.mjs';
 import {memorySummary, buildMemoryPayload, addFact, deleteFact, clearProfile, importSessionMemory, loadProfile, recordTask, clearTasks} from '../agent/memory.mjs';
 
@@ -73,6 +78,13 @@ const outboundWaits = new Map();
 const failureStreaks = new Map();
 // 任务闸与任务记录：每用户 2 / 全局 8 / 排队 120s；记录落在 users/<id>/tasks/，供抽屉刷新。
 const taskManager = new TaskManager({dataDir, gate: new TaskGate(taskLimits), maxDurationMs: taskLimits.maxDurationMs});
+// 重启后 waiting_login/waiting_human 没有执行体可续跑：启动时收尾为 failed，避免永久 active。
+const restartRecovery = await taskManager.recoverInterrupted().catch(() => ({recovered: 0}));
+// 30 天证据清理：启动跑一次，之后每 6 小时一次；只删证据文件，不动审计/任务卡。
+const evidenceCleanup = () => purgeExpiredEvidence({dataDir}).catch(() => ({removedFiles: 0}));
+await evidenceCleanup();
+const evidenceCleanupTimer = setInterval(evidenceCleanup, 6 * 3600 * 1000);
+evidenceCleanupTimer.unref?.();
 // 统一上游闸：模型 API、MCP 出站、入站转发共用；进程内所有用户共享同一实例。
 const gate = upstreamGate || new UpstreamGate(upstreamLimits);
 // MRTR elicitation：表单事件投递到当前任务的 NDJSON，回复走 /api/mrtr/elicit。
@@ -101,6 +113,57 @@ const sourceCheckService = createSourceCheckService({
     });
   })
 });
+// 来源操作员：复用同一个任务管理器与证据目录；浏览器启动可在测试中注入，不启动真实窗口。
+const operatorService = createOperatorService({
+  dataDir,
+  taskManager,
+  ...(sourceCheck?.operator?.launch ? {launch: sourceCheck.operator.launch} : {}),
+  ...(sourceCheck?.operator?.maxActiveMs ? {maxActiveMs: sourceCheck.operator.maxActiveMs} : {}),
+  // 兜底写完动作后复用同一套视觉抽取/复核：测试注入假实现，live 用用户自己的模型 API。
+  ...(sourceCheck.extractor ? {extractor: sourceCheck.extractor} : {}),
+  ...(sourceCheck.reviewer ? {reviewer: sourceCheck.reviewer} : {})
+});
+
+// 公众号 AI 操作员（#59）：连同账号解析一起挂到同一个 operator 任务上。
+// HTTP 只传 accountId；页面读取器可在测试里注入 fixture，不访问真实微信网络。
+async function startWechatOperator({user, dir, body = {}}) {
+  // 账号级 AI 采集也要一次明确确认；没有确认不打开浏览器任务。
+  if (body.confirm !== true) {
+    return {status: 400, json: {error: 'AI 采集需要你先确认一次；未确认不会启动浏览器任务。', code: 'OPERATOR_CONFIRM_REQUIRED'}};
+  }
+  const store = WeChatStore.open(join(dir, 'wechat.db'));
+  let account = null;
+  try {
+    account = body.accountId ? store.getAccount(String(body.accountId)) : pickWechatOperatorAccount(store.listAccounts());
+  } finally { store.close(); }
+  if (!account) {
+    return {status: 400, json: {error: '没有可用的公众号账号；请先添加公众号或导入一篇文章识别 biz。', code: 'WECHAT_OPERATOR_NO_ACCOUNT'}};
+  }
+  if (!account.biz) {
+    return {status: 400, json: {error: '这个公众号还没有 biz 标识，无法打开文章列表；请先导入一篇文章自动识别 biz。', code: 'WECHAT_OPERATOR_NO_BIZ'}};
+  }
+  const out = await operatorService.start({
+    user,
+    confirm: true,
+    title: '公众号操作 · ' + account.name,
+    source: {id: 'wechat:' + account.id, name: account.name, school: account.school || '', listUrl: wechatProfileUrl(account)},
+    execute: ctx => runWechatOperator({
+      ...ctx,
+      dataDir,
+      userId: user.id,
+      account,
+      wechatDir: dir,
+      readers: sourceCheck?.wechatOperator?.readers || undefined,
+      limit: sourceCheck?.wechatOperator?.limit
+    })
+  });
+  if (out.json) {
+    out.json.accountId = account.id;
+    out.json.accountName = account.name;
+    out.json.mode = 'wechat_operator';
+  }
+  return out;
+}
 let actualPort = Number(port);
 let localOrigin = 'http://127.0.0.1:' + actualPort;
 let allowedHosts = new Set();
@@ -248,7 +311,7 @@ async function activeTaskIdForSession(userId, sessionId) {
   if (!sessionId) return '';
   try {
     const {tasks = []} = await taskManager.list(userId, {sessionId});
-    const active = tasks.find(task => ['queued', 'running', 'waiting_confirmation', 'blocked'].includes(task.state));
+    const active = tasks.find(task => ['queued', 'running', 'running_operator', 'waiting_login', 'waiting_human', 'waiting_confirmation', 'blocked'].includes(task.state));
     return active?.id || '';
   } catch { return ''; }
 }
@@ -457,6 +520,11 @@ const server = http.createServer(async (req, res) => {
       }
       return send(res, out.json, out.status || 500);
     }
+    // 来源 playbook 清单：来源卡与「AI 兜底」只读这一份源知识；不返回 Markdown 正文。
+    if (req.method === 'GET' && url.pathname === '/api/source-check/playbooks') {
+      const playbooks = await listPlaybooks();
+      return send(res, {playbooks: playbooks.map(({markdown, ...rest}) => rest)});
+    }
     // 来源校对的截图/抽取证据：只从本人任务目录取，文件名白名单。
     if (req.method === 'GET' && url.pathname === '/api/source-check/evidence') {
       const out = await sourceCheckService.readEvidence({userId: user.id, taskId: url.searchParams.get('taskId'), file: url.searchParams.get('file')});
@@ -585,9 +653,37 @@ const server = http.createServer(async (req, res) => {
         return send(res, out.json, out.status);
       }
 
+      // 来源操作（AI 采集）入口：打开应用内可见 profile，任务在后台运行/等待人工接管。
+      // 安全边界：HTTP 不接受客户端 steps/evaluate，步骤只能来自服务端 playbook 或内部注入（WeChat）；
+      // 每次 AI 采集还必须带 confirm:true，避免任何持 web token 的请求静默驱动登录 profile。
+      if (url.pathname === '/api/source-check/operator/start') {
+        if (body.steps !== undefined || body.evaluate !== undefined) {
+          return send(res, {error: 'AI 采集不接受客户端步骤/JS；步骤只能来自服务端 playbook。', code: 'OPERATOR_STEPS_FORBIDDEN'}, 400);
+        }
+        const out = await operatorService.start({user, sourceId: body.sourceId, url: body.url, playbook: body.playbook, models: models.snapshot(), confirm: body.confirm === true});
+        return send(res, out.json, out.status || 200);
+      }
+      if (url.pathname === '/api/source-check/operator/continue') {
+        const out = operatorService.continueRun({userId: user.id, taskId: body.taskId});
+        return send(res, out.json, out.status || 200);
+      }
+      if (url.pathname === '/api/source-check/operator/confirm') {
+        const out = operatorService.confirm({userId: user.id, taskId: body.taskId, decision: body.decision});
+        return send(res, out.json, out.status || 200);
+      }
+      // 公众号 AI 采集：默认西财校招，次选上财就业；浏览器在可见窗口里登录，用户人工接管。
+      if (url.pathname === '/api/wechat/operator/start') {
+        const out = await startWechatOperator({user, dir, body});
+        return send(res, out.json, out.status || 200);
+      }
       // 来源校对入口：数据页只发起，立刻返回新会话与任务 id；任务在后台排队/运行。
       if (url.pathname === '/api/source-check/start') {
-        const out = await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId, url: body.url});
+        if (body.mode === 'operator' && (body.steps !== undefined || body.evaluate !== undefined)) {
+          return send(res, {error: 'AI 采集不接受客户端步骤/JS；步骤只能来自服务端 playbook。', code: 'OPERATOR_STEPS_FORBIDDEN'}, 400);
+        }
+        const out = body.mode === 'operator'
+          ? await operatorService.start({user, sourceId: body.sourceId, url: body.url, playbook: body.playbook, models: models.snapshot(), confirm: body.confirm === true})
+          : await sourceCheckService.start({user, models: models.snapshot(), sourceId: body.sourceId, url: body.url});
         return send(res, out.json, out.status || 200);
       }
       // 清空审计：必须原样输入指定短语；只删本人的审计与确认记录，幂等行保留到 TTL。
@@ -1019,6 +1115,7 @@ localOrigin = 'http://127.0.0.1:' + actualPort;
 allowedHosts = buildAllowedHosts(actualPort);
 let closing = null;
 const close = () => closing || (closing = (async () => {
+  clearInterval(evidenceCleanupTimer);
   for (const controller of running.values()) controller.abort();
   // 关服务时把还在等出网确认的任务一律按拒绝收尾，绝不偷偷把内容发出去。
   for (const waiter of [...outboundWaits.values()]) { try { waiter.finish('reject'); } catch { /* 已收尾 */ } }
@@ -1030,5 +1127,6 @@ const close = () => closing || (closing = (async () => {
   if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
   await new Promise(resolve => server.close(() => resolve()));
 })());
-return {server, token, dataDir, root, host, port: actualPort, origin: localOrigin, close, tasks: taskManager};
+// operator 是服务端的进程内接缝（测试/WeChat 内部调用）；HTTP 路由不转发客户端 steps。
+return {server, token, dataDir, root, host, port: actualPort, origin: localOrigin, close, tasks: taskManager, operator: operatorService, restartRecovery};
 }

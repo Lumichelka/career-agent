@@ -65,19 +65,27 @@ export function isPrivateSourceHost(hostname) {
   return false;
 }
 
-export function normalizeSourceCheckUrl(url, {allowPrivate = privateSourceUrlsAllowed()} = {}) {
+// 来源校对与 operator 共用的 URL 判据：一次解析，返回原因码；两个入口不再各写一份规则。
+// 原因码：empty / too-long / scheme / parse / protocol / private。
+export function validateHttpUrl(url, {allowPrivate = privateSourceUrlsAllowed(), maxLength = 2000} = {}) {
   const raw = String(url || '').trim();
-  if (!raw || raw.length > 2000) return null;
-  if (!/^https?:\/\//i.test(raw)) return null;
+  if (!raw) return {ok: false, code: 'empty'};
+  if (raw.length > maxLength) return {ok: false, code: 'too-long'};
+  if (!/^https?:\/\//i.test(raw)) return {ok: false, code: 'scheme'};
   let parsed;
   try {
     parsed = new URL(raw);
   } catch {
-    return null;
+    return {ok: false, code: 'parse'};
   }
-  if (!['http:', 'https:'].includes(parsed.protocol)) return null;
-  if (!allowPrivate && isPrivateSourceHost(parsed.hostname)) return null;
-  return parsed.href;
+  if (!['http:', 'https:'].includes(parsed.protocol)) return {ok: false, code: 'protocol'};
+  if (!allowPrivate && isPrivateSourceHost(parsed.hostname)) return {ok: false, code: 'private', host: parsed.hostname};
+  return {ok: true, url: parsed.href, host: parsed.hostname};
+}
+
+export function normalizeSourceCheckUrl(url, options = {}) {
+  const checked = validateHttpUrl(url, options);
+  return checked.ok ? checked.url : null;
 }
 
 // 从列表页链接里挑「活动详情」链接：显式 pattern 优先，否则用启发式（活动文案 > 数字/详情路径 > html 后缀）。

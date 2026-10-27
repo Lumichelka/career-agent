@@ -44,14 +44,23 @@ export const EXTRACTION_PROMPT = [
   '不要输出联系人、手机、邮箱、微信、身份证等联系方式字段；这些信息会被丢弃。'
 ].join('\n');
 
-export function buildExtractionPrompt(source = {}) {
+// playbook 的 successMarkers / extractHints / domains 不是死配置：这里真的带给视觉模型。
+// domains 只作入口/登录域提示，不是硬限制（ADR 0001 不按域名收紧动作集）。
+export function buildExtractionPrompt(source = {}, playbook = null) {
   const school = text(source.school, 60);
   const city = text(source.city, 20);
   const kind = text(source.kind, 20);
   const defaults = (school || city || kind)
     ? '学校默认' + (school || '（无）') + '，城市默认' + (city || '（无）') + '，类型默认' + (kind || '（无）') + '；截图上读不到的字段留空，不要硬套默认值。'
     : '没有已知默认学校/城市/类型；以截图为准，读不到就留空，不要猜测。';
-  return EXTRACTION_PROMPT + '\n来源：' + String(source.name || source.school || '未知来源') + '；' + defaults;
+  const lines = [EXTRACTION_PROMPT + '\n来源：' + String(source.name || source.school || '未知来源') + '；' + defaults];
+  const markers = Array.isArray(playbook?.successMarkers) ? playbook.successMarkers.filter(Boolean) : [];
+  const hints = Array.isArray(playbook?.extractHints) ? playbook.extractHints.filter(Boolean) : [];
+  const domains = Array.isArray(playbook?.domains) ? playbook.domains.filter(Boolean) : [];
+  if (markers.length) lines.push('playbook 成功标志（满足这些标志才说明读全了）：' + markers.join('；'));
+  if (hints.length) lines.push('playbook 抽取提示（必须遵守；读不到仍留空）：' + hints.join('；'));
+  if (domains.length) lines.push('playbook 允许域（只作入口/登录域提示，不是硬限制）：' + domains.join('、'));
+  return lines.join('\n');
 }
 
 // 只保留写入需要的事件/单位字段；跳过没有标题/开始时间的活动，跳过没有单位名/项目名的单位。
@@ -141,7 +150,7 @@ function visionConfigError(message, recovery) {
 
 // 视觉抽取器：把两张截图转成 data URL 交给当前视觉模型 API，只做一次 JSON 往返，不调用工具。
 export function createVisionExtractor({config = {}, visionCall = runVisionJson, readFileImpl = readFile} = {}) {
-  return async ({screenshots = [], source = {}, signal} = {}) => {
+  return async ({screenshots = [], source = {}, playbook = null, signal} = {}) => {
     if (!config || config.mode === 'codex' || !config.baseUrl || !config.model) {
       throw visionConfigError('还没有可用的视觉模型 API，来源校对无法读图。', '在「模型与接口设置」里配置支持读图的模型 API（如 deepseek-flash）后重试。');
     }
@@ -152,7 +161,7 @@ export function createVisionExtractor({config = {}, visionCall = runVisionJson, 
       images.push({name: basename(shot.file), type: 'image', mime: 'image/png', dataUrl: 'data:image/png;base64,' + bytes.toString('base64')});
     }
     if (images.length !== 2) throw visionConfigError('视觉抽取需要列表页与详情页两张截图。', '重新发起来源校对；仍失败就改用手动导入。');
-    const result = await visionCall({config, prompt: buildExtractionPrompt(source), images, signal});
+    const result = await visionCall({config, prompt: buildExtractionPrompt(source, playbook), images, signal});
     const json = result && typeof result === 'object' && 'json' in result ? result.json : result;
     if (!json || typeof json !== 'object') throw visionConfigError('视觉模型没有返回可用的 JSON。', '重试一次；仍失败就改用人工导入。');
     return json;

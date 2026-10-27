@@ -56,6 +56,14 @@ body.workflow-open main{margin-right:400px}
 .draft-actions button,.task-actions button{border:1px solid #d9e5dc;background:#fff;border-radius:7px;padding:3px 8px;font-size:10px;color:#3f6f57}
 .task-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:9px;flex-wrap:wrap}
 .task-actions button[disabled]{opacity:.55;cursor:default}
+.task-operator-actions{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:11px}
+.task-operator-actions li{display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;border:1px solid #e6ede8;border-radius:7px;padding:4px 7px;color:#4f6a5b;min-width:0}
+.task-operator-actions li b{font-size:10px;color:#7a8d81;font-weight:600}
+.task-operator-actions li small{color:#8b9b91;margin-left:auto;font-size:9px}
+.task-operator-actions li a{color:#247559;font-size:10px}
+.task-operator-takeover{border:1px solid #e5d4a8;background:#fdf9ef;border-radius:9px;padding:7px 9px;margin-bottom:7px}
+.task-operator-takeover p{margin:0;font-size:11px;line-height:1.7;color:#6b5420;overflow-wrap:anywhere}
+.task-operator-takeover .task-actions{margin-top:6px}
 @media(min-width:751px){#workflow-scrim{display:none}}
 @media(max-width:750px){
  body.workflow-open main{margin-right:0}

@@ -14,6 +14,7 @@ export const HANDLERS = {
   'recruit.projects': recruit.projects,
   'recruit.project': recruit.project,
   'recruit.sources': recruit.sourceStates,
+  'recruit.feed': recruit.feed,
   'recruit.bulkWrite': recruit.bulkWrite,
   'profile.write': profile.profileWrite,
   'search.public': search.publicSearch,

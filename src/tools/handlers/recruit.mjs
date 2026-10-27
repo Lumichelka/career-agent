@@ -3,6 +3,7 @@ import {SOURCES, REMOVED_SOURCES, sourceHealth} from '../../recruit/sources/inde
 import {createWriteGateway} from '../../writes/gateway.mjs';
 import {writeFailure} from '../../writes/errors.mjs';
 import {bulkWriteRows, normalizeSource, validateBulkPayload} from '../../recruit/bulk.mjs';
+import {readFeed} from '../../recruit/feed.mjs';
 
 function ctxDir(ctx) { return ctx.config?.recruitDir; }
 
@@ -52,6 +53,47 @@ export async function project(args, ctx) {
     const e = store.getEvent(p.eventId);
     return {status: 'readable', project: p, event: e};
   } finally { store.close(); }
+}
+
+// career_feed：/chat 与入站 MCP 共用同一条读取路径；身份只来自 ctx（入站 client 也落到所属账号目录）。
+// 只读：打开业务库读 events/projects/companies 与 write_audit，不写业务行、不产生审计。
+export async function feed(args, ctx) {
+  const dir = ctxDir(ctx);
+  const since = args.since;
+  if (!dir) {
+    return {
+      status: 'unavailable',
+      message: '当前任务没有关联招聘数据库。',
+      entries: [],
+      nextCursor: Number.isFinite(Number(since)) ? Math.max(0, Number(since)) : 0,
+      hasMore: false
+    };
+  }
+  const dataDir = ctx.config?.dataDir || dir;
+  const userId = String(ctx.config?.userId || ctx.userId || '').trim();
+  const {RecruitStore} = await import('../../recruit/store.mjs');
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  try {
+    return readFeed({
+      db: store.db,
+      companyDir: dir,
+      dataDir,
+      userId,
+      since,
+      types: args.types,
+      sourceId: args.sourceId || '',
+      limit: args.limit,
+      offset: args.offset,
+      includeRawText: args.includeRawText === true
+    });
+  } catch (error) {
+    if (error?.code === 'INVALID_ARGUMENTS') {
+      return {status: 'error', code: 'INVALID_ARGUMENTS', message: error.message, recovery: '按工具参数说明修正后重试。'};
+    }
+    throw error;
+  } finally {
+    store.close();
+  }
 }
 
 export async function sourceStates(args, ctx) {

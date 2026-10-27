@@ -116,7 +116,15 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
 
     let items = [];
     let listText = '';
-    if (source.mode === 'browser') {
+    // 源自带列表抓取（例如 JS 渲染页用应用内浏览器）：返回数组，或 {items, pageCount, pages}。
+    if (typeof source.fetchList === 'function') {
+      const fetched = await source.fetchList({source, limit, onLog});
+      items = Array.isArray(fetched) ? fetched : (fetched?.items || []);
+      listText = Array.isArray(fetched) ? '' : String(fetched?.listText || '');
+      if (!Array.isArray(fetched)) {
+        if (fetched?.pageCount) onLog?.({source: source.id, text: `列表共 ${fetched.pageCount} 页，本次取 ${fetched.pages || 0} 页`});
+      }
+    } else if (source.mode === 'browser') {
       const {text, title} = await browserText(source.listUrl);
       listText = text;
       if (store) store.saveRaw({url: source.listUrl, sourceId: source.id, title, text});
@@ -159,22 +167,40 @@ export async function collectSource(sourceOrId, {dir, limit = 20, detailLimit = 
     // 详情页补充（只对缺地点/缺结束时间的条目，控制请求量）
     if (source.detail && source.parseDetail) {
       let done = 0;
+      let detailRequests = 0;
+      const detailDelay = Math.max(0, Number(source.detailDelayMs) || 0);
+      const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
       for (const item of items) {
         if (done >= detailLimit) break;
-        if (item.venue && item.endAt) continue;
+        if (!source.detailAll && item.venue && item.endAt) continue;
+        // 逐条详情限速：同一站点的详情请求之间至少间隔 detailDelayMs（UIBE 1.2s）。
+        if (detailRequests > 0 && detailDelay > 0) await wait(detailDelay);
+        detailRequests += 1;
         try {
           const res = await fetchText(item.url, {timeout: 15000});
-          if (!res.ok) continue;
+          if (!res.ok) {
+            onLog?.({source: source.id, text: '详情页打不开：' + (item.title || item.url) + '（' + res.message + '）'});
+            continue;
+          }
           const text = htmlToText(res.text);
           const extra = source.parseDetail(text, item) || {};
+          if (extra.company && !item.company) item.company = extra.company;
           if (extra.venue && !item.venue) item.venue = extra.venue;
-          if (extra.date && !item.startAt) item.startAt = extra.date + 'T09:00:00+08:00';
-          if (extra.startTime) item.startAt = (extra.date || item.startAt.slice(0, 10)) + 'T' + extra.startTime + ':00+08:00';
-          if (extra.endTime) item.endAt = (extra.date || item.startAt.slice(0, 10)) + 'T' + extra.endTime + ':00+08:00';
+          const detailDate = extra.date || item.startAt.slice(0, 10);
+          if (extra.startTime && detailDate) item.startAt = detailDate + 'T' + extra.startTime + ':00+08:00';
+          else if (extra.date && !item.startAt) {
+            // 只有日期、没有具体时间：留空并记录原因，不用 09:00 占位（UIBE 不猜）。
+            item.notes = [item.notes, '详情页只有日期没有具体时间，未填开始时间'].filter(Boolean).join('；');
+            onLog?.({source: source.id, text: '详情页只有日期没有时间，未填开始时间：' + (item.title || item.url)});
+          }
+          if (extra.endTime && detailDate) item.endAt = detailDate + 'T' + extra.endTime + ':00+08:00';
           item.notes = [item.notes, '详情页已核对'].filter(Boolean).join('；');
-          item.rawText = text.slice(0, 4000);
+          item.rawText = String(extra.rawText || text).slice(0, 4000);
           done++;
-        } catch { /* 单条详情失败不影响整批 */ }
+        } catch (error) {
+          // 单条详情失败不影响整批，但把原因写进日志，便于判断要不要走 AI 兜底。
+          onLog?.({source: source.id, text: '详情抓取失败：' + (item.title || item.url) + '（' + error.message + '）'});
+        }
       }
     }
 

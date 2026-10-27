@@ -22,7 +22,7 @@ export const SOURCE_CHECK_NOTES = '浏览器截图读取（非采集器）';
 export const SOURCE_CHECK_REASON = '采集器已禁用（robots 限制），改用应用内浏览器读取';
 export const SOURCE_CHECK_STATUS = '采集器已禁用，改用应用内浏览器读取；不会调用采集器，也不会向目标站发直连请求。';
 export const SOURCE_CHECK_ACTOR = 'model_api';
-const EVIDENCE_FILES = /^(01-list\.png|02-detail\.png|screenshots\.json|extraction\.json|review\.json)$/;
+const EVIDENCE_FILES = /^(01-list\.png|02-detail\.png|screenshots\.json|extraction\.json|review\.json|action\.jsonl|action-\d{3}\.png|wechat-[a-z0-9-]+\.json)$/;
 
 export function resolveSource(sourceId) {
   const key = SOURCE_CHECK_ALIASES[String(sourceId || '').trim()];
@@ -104,7 +104,9 @@ export async function writeSourceCheck({dataDir, userId, taskId, extraction, sou
   try {
     const detail = screenshots.find(shot => shot.id === 'detail') || screenshots.at(-1) || null;
     const detailUrl = source.detailUrl || detail?.url || extraction?.source?.detailUrl || source.listUrl || '';
-    const sourceMeta = {sourceId: 'manual', sourceUrl: detailUrl, notes: SOURCE_CHECK_NOTES};
+    // 来源 id 跟随实际来源（uibe-career/swufe-xjh/wechat:<id>），任意 URL 仍是合成的 manual；
+    // 这样兜底/对照记录能被 career_feed({sourceId}) 过滤，而不是全部压成 manual。
+    const sourceMeta = {sourceId: String(source.id || 'manual').slice(0, 80), sourceUrl: detailUrl, notes: SOURCE_CHECK_NOTES};
     const detailFile = String(detail?.file || '02-detail.png');
     const sourceRef = 'artifact:' + basename(detailFile);
     const gateway = createWriteGateway({
@@ -233,6 +235,85 @@ async function runReview({reviewer, extraction, source, screenshots, signal, tas
   return review;
 }
 
+function screenshotMeta(shot) {
+  return {
+    id: shot.id,
+    kind: 'screenshot',
+    file: basename(shot.file),
+    url: String(shot.url || ''),
+    title: String(shot.title || ''),
+    at: shot.at || new Date().toISOString(),
+    viewport: {width: Number(shot.viewport?.width) || 1366, height: Number(shot.viewport?.height) || 900}
+  };
+}
+
+// 抽取 → 复核 → 写库：确定性 source-check 与手动 AI 兜底共用这一段写路径与证据，
+// 两条路径只有「截图从哪来」不同（固定两页 / operator 动作截图），记录字段与审计口径一致。
+export async function runExtractionAndWrite({
+  dataDir, userId, task, source = {}, shots = [], models = {}, extractor = null, reviewer = null,
+  actorRef = '', signal, emit = () => {}, addEvidence = async () => {}, setPhase = () => {},
+  evidenceDir = '', addScreenshotEvidence = true, label = '来源校对', playbook = null
+} = {}) {
+  const dir = evidenceDir || evidenceDirFor(dataDir, userId, task.id);
+  await mkdir(dir, {recursive: true});
+  const usable = Array.isArray(shots) ? shots.filter(shot => shot?.file) : [];
+  if (usable.length !== 2) {
+    throw Object.assign(new Error('没有拿到列表页与详情页两张截图，未写入任何数据。'), {
+      code: 'SOURCE_SCREENSHOTS_MISSING',
+      recovery: '重试一次；仍失败就改用手动导入。'
+    });
+  }
+  const screenshots = usable.map(screenshotMeta);
+  await writeFile(join(dir, 'screenshots.json'), JSON.stringify(screenshots, null, 2), 'utf8');
+  if (addScreenshotEvidence) {
+    for (const shot of screenshots) {
+      await addEvidence({
+        kind: 'screenshot',
+        label: (shot.id === 'list' ? '截图 1 · 列表页：' : '截图 2 · 活动详情：') + (shot.title || ''),
+        detail: evidenceDetail(shot),
+        url: evidenceUrl(task.id, shot.file)
+      });
+    }
+  }
+
+  setPhase('正在用视觉模型 API 依据截图抽取活动与单位…');
+  const raw = extractor
+    ? await extractor({screenshots: usable, source, models, signal, playbook})
+    : await createVisionExtractor({config: models})({screenshots: usable, source, signal, playbook});
+  const detailShot = screenshots.find(shot => shot.id === 'detail');
+  const detailUrl = detailShot?.url || '';
+  const detailTitle = detailShot?.title || '';
+  const extraction = normalizeExtraction(raw, {source, detailUrl, detailTitle});
+  await writeFile(join(dir, 'extraction.json'), JSON.stringify(extraction, null, 2), 'utf8');
+  const skipped = Number(extraction.skipped?.events || 0) + Number(extraction.skipped?.projects || 0);
+  await addEvidence({
+    kind: 'extraction',
+    label: '抽取 JSON（联系方式已剔除）',
+    detail: '活动 ' + extraction.events.length + ' · 单位 ' + extraction.projects.length + (skipped ? ' · 跳过不可读 ' + skipped : ''),
+    url: evidenceUrl(task.id, 'extraction.json')
+  });
+  if (!extraction.events.length) {
+    throw Object.assign(new Error('截图里没有读到可写入的活动，未写入任何数据。'), {code: 'SOURCE_NO_EVENTS_READ', recovery: '在普通浏览器人工核对后手动导入；不要靠猜补字段。'});
+  }
+
+  // 复核在写库之前：只发送抽取 JSON 与来源元数据；问题不改写入集，失败也不阻断写库。
+  setPhase('正在请外部 Agent 文本复核抽取结果…');
+  const review = await runReview({
+    reviewer, extraction, source, screenshots: usable, signal,
+    taskId: task.id, evidenceDir: dir, addEvidence, emit
+  });
+
+  setPhase('正在写入本机招聘库…');
+  const write = await writeSourceCheck({dataDir, userId, taskId: task.id, extraction, source, screenshots: usable, actorRef});
+  if (write.duplicate) {
+    emit({type: 'status', text: '这批写入此前已经完成（幂等重放），没有新增数据。'});
+  } else {
+    emit({type: 'writes', taskId: task.id, tool: 'career_recruit_bulk_write', batchId: write.batchId, counts: write.counts});
+  }
+  setPhase(label + '完成：已写入活动 ' + extraction.events.length + ' 条、单位 ' + extraction.projects.length + ' 条。');
+  return {extraction, write, screenshots, review};
+}
+
 // 单次任务的执行体：说明 → 浏览器两页 → 视觉抽取 → 文本复核 → 写库；阻断则标 blocked 并保留恢复建议。
 export async function runSourceCheck({dataDir, userId, task, source, models = {}, browserReader = readSourcePages, extractor = null, reviewer = null, actorRef = '', signal, emit = () => {}, addEvidence = async () => {}, setPhase = () => {}}) {
   const evidenceDir = evidenceDirFor(dataDir, userId, task.id);
@@ -255,62 +336,10 @@ export async function runSourceCheck({dataDir, userId, task, source, models = {}
   }
 
   const shots = Array.isArray(read?.screenshots) ? read.screenshots.filter(shot => shot?.file) : [];
-  if (shots.length !== 2) throw Object.assign(new Error('浏览器没有拿到列表页与详情页两张截图，未写入任何数据。'), {code: 'SOURCE_SCREENSHOTS_MISSING', recovery: '重试一次；仍失败就改用手动导入。'});
-  const screenshots = shots.map(shot => ({
-    id: shot.id,
-    kind: 'screenshot',
-    file: basename(shot.file),
-    url: String(shot.url || ''),
-    title: String(shot.title || ''),
-    at: shot.at || new Date().toISOString(),
-    viewport: {width: Number(shot.viewport?.width) || 1366, height: Number(shot.viewport?.height) || 900}
-  }));
-  await writeFile(join(evidenceDir, 'screenshots.json'), JSON.stringify(screenshots, null, 2), 'utf8');
-  for (const shot of screenshots) {
-    await addEvidence({
-      kind: 'screenshot',
-      label: (shot.id === 'list' ? '截图 1 · 列表页：' : '截图 2 · 活动详情：') + (shot.title || ''),
-      detail: evidenceDetail(shot),
-      url: evidenceUrl(task.id, shot.file)
-    });
-  }
-
-  setPhase('正在用视觉模型 API 依据截图抽取活动与单位…');
-  const raw = extractor
-    ? await extractor({screenshots: shots, source, models, signal})
-    : await createVisionExtractor({config: models})({screenshots: shots, source, signal});
-  const detailShot = screenshots.find(shot => shot.id === 'detail');
-  const detailUrl = detailShot?.url || '';
-  const detailTitle = detailShot?.title || '';
-  const extraction = normalizeExtraction(raw, {source, detailUrl, detailTitle});
-  await writeFile(join(evidenceDir, 'extraction.json'), JSON.stringify(extraction, null, 2), 'utf8');
-  const skipped = Number(extraction.skipped?.events || 0) + Number(extraction.skipped?.projects || 0);
-  await addEvidence({
-    kind: 'extraction',
-    label: '抽取 JSON（联系方式已剔除）',
-    detail: '活动 ' + extraction.events.length + ' · 单位 ' + extraction.projects.length + (skipped ? ' · 跳过不可读 ' + skipped : ''),
-    url: evidenceUrl(task.id, 'extraction.json')
+  return runExtractionAndWrite({
+    dataDir, userId, task, source, shots, models, extractor, reviewer, actorRef, signal,
+    emit, addEvidence, setPhase, evidenceDir, label: '来源校对'
   });
-  if (!extraction.events.length) {
-    throw Object.assign(new Error('截图里没有读到可写入的活动，未写入任何数据。'), {code: 'SOURCE_NO_EVENTS_READ', recovery: '在普通浏览器人工核对后手动导入；不要靠猜补字段。'});
-  }
-
-  // 复核在写库之前：只发送抽取 JSON 与来源元数据；问题不改写入集，失败也不阻断写库。
-  setPhase('正在请外部 Agent 文本复核抽取结果…');
-  const review = await runReview({
-    reviewer, extraction, source, screenshots: shots, signal,
-    taskId: task.id, evidenceDir, addEvidence, emit
-  });
-
-  setPhase('正在写入本机招聘库…');
-  const write = await writeSourceCheck({dataDir, userId, taskId: task.id, extraction, source, screenshots: shots, actorRef});
-  if (write.duplicate) {
-    emit({type: 'status', text: '这批写入此前已经完成（幂等重放），没有新增数据。'});
-  } else {
-    emit({type: 'writes', taskId: task.id, tool: 'career_recruit_bulk_write', batchId: write.batchId, counts: write.counts});
-  }
-  setPhase('来源校对完成：已写入活动 ' + extraction.events.length + ' 条、单位 ' + extraction.projects.length + ' 条。');
-  return {extraction, write, screenshots, review};
 }
 
 // 来源校对任务没有对话轮次，但复核调用记录必须挂在助手消息的调用表里（step=review）。
