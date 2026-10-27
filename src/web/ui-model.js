@@ -283,11 +283,26 @@
     panel.id = 'context-panel';
     panel.hidden = true;
     panel.style.cssText = 'position:fixed;right:18px;top:70px;width:280px;z-index:30;background:#fff;border:1px solid #dce7df;border-radius:12px;padding:12px;box-shadow:0 12px 36px #1f3a2e22;font-size:12px;line-height:1.8;color:#314b3f';
-    panel.innerHTML = '<b style="font-size:12px">当前上下文</b>' + (project ? '<div style="margin-top:6px">项目：<code style="font-size:10px">' + project.slice(0,8) + '…</code></div>' : '<div style="margin-top:6px;color:#7b8b80">还没有从日历选择项目</div>') + '<div style="margin-top:8px"><a href="/recruit">打开数据与日历 →</a></div><div><a href="/resume">我的简历</a> · <a href="/companies">公司档案</a></div><div style="color:#7b8b80;margin-top:6px">来源只来自高校/公众号；平台用于研究岗位要求与薪资。</div>';
+    panel.innerHTML = '<b style="font-size:12px">当前上下文</b>' + (project ? '<div style="margin-top:6px">项目：<code style="font-size:10px">' + project.slice(0,8) + '…</code></div>' : '<div style="margin-top:6px;color:#7b8b80">还没有从日历选择项目</div>') + '<div id="context-session"></div><div style="margin-top:8px"><a href="/recruit">打开数据与日历 →</a></div><div><a href="/resume">我的简历</a> · <a href="/companies">公司档案</a></div><div style="color:#7b8b80;margin-top:6px">来源只来自高校/公众号；平台用于研究岗位要求与薪资。</div>';
     document.body.appendChild(panel);
-    btn.onclick = () => { panel.hidden = !panel.hidden; };
+    const renderSessionBits = () => {
+      const box = panel.querySelector('#context-session');
+      if (!box) return;
+      const s = ZX.currentSession ? ZX.currentSession() : null;
+      const memory = String(s?.memory || '').trim();
+      const arts = Array.isArray(s?.artifacts) ? s.artifacts.slice(-3).reverse() : [];
+      const memHtml = memory
+        ? '<div style="max-height:72px;overflow:auto;white-space:pre-wrap;font-size:11px;color:#5f7568;background:#f8fbf8;border-radius:7px;padding:6px">' + esc(memory.slice(0, 280)) + (memory.length > 280 ? '…' : '') + '</div>'
+        : '<div style="color:#7b8b80;font-size:11px">还没有记忆</div>';
+      const artHtml = arts.length
+        ? arts.map(a => '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;margin-top:3px"><span>' + esc(a.title || '求职文稿') + '</span><span style="color:#7b8b80;white-space:nowrap">' + esc(String(a.createdAt || '').slice(0, 10)) + '</span></div>').join('')
+        : '<div style="color:#7b8b80;font-size:11px">还没有文稿</div>';
+      box.innerHTML = '<div style="border-top:1px solid #eef3ec;margin-top:8px;padding-top:8px"><b style="font-size:12px">当前会话</b><div style="font-size:10.5px;color:#7b8b80;margin-top:4px">记忆</div>' + memHtml + '<div style="font-size:10.5px;color:#7b8b80;margin-top:6px">最近文稿</div>' + artHtml + '</div>';
+    };
+    btn.onclick = () => { if (panel.hidden) renderSessionBits(); panel.hidden = !panel.hidden; };
     if (project) {
       panel.hidden = false;
+      renderSessionBits();
       let projectLoaded = false;
       const loadProject = async (attempt = 0) => {
         if (projectLoaded) return;

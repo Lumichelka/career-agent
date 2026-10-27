@@ -109,6 +109,14 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
 #manual-dialog .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 #manual-dialog .draft{border-top:1px solid var(--line);margin-top:14px;padding-top:8px}
 @media(max-width:560px){#manual-dialog .grid2{grid-template-columns:1fr}}
+dialog#project-dialog{border:1px solid var(--line);border-radius:16px;padding:0;width:min(680px,92vw);max-height:88vh;overflow:auto;background:#fff;color:var(--ink);box-shadow:0 24px 70px #1f3a2e33}
+dialog#project-dialog::backdrop{background:#1f3a2e55}
+#project-dialog .inner{padding:20px 22px}
+#project-dialog h2{margin:0 0 8px;font-size:17px}
+.pd-row{display:flex;gap:8px;margin:7px 0;font-size:12.5px;line-height:1.7}
+.pd-row>b{flex:0 0 62px;color:#4e6558;font-weight:600}
+.pd-row>span{flex:1;min-width:0;word-break:break-word}
+.pd-raw{white-space:pre-wrap;max-height:190px;overflow:auto;background:#fbfdfb;border:1px solid #e2ebe2;border-radius:8px;padding:8px;font-size:11.5px}
 </style>
 </head>
 <body>
@@ -246,6 +254,13 @@ dialog#manual-dialog::backdrop{background:#1f3a2e55}
       <label>备注（含识别提示）<textarea id="m-notes" style="min-height:60px"></textarea></label>
       <div class="row"><button id="m-save" class="primary">保存到招聘库</button><span class="note" style="margin:0">保存后可在日历里看到，并参与导出。</span></div>
     </div>
+  </div>
+</dialog>
+<dialog id="project-dialog">
+  <div class="inner">
+    <h2 id="pd-title">招聘项目</h2>
+    <div id="pd-body" class="note"></div>
+    <div class="row" style="margin-top:12px"><button id="pd-close">关闭</button></div>
   </div>
 </dialog>
 <div class="toast" id="toast"></div>
@@ -392,11 +407,36 @@ function renderDayDetail(){
   const day=calendar?.days.find(d=>d.date===selectedDate);
   if(!day){el('#day-detail').innerHTML='<div class="empty">这天没有活动。</div>';return}
   const events=day.events.map(e=>{
-    const projects=(e.projects||[]).map(p=>{const meta=projectCardMeta(p);const details=meta.details.map(d=>d.label+'：'+d.value).join(' · ');return '<div class="project"><div><b>'+esc(p.company||'未填单位')+'</b> '+esc(p.title||'')+'<div class="hint">'+esc(details)+(p.applyMode?' · '+esc(p.applyMode):'')+(p.applyUrl?' · '+esc(p.applyUrl):'')+'</div></div><a class="hint" href="/chat?project='+encodeURIComponent(p.id)+'">研究 ↗</a><button data-del-project="'+esc(p.id)+'">删除</button></div>';}).join('');
+    const projects=(e.projects||[]).map(p=>{const meta=projectCardMeta(p);const details=meta.details.map(d=>d.label+'：'+d.value).join(' · ');return '<div class="project"><div><b>'+esc(p.company||'未填单位')+'</b> '+esc(p.title||'')+'<div class="hint">'+esc(details)+(p.applyMode?' · '+esc(p.applyMode):'')+(p.applyUrl?' · '+esc(p.applyUrl):'')+'</div></div><button data-project-detail="'+esc(p.id)+'" class="hint">详情</button><a class="hint" href="/chat?project='+encodeURIComponent(p.id)+'">研究 ↗</a><button data-del-project="'+esc(p.id)+'">删除</button></div>';}).join('');
     const flags=[e.status==='orphaned'?'<span class="flag bad">来源已下线</span>':'',e.status==='possibly_removed'?'<span class="flag bad">可能撤下</span>':'',e.interviewStage?'<span class="flag">'+esc([...new Set([e.interviewStage,e.interviewType].filter(Boolean))].join(' · '))+'</span>':'',(e.crossSources||[]).length>1?'<span class="flag ok">多源收录</span>':''].filter(Boolean).join(' ');
     return '<article class="ev"><time>'+esc(fmtTime(e.startAt))+(e.endAt?'–'+esc(fmtTime(e.endAt)):'')+'</time><div><p class="title">'+esc(e.title)+'</p><div class="meta">'+(e.company?'<b><a href="/companies?name='+encodeURIComponent(e.company)+'">'+esc(e.company)+'</a></b> · ':'')+esc(e.school)+' · '+esc(e.kind)+(e.venue?'<br>地点：'+esc(e.venue):'')+'<br>招聘项目：'+(e.projects||[]).length+' 个</div><div class="row">'+(e.sourceUrl?'<a href="'+esc(e.sourceUrl)+'" target="_blank" rel="noopener noreferrer">来源 ↗</a>':'')+'<a href="'+esc(mapFor(e))+'" target="_blank" rel="noopener noreferrer">地图 ↗</a><button data-verify="'+esc(e.id)+'">复核来源</button><button data-add-project="'+esc(e.id)+'">＋ 招聘项目</button><button data-bulk-project="'+esc(e.id)+'">批量粘贴</button></div><div class="projects">'+(projects||'<div class="hint">还没有拆分项目；双选会可在这里补充参会单位/岗位。</div>')+'</div><div class="bulk-form" data-bulk="'+esc(e.id)+'" hidden><textarea data-bulk-text placeholder="每行一个：单位 | 岗位 | 要求 | 投递方式 | 链接"></textarea><button data-save-bulk="'+esc(e.id)+'">批量保存</button></div><div class="project-form" data-form="'+esc(e.id)+'" hidden><input data-p-company placeholder="单位名称"><input data-p-title placeholder="项目/岗位名称"><input data-p-positions placeholder="岗位/工作内容"><input data-p-requirements placeholder="岗位要求（学历/专业/经验）"><input data-p-apply placeholder="投递方式（网申/邮箱/现场）"><input data-p-url placeholder="投递链接"><button data-save-project="'+esc(e.id)+'">保存项目</button></div></div><div class="side">'+flags+'</div></article>';
   }).join('');
   el('#day-detail').innerHTML='<h3 style="font-size:14px;margin:0 0 8px">'+esc(day.date)+' <span class="hint">'+events.length+' 项</span></h3>'+events;
+}
+
+function renderProjectDetail(d){
+  const p=d.project||{},e=d.event||{};
+  const safeUrl=u=>/^https?:\/\//i.test(String(u||''))?String(u):'';
+  const link=(url,text)=>url?'<a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+esc(text)+' ↗</a>':'';
+  const row=(label,value)=>value?'<div class="pd-row"><b>'+label+'</b><span>'+esc(value)+'</span></div>':'';
+  const sourceUrl=safeUrl(p.sourceUrl||e.sourceUrl);
+  let host='';
+  try{host=sourceUrl?new URL(sourceUrl).hostname:''}catch{}
+  const rawSource=p.sourceId||e.sourceId;
+  const sourceLabel=d.sourceName||(rawSource==='manual'?'手动添加':rawSource)||host||'未记录';
+  el('#pd-title').textContent=p.company||e.company||'招聘项目';
+  el('#pd-body').innerHTML=
+    row('公司',p.company||e.company||'未填单位')
+    +row('项目',p.title||'未填项目')
+    +row('岗位',p.positions||'未公布')
+    +row('要求',p.requirements||'未公布')
+    +'<div class="pd-row"><b>投递</b><span>'+esc(p.applyMode||'未公布')+(safeUrl(p.applyUrl)?' · '+link(safeUrl(p.applyUrl),'投递链接'):'')+'</span></div>'
+    +'<div class="pd-row"><b>来源</b><span>'+esc(sourceLabel)+(sourceUrl?' · '+link(sourceUrl,'来源原文'):'')+'</span></div>'
+    +row('活动',e.title||'未关联活动')
+    +row('学校',e.school)
+    +row('时间',e.startAt?shortStamp(e.startAt):'')
+    +row('备注',p.notes||e.notes)
+    +'<div class="pd-row"><b>原文</b><div class="pd-raw">'+esc(p.rawText||'未记录')+'</div></div>';
 }
 
 function renderRuns(runs){
@@ -560,6 +600,7 @@ const manualDialog=el('#manual-dialog');
 let manualPreview='';let wxArticle=null,wxDraft=null;
 el('#manual-open').onclick=()=>{el('#m-status').textContent='';el('#m-draft').hidden=true;manualDialog.showModal()};
 el('#m-close').onclick=()=>manualDialog.close();
+el('#pd-close').onclick=()=>el('#project-dialog').close();
 el('#m-parse').onclick=async()=>{
   const status=el('#m-status');status.textContent='解析中…';
   try{
@@ -600,6 +641,7 @@ document.addEventListener('click',async e=>{
   const saveBulk=e.target.closest('[data-save-bulk]');if(saveBulk){const form=saveBulk.closest('.bulk-form');try{const r=await api('projects/bulk',{eventId:saveBulk.dataset.saveBulk,text:form.querySelector('[data-bulk-text]').value});toast('已保存 '+r.count+' 个项目');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
   const add=e.target.closest('[data-add-project]');if(add){const form=document.querySelector('[data-form="'+add.dataset.addProject+'"]');if(form)form.hidden=!form.hidden;return}
   const save=e.target.closest('[data-save-project]');if(save){const form=save.closest('.project-form');const eventId=save.dataset.saveProject;try{await api('projects',{eventId,company:form.querySelector('[data-p-company]').value,title:form.querySelector('[data-p-title]').value,positions:form.querySelector('[data-p-positions]').value,requirements:form.querySelector('[data-p-requirements]').value,applyMode:form.querySelector('[data-p-apply]').value,applyUrl:form.querySelector('[data-p-url]').value});toast('项目已保存');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
+  const detail=e.target.closest('[data-project-detail]');if(detail){try{const d=await api('projects/'+encodeURIComponent(detail.dataset.projectDetail));renderProjectDetail(d);el('#project-dialog').showModal()}catch(err){toast(err.message)}return}
   const del=e.target.closest('[data-del-project]');if(del){if(!confirm('删除这个招聘项目？'))return;try{await api('projects/'+del.dataset.delProject+'/delete',{});toast('已删除');await loadCalendar(calendar.month)}catch(err){toast(err.message)}return}
 });
 loadAll();

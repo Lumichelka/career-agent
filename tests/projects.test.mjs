@@ -342,6 +342,24 @@ test('数据页引用项目卡 helper，不再只渲染 positions/applyMode/appl
   const html = readFileSync(new URL('../src/web/recruit.html', import.meta.url), 'utf8');
   assert.match(html, /projectCardMeta/);
   assert.match(html, /requirements/);
+  assert.match(html, /data-project-detail/);
+  assert.match(html, /id="project-dialog"/);
+});
+
+test('API：项目详情返回所属活动与来源名', async () => {
+  await withDir(async dir => {
+    const store = RecruitStore.open(join(dir, 'recruit.db'));
+    store.upsertEvent(baseEvent());
+    const project = store.upsertProject({eventId: 'a'.repeat(24), company: '甲公司', title: '数据分析', requirements: '本科', rawText: '招聘原文：本科，React'});
+    store.close();
+    const out = await handleRecruit({method: 'GET', pathname: 'projects/' + project.id, dir});
+    assert.equal(out.json.project.id, project.id);
+    assert.equal(out.json.project.requirements, '本科');
+    assert.equal(out.json.event.id, 'a'.repeat(24));
+    assert.equal(out.json.event.title, '测试双选会');
+    assert.ok('sourceName' in out.json, '详情应带来源名，供抽屉与详情弹窗显示');
+    assert.equal(out.json.project.rawText, '招聘原文：本科，React', '详情应带原文，供详情弹窗显示');
+  });
 });
 
 test('API：平台岗位按岗位/城市筛选，来源字段随行返回', async () => {

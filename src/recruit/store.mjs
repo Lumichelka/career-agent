@@ -488,7 +488,7 @@ export class RecruitStore {
 
   getProject(id) {
     const row = this.db.prepare('SELECT * FROM event_projects WHERE id=?').get(id);
-    return row ? rowToProject(row) : null;
+    return row ? {...rowToProject(row), rawText: row.raw_text || ''} : null;
   }
 
   sourceName(id) {
