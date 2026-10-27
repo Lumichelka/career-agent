@@ -29,7 +29,10 @@ test('加载技能：正文、提示词、验收清单', async () => {
   assert.match(skill.body, /何时使用/);
   assert.match(skill.prompt, /来源|调研|公司/);
   assert.match(skill.checklist, /验收清单/);
-  assert.ok(skill.tools.includes('career_company_research'));
+  assert.deepEqual(skill.tools, ['career_company_research', 'career_public_search', 'career_recruit_projects', 'career_recruit_project']);
+  assert.match(skill.body, /career_recruit_project/);
+  assert.match(skill.body, /项目 id 先/);
+  assert.match(skill.body, /不是公司官方事实/);
 });
 
 test('技能路由：按最长触发词选择', async () => {
@@ -59,8 +62,9 @@ test('技能限定了工具：模型只看到该技能允许的工具', async ()
     await runApiModel({root, prompt: '请给出测试回复', search: true, config, toolNames: skill.tools});
     const withTools = mock.state.requests.find(r => r.tools?.length);
     assert.ok(withTools, '应该有一次带工具的请求');
-    assert.equal(withTools.tools.length, 2);
-    assert.equal(withTools.tools[0].function.name, 'career_company_research');
+    assert.equal(withTools.tools.length, 4);
+    const names = withTools.tools.map(t => t.function.name);
+    assert.deepEqual(names.sort(), ['career_company_research', 'career_public_search', 'career_recruit_project', 'career_recruit_projects'].sort());
   } finally { await mock.close(); }
 });
 
@@ -82,6 +86,6 @@ test('完整链路：启用技能后计划与执行都带技能上下文', async
     const prompts = mock.state.requests.map(r => JSON.stringify(r.messages || r.input || ''));
     assert.ok(prompts.some(p => p.includes('本次启用技能')), '提示词应包含技能说明');
     const toolRequest = mock.state.requests.find(r => r.tools?.length);
-    assert.equal(toolRequest.tools.length, 2);
+    assert.equal(toolRequest.tools.length, 4);
   } finally { await mock.close(); }
 });
