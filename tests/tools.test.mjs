@@ -26,6 +26,13 @@ test('注册表：名称唯一、字段完整、处理器都有实现', () => {
   assert.equal(getTool('career_platform_jobs').permission, 'read');
 });
 
+test('来源健康工具说明使用七状态词表，不再写旧的 ok 语义', () => {
+  const description = getTool('career_source_health').description;
+  assert.match(description, /connected/);
+  assert.match(description, /list_only/);
+  assert.doesNotMatch(description, /ok 只在/);
+});
+
 test('模型工具集不暴露权限与处理器', () => {
   const modelTools = toolsForModel();
   assert.equal(modelTools.length, TOOLS.length);

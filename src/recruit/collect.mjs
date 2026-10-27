@@ -97,13 +97,18 @@ function scoreConfidence(event) {
   return Math.min(0.95, Number(c.toFixed(2)));
 }
 
-export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, projectLimit = 12, onLog = () => {}, persist = true} = {}) {
+export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, now, onLog = () => {}, persist = true} = {}) {
   const source = typeof sourceOrId === 'string' ? sourceById(sourceOrId) : sourceOrId;
   const startedAt = new Date().toISOString();
   const t0 = Date.now();
   const store = persist ? RecruitStore.open(join(dir, 'recruit.db')) : null;
   if (store) store.syncSources(SOURCES, REMOVED_SOURCES);
-  const result = {id: source.id, name: source.name, status: 'connected', fetched: 0, created: 0, updated: 0, projects: 0, projectEvents: 0, projectErrors: 0, projectEmpty: 0, message: '', durationMs: 0};
+  // 项目阶段只对今天（Asia/Shanghai）及以后的活动执行；已结束场次跳过，不占项目失败次数。
+  const nowDate = now == null ? new Date() : new Date(now);
+  const clock = Number.isNaN(nowDate.getTime()) ? new Date() : nowDate;
+  const todayYmd = new Intl.DateTimeFormat('en-CA', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'}).format(clock);
+  const todayStartMs = Date.parse(todayYmd + 'T00:00:00+08:00');
+  const result = {id: source.id, name: source.name, status: 'connected', fetched: 0, parsed: 0, created: 0, updated: 0, projects: 0, projectEvents: 0, projectErrors: 0, projectEmpty: 0, projectEligible: 0, projectSkipped: 0, message: '', durationMs: 0};
   try {
     if (!source.enabled) {
       result.status = 'disabled';
@@ -168,8 +173,9 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     const parsedCount = items.length;
     const truncated = parsedCount >= itemLimit;
     items = items.slice(0, itemLimit);
+    result.parsed = parsedCount;
     result.fetched = items.length;
-    onLog?.({source: source.id, text: `列表解析到 ${items.length} 条`});
+    onLog?.({source: source.id, text: `列表解析到 ${parsedCount} 条，入库 ${items.length} 条`});
 
     // 详情页补充（只对缺地点/缺结束时间的条目，控制请求量）
     if (source.detail && source.parseDetail) {
@@ -212,7 +218,7 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     }
 
     const seen = [];
-    let projectEvents = 0, projectErrors = 0, projectEmpty = 0, projectTotal = 0;
+    let projectEvents = 0, projectErrors = 0, projectEmpty = 0, projectTotal = 0, projectEligible = 0, projectSkipped = 0;
     for (const item of items) {
       const event = normalize(item, source);
       if (!event) continue;
@@ -223,34 +229,40 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
         if (action === 'created') result.created++; else result.updated++;
       } else result.created++;
 
-      // 项目阶段：只对声明了 fetchProjects 的源执行；失败不影响活动入库。
-      if (store && typeof source.fetchProjects === 'function' && projectEvents < projectLimit) {
-        try {
-          const got = await source.fetchProjects(item, event, {source});
-          const projectStatus = String(got?.status || '');
-          if (projectStatus === 'ok' || projectStatus === 'partial') {
-            const projects = Array.isArray(got?.projects) ? got.projects : [];
-            if (projects.length) {
-              const synced = store.syncProjects(event.id, source.id, projects);
-              projectTotal += synced.total;
-              onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目 ${synced.total} 个（新增 ${synced.created}，更新 ${synced.updated}）`});
-            } else {
+      // 项目阶段：只对声明了 fetchProjects 的源、且活动尚未结束时执行；失败不影响活动入库。
+      if (store && typeof source.fetchProjects === 'function') {
+        const startMs = Date.parse(event.startAt);
+        if (!Number.isFinite(startMs) || startMs < todayStartMs) {
+          projectSkipped++;
+        } else {
+          projectEligible++;
+          try {
+            const got = await source.fetchProjects(item, event, {source});
+            const projectStatus = String(got?.status || '');
+            if (projectStatus === 'ok' || projectStatus === 'partial') {
+              const projects = Array.isArray(got?.projects) ? got.projects : [];
+              if (projects.length) {
+                const synced = store.syncProjects(event.id, source.id, projects);
+                projectTotal += synced.total;
+                onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目 ${synced.total} 个（新增 ${synced.created}，更新 ${synced.updated}）`});
+              } else {
+                projectEmpty++;
+                onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：接口可访问，但没有参会单位`});
+              }
+              projectEvents++;
+            } else if (projectStatus === 'none' || projectStatus === 'empty') {
+              // 合法空项目：接口可用、只是没有参会单位，不是采集失败。
               projectEmpty++;
-              onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：接口可访问，但没有参会单位`});
+              projectEvents++;
+              onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目为空（${got?.message || '接口可访问，但没有参会单位'}）`});
+            } else {
+              projectErrors++;
+              onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目未抓取（${got?.message || got?.status || '未知原因'}）`});
             }
-            projectEvents++;
-          } else if (projectStatus === 'none' || projectStatus === 'empty') {
-            // 合法空项目：接口可用、只是没有参会单位，不是采集失败。
-            projectEmpty++;
-            projectEvents++;
-            onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目为空（${got?.message || '接口可访问，但没有参会单位'}）`});
-          } else {
+          } catch (e) {
             projectErrors++;
-            onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目未抓取（${got?.message || got?.status || '未知原因'}）`});
+            onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目失败（${e.message}）`});
           }
-        } catch (e) {
-          projectErrors++;
-          onLog?.({source: source.id, text: `${event.title.slice(0, 24)}：项目失败（${e.message}）`});
         }
       }
     }
@@ -258,6 +270,8 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     result.projectEvents = projectEvents;
     result.projectErrors = projectErrors;
     result.projectEmpty = projectEmpty;
+    result.projectEligible = projectEligible;
+    result.projectSkipped = projectSkipped;
 
     // 来源页如果链接了公众号推文，顺手发现并分析（不批量刷公众号主页）。
     if (store && listText.includes('mp.weixin.qq.com')) {
@@ -278,14 +292,19 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     if (!items.length) { result.status = 'empty'; result.message = '页面可访问，但没有解析到活动；可能需要浏览器模式或适配选择器。'; }
     else if (typeof source.fetchProjects === 'function') {
       if (projectErrors) result.status = 'list_only';
-      if (!projectEvents) {
-        result.message = `活动已入库，但项目阶段未成功（${projectErrors} 场失败）`;
+      const skippedNote = projectSkipped ? `；${projectSkipped} 场已结束，跳过项目阶段` : '';
+      if (!projectEligible && projectSkipped) {
+        result.message = `活动已入库；${projectSkipped} 场已结束，跳过项目阶段`;
+      } else if (!projectEvents) {
+        result.message = `活动已入库，但项目阶段未成功（${projectErrors} 场失败）${skippedNote}`;
       } else if (projectErrors) {
-        result.message = `项目部分成功：${projectEvents} 场，${projectErrors} 场失败`;
+        result.message = `项目部分成功：${projectEvents} 场，${projectErrors} 场失败${skippedNote}`;
       } else if (projectEmpty && !projectTotal) {
-        result.message = '活动已入库；项目接口可访问，但没有参会单位';
+        result.message = '活动已入库；项目接口可访问，但没有参会单位' + skippedNote;
       } else if (projectEmpty) {
-        result.message = `项目阶段完成：有项目 ${projectEvents - projectEmpty} 场，空项目 ${projectEmpty} 场`;
+        result.message = `项目阶段完成：有项目 ${projectEvents - projectEmpty} 场，空项目 ${projectEmpty} 场${skippedNote}`;
+      } else if (skippedNote) {
+        result.message = `项目阶段完成${skippedNote}`;
       }
     }
   } catch (e) {
@@ -295,7 +314,7 @@ export async function collectSource(sourceOrId, {dir, limit, detailLimit = 8, pr
     result.durationMs = Date.now() - t0;
     if (store) {
       try {
-        store.markSource(source.id, {status: result.status, error: result.message, count: result.fetched, fetched: result.fetched, created: result.created, updated: result.updated});
+        store.markSource(source.id, {status: result.status, error: result.message, count: result.parsed, fetched: result.fetched, created: result.created, updated: result.updated});
         store.recordRun({id: randomUUID(), sourceId: source.id, startedAt, finishedAt: new Date().toISOString(), status: result.status, fetched: result.fetched, created: result.created, updated: result.updated, message: result.message + (result.projects ? `；项目 ${result.projects}` : '')});
       } catch { /* 记录失败不掩盖采集结果 */ }
       store.close();

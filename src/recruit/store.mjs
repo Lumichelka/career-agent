@@ -244,15 +244,17 @@ export class RecruitStore {
     }]));
   }
 
-  markSource(id, {status, error = '', count = 0, fetched, created = 0, updated = 0}) {
+  markSource(id, {status, error = '', count, fetched, created = 0, updated = 0}) {
     const now = new Date().toISOString();
-    const f = Number(fetched ?? count) || 0;
+    // count 是列表解析数（面板上的 last_count），fetched 是实际入库数（被 limit 截断时更少）。
+    const storedCount = Number(fetched ?? count) || 0;
+    const parsedCount = count === undefined || count === null ? storedCount : Number(count) || 0;
     const savedStatus = normalizeSourceStatus(status) || String(status || '');
     this.db.prepare('UPDATE sources SET last_run=?, last_status=?, last_error=?, last_count=?, last_attempt=? WHERE id=?')
-      .run(now, savedStatus, error, f, now, id);
+      .run(now, savedStatus, error, parsedCount, now, id);
     if (isSuccessful(savedStatus)) {
       this.db.prepare('UPDATE sources SET last_success=?, last_fetched=?, last_created=?, last_updated=?, failure_streak=0 WHERE id=?')
-        .run(now, f, Number(created) || 0, Number(updated) || 0, id);
+        .run(now, storedCount, Number(created) || 0, Number(updated) || 0, id);
     } else {
       // 连续失败：成功（connected/empty/list_only）清零，其余每次 +1；供来源卡与告警判断。
       this.db.prepare('UPDATE sources SET failure_streak=COALESCE(failure_streak,0)+1 WHERE id=?').run(id);

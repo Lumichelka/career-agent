@@ -122,11 +122,11 @@ test('sourceStates：数据年龄与「今日有活动但数据超 24h」标黄'
   assert.equal(other.stale, false, '没有今日活动不标黄');
 });
 
-async function startServer(t) {
+async function startServer(t, items = [{title: '测试宣讲会', startAt: '2026-11-01T09:00:00+08:00', venue: '体育馆'}]) {
   const server = createServer((req, res) => {
     res.setHeader('content-type', 'application/json; charset=utf-8');
     if (req.url === '/robots.txt') return res.end('User-agent: *\nAllow: /\n');
-    res.end(JSON.stringify({items: [{title: '测试宣讲会', startAt: '2026-11-01T09:00:00+08:00', venue: '体育馆'}]}));
+    res.end(JSON.stringify({items}));
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   t.after(() => new Promise(r => server.close(r)));
@@ -178,4 +178,19 @@ test('GET /api/recruit/sources 返回每源新鲜度字段', async t => {
   assert.equal(typeof s.stale, 'boolean');
   assert.equal(typeof s.hasEventsToday, 'boolean');
   assert.ok('dataAgeMinutes' in s);
+});
+
+test('采集统计：last_count 记列表解析数，last_fetched 记入库数', async t => {
+  const items = Array.from({length: 25}, (_, i) => ({title: `第 ${i + 1} 场宣讲会`, startAt: '2026-11-01T09:00:00+08:00', venue: '体育馆'}));
+  const base = await startServer(t, items);
+  const dir = await mkdtemp(join(tmpdir(), 'zx-fresh-'));
+  const result = await collectSource(jsonSource(base, 'scu-employ'), {dir, limit: 20});
+  assert.equal(result.parsed, 25, '解析数不能被 limit 截断');
+  assert.equal(result.fetched, 20, '入库数受 limit 限制');
+  const store = RecruitStore.open(join(dir, 'recruit.db'));
+  t.after(() => cleanup(dir, store));
+  const row = store.db.prepare('SELECT * FROM sources WHERE id=?').get('scu-employ');
+  assert.equal(row.last_count, 25, 'last_count 记解析数');
+  assert.equal(row.last_fetched, 20, 'last_fetched 记实际入库数');
+  assert.equal(row.last_created, 20);
 });

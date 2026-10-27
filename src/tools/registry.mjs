@@ -229,7 +229,7 @@ export const TOOLS = [
   {
     name: 'career_source_health',
     title: '招聘来源健康',
-    description: '列出高校就业网/公众号来源的列表、详情、项目能力与最近状态；ok 只在列表解析成功时使用。',
+    description: '列出高校就业网/公众号来源的列表、详情、项目能力与最近状态；connected 表示列表与项目阶段都成功（或该源不支持项目），list_only 表示活动列表成功但项目阶段未成功，其余按七状态词表说明。',
     permission: 'read',
     handler: 'recruit.sources',
     timeoutMs: 8000,
