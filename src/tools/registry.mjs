@@ -125,6 +125,25 @@ export const TOOLS = [
     }
   },
   {
+    name: 'career_wechat_articles',
+    title: '查询公众号文章',
+    description: '从本机已导入/同步的公众号文章里按公众号、学校、关键词筛选，返回标题、链接、发布时间、是否含招聘、分析摘要、抽取草稿、关联活动/项目与来源链接。只读：不抓取、不写库、不投递；草稿和关联条目需要人工核对后才可写入。',
+    permission: 'read',
+    handler: 'wechat.articles',
+    timeoutMs: 8000,
+    parameters: {
+      type: 'object',
+      properties: {
+        account: {type: 'string', maxLength: 60, description: '公众号名称或别名（模糊），可选'},
+        school: {type: 'string', maxLength: 30, description: '学校名（模糊），可选'},
+        q: {type: 'string', maxLength: 60, description: '关键词（标题/摘要/分析摘要），可选'},
+        hasRecruitment: {type: 'string', enum: ['yes', 'uncertain', 'no'], description: '只看含招聘/不确定/不含招聘的文章，可选'},
+        limit: {type: 'number', minimum: 1, maximum: 50, description: '最多返回条数，默认 20'}
+      },
+      additionalProperties: false
+    }
+  },
+  {
     name: 'career_recruit_bulk_write',
     title: '批量写入招聘活动与项目',
     description: '把从页面或截图核对出的活动与参会单位一次写入本机招聘库（自动写入，带审计与幂等）。只写 events / event_projects，不写公司档案、不投递。events 每条需 title 与 startAt；projects 用 eventIndex（从 0 开始）或 eventId 指向同批活动；source.sourceId=manual 表示手动/浏览器读取。同一次调用共用一个 idempotencyKey，重试不会重复写入。',

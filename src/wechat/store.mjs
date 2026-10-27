@@ -79,18 +79,20 @@ function rowToArticle(r) {
 }
 
 export class WeChatStore {
-  constructor(file) {
-    mkdirSync(dirname(file), {recursive: true});
+  constructor(file, {readOnly = false} = {}) {
     this.file = file;
-    this.db = new DatabaseSync(file);
-    this.db.exec('PRAGMA journal_mode = WAL');
+    this.readOnly = readOnly;
+    if (!readOnly) mkdirSync(dirname(file), {recursive: true});
+    this.db = new DatabaseSync(file, readOnly ? {readOnly: true} : {});
     this.db.exec('PRAGMA busy_timeout = 5000');
+    if (readOnly) return;
+    this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(SCHEMA);
     this.migrate();
     this.seed();
     this.upgradeData();
   }
-  static open(file) { return new WeChatStore(file); }
+  static open(file, options) { return new WeChatStore(file, options); }
   close() { try { this.db.close(); } catch { /* 已关闭 */ } }
 
   migrate() {
@@ -456,6 +458,31 @@ export class WeChatStore {
       ? this.db.prepare('SELECT * FROM wechat_articles WHERE account_id=? ORDER BY COALESCE(NULLIF(published_at,\'\'), created_at) DESC LIMIT ?').all(accountId, limit)
       : this.db.prepare('SELECT * FROM wechat_articles ORDER BY COALESCE(NULLIF(published_at,\'\'), created_at) DESC LIMIT ?').all(limit);
     return rows.map(rowToArticle);
+  }
+
+  // 只读查询：按公众号名称/别名、学校、关键词与是否含招聘筛选；count 是命中总数，不受 limit 截断。
+  searchArticles({account = '', school = '', q = '', hasRecruitment = '', limit = 20} = {}) {
+    const like = value => '%' + String(value).replace(/[\\%_]/g, m => '\\' + m) + '%';
+    const where = [], args = [];
+    const accountText = String(account || '').trim();
+    if (accountText) {
+      where.push("(a.name LIKE ? ESCAPE '\\' OR a.alias_names LIKE ? ESCAPE '\\')");
+      args.push(like(accountText), like(accountText));
+    }
+    const schoolText = String(school || '').trim();
+    if (schoolText) { where.push("a.school LIKE ? ESCAPE '\\'"); args.push(like(schoolText)); }
+    const keyword = String(q || '').trim();
+    if (keyword) {
+      where.push("(r.title LIKE ? ESCAPE '\\' OR r.summary LIKE ? ESCAPE '\\' OR r.analysis_summary LIKE ? ESCAPE '\\')");
+      args.push(like(keyword), like(keyword), like(keyword));
+    }
+    const recruitment = String(hasRecruitment || '').trim();
+    if (recruitment) { where.push('r.has_recruitment = ?'); args.push(recruitment); }
+    const cap = Math.floor(Math.min(50, Math.max(1, Number(limit) || 20)));
+    const filter = where.length ? ' WHERE ' + where.join(' AND ') : '';
+    const total = Number(this.db.prepare('SELECT COUNT(*) c FROM wechat_articles r LEFT JOIN wechat_accounts a ON a.id=r.account_id' + filter).get(...args).c) || 0;
+    const rows = this.db.prepare('SELECT r.*, a.name AS account_name, a.school AS account_school FROM wechat_articles r LEFT JOIN wechat_accounts a ON a.id=r.account_id' + filter + " ORDER BY COALESCE(NULLIF(r.published_at,''), r.created_at) DESC LIMIT ?").all(...args, cap);
+    return {total, rows: rows.map(r => ({...rowToArticle(r), accountName: r.account_name || '', accountSchool: r.account_school || ''}))};
   }
 
   deleteArticle(id) { this.db.prepare('DELETE FROM wechat_articles WHERE id=?').run(id); }

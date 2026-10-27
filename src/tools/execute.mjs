@@ -2,6 +2,7 @@
 import {getTool} from './registry.mjs';
 import {validateArguments, validateExternalArguments} from './policy.mjs';
 import * as recruit from './handlers/recruit.mjs';
+import * as wechat from './handlers/wechat.mjs';
 import * as search from './handlers/search.mjs';
 import * as platform from './handlers/platform.mjs';
 import * as resume from './handlers/resume.mjs';
@@ -16,6 +17,7 @@ export const HANDLERS = {
   'recruit.sources': recruit.sourceStates,
   'recruit.feed': recruit.feed,
   'recruit.bulkWrite': recruit.bulkWrite,
+  'wechat.articles': wechat.articles,
   'profile.write': profile.profileWrite,
   'search.public': search.publicSearch,
   'search.company': search.companyResearch,

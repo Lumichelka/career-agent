@@ -43,6 +43,9 @@ function decide(body, state = {}) {
   if (body.tools?.length && /研究这个招聘项目/.test(userText)) {
     return {toolCalls: [{id: 'call_career_recruit_projects', name: 'career_recruit_projects', args: '{\"days\":30}'}]};
   }
+  if (body.tools?.length && /查公众号文章/.test(userText)) {
+    return {toolCalls: [{id: 'call_career_wechat_articles', name: 'career_wechat_articles', args: '{\"q\":\"双选会\",\"limit\":3}'}]};
+  }
   if (body.tools?.length && /请调用 career_platform_status/.test(userText)) {
     return {toolCalls: [{id: 'call_career_platform_status', name: 'career_platform_status', args: '{}'}]};
   }

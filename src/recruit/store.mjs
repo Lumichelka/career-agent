@@ -74,17 +74,19 @@ function isSuccessful(status) {
 }
 
 export class RecruitStore {
-  constructor(file) {
-    mkdirSync(dirname(file), {recursive: true});
+  constructor(file, {readOnly = false} = {}) {
     this.file = file;
-    this.db = new DatabaseSync(file);
-    this.db.exec('PRAGMA journal_mode = WAL');
+    this.readOnly = readOnly;
+    if (!readOnly) mkdirSync(dirname(file), {recursive: true});
+    this.db = new DatabaseSync(file, readOnly ? {readOnly: true} : {});
     this.db.exec('PRAGMA busy_timeout = 5000');
+    if (readOnly) return;
+    this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(SCHEMA);
     this.migrate();
   }
 
-  static open(file) { return new RecruitStore(file); }
+  static open(file, options) { return new RecruitStore(file, options); }
   close() { try { this.db.close(); } catch { /* 已关闭 */ } }
 
   migrate() {
