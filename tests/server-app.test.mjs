@@ -44,6 +44,23 @@ test('静态页：no-store 与 CSP 不回归', async t => {
   assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
 });
 
+test('公司档案页：/companies 直达 200，CSP 与口令替换正常', async t => {
+  const app = await startApp(t);
+  const res = await fetch(app.origin + '/companies?name=' + encodeURIComponent('测试公司'));
+  assert.equal(res.status, 200, '/companies 不应再 302 到 /chat');
+  assert.match(res.headers.get('content-type'), /text\/html/);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.match(res.headers.get('content-security-policy') || '', /default-src 'self'/);
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  const html = await res.text();
+  assert.match(html, /公司档案/);
+  assert.match(html, /api\('companies'/);
+  assert.match(html, /api\('auth\/me'/);
+  assert.match(html, /href="\/chat"/);
+  assert.match(html, /href="\/recruit"/);
+  assert.doesNotMatch(html, /SESSION_TOKEN/, '页面口令应替换为实例 token');
+});
+
 test('鉴权：缺 token 403，缺登录 401，注册后 cookie 可访问本人接口', async t => {
   const app = await startApp(t);
 

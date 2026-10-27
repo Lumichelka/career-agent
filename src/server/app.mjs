@@ -426,8 +426,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/companies') {
-      res.writeHead(302, {Location: '/chat'});
-      return res.end();
+      const html = (await readFile(join(root, 'src', 'web', 'companies.html'), 'utf8')).replaceAll('SESSION_TOKEN', token);
+      res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'", 'X-Content-Type-Options': 'nosniff'});
+      return res.end(html);
     }
 
     if (req.method === 'GET' && ['/ui-model.js', '/liveness.js', '/inbound.js', '/capabilities.js', '/memory.js', '/artifact.js', '/workflow.js', '/audit.js', '/backends.js', '/agents.js', '/recruit-cards.js', '/source-status.js', '/vendor/mammoth.js', '/vendor/pdf.mjs', '/vendor/pdf.worker.mjs'].includes(url.pathname)) {

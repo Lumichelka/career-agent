@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>职向 · 公司档案</title>
+<style>
+:root{--bg:#f6f8f5;--card:#fff;--ink:#1f3a2e;--muted:#7b8b80;--line:#e2e8e1;--green:#1f6b50;--soft:#e8f1ea;--danger:#a63a3a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.7 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+a{color:var(--green);text-decoration:none}a:hover{text-decoration:underline}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px 26px;background:#fffdf8e8;backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.brand{font-size:18px;font-weight:600;letter-spacing:2px}.brand small{display:block;font-size:9px;letter-spacing:2px;color:var(--muted);font-weight:400}
+nav{display:flex;gap:6px;flex-wrap:wrap}nav a{padding:7px 12px;border-radius:9px;font-size:12.5px;color:#4e6558}nav a.active{background:var(--green);color:#fff}nav a:hover{background:var(--soft);text-decoration:none}
+.spacer{flex:1}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:7px 12px;font:inherit;font-size:12.5px}
+button:hover{border-color:#b9cdbd;background:#f7fbf7}button.primary{background:var(--green);border-color:var(--green);color:#fff}button.primary:hover{background:#1a5c44}button.danger{color:var(--danger)}
+main{max-width:1150px;margin:0 auto;padding:22px 22px 80px}
+.grid{display:grid;grid-template-columns:290px minmax(0,1fr);gap:16px;align-items:start}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:16px}
+.panel h2{margin:0 0 12px;font-size:13px;letter-spacing:1px;color:var(--muted);font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.company-item{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin-bottom:8px;cursor:pointer;background:#fff}
+.company-item:hover{border-color:#b9cdbd}.company-item.selected{border-color:var(--green);background:#f7fbf8}
+.company-item b{font-size:13px}.company-item .meta{font-size:10.5px;color:var(--muted);margin-top:2px}
+form.stack{display:grid;gap:9px}
+label{display:grid;gap:4px;font-size:12px;color:#4e6558}
+input,textarea{width:100%;padding:8px 10px;border:1px solid #d7e1d9;border-radius:8px;font:13px inherit;background:#fff;color:var(--ink)}
+textarea{min-height:80px;resize:vertical}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.hint{font-size:11px;color:var(--muted);line-height:1.8}
+.related{font-size:12px;border-left:3px solid #b9d6c4;padding:6px 10px;margin:7px 0;background:#fbfdfb}
+.related .when{font-size:10.5px;color:var(--muted)}
+.empty{padding:22px;border:1px dashed var(--line);border-radius:12px;color:var(--muted);font-size:12px;text-align:center}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f3a2e;color:#fff;padding:9px 16px;border-radius:22px;font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:100}
+.toast.show{opacity:1}
+.gate{position:fixed;inset:0;z-index:99;background:#f4f6f0;display:grid;place-items:center;padding:20px}
+.gate[hidden]{display:none}
+.gate .box{background:#fff;border:1px solid var(--line);border-radius:20px;padding:30px 32px;max-width:420px;text-align:center}
+@media(max-width:860px){.grid{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}main{padding:14px 12px 70px}.top{padding:10px 14px;gap:10px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">✧ 职向<small>COMPANY FILES</small></div>
+  <nav>
+    <a href="/chat">对话</a>
+    <a href="/recruit">机会日历</a>
+    <a href="/resume">简历与投递</a>
+    <a href="/companies" class="active">公司档案</a>
+  </nav>
+  <div class="spacer"></div>
+  <button id="refresh">刷新</button>
+</header>
+
+<main id="main">
+  <div class="grid">
+    <aside>
+      <div class="panel">
+        <h2>公司档案 <a href="/chat">从对话保存 →</a></h2>
+        <div id="company-list"><div class="empty">还没有公司档案</div></div>
+      </div>
+      <details class="panel">
+        <summary style="cursor:pointer;font-size:13px">＋ 新建公司档案</summary>
+        <form id="new-company" class="stack" style="margin-top:10px">
+          <label>公司名称<input id="nc-name" maxlength="80" required placeholder="例如：某银行"></label>
+          <div class="grid2">
+            <label>行业<input id="nc-industry" maxlength="60"></label>
+            <label>城市<input id="nc-city" maxlength="60"></label>
+          </div>
+          <label>官网<input id="nc-website" maxlength="300" placeholder="https://"></label>
+          <button type="submit" class="primary">创建</button>
+        </form>
+      </details>
+    </aside>
+
+    <section>
+      <div class="panel">
+        <h2 id="company-title">选择左侧公司</h2>
+        <div id="company-detail"><div class="empty">选择一份公司档案查看详情</div></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="gate" id="gate" hidden>
+  <div class="box">
+    <h3>请先登录</h3>
+    <p class="hint">公司档案只保存在本机，需要登录后查看。</p>
+    <p><a href="/chat" style="display:inline-block;background:var(--green);color:#fff;border-radius:9px;padding:8px 16px">去登录</a></p>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = 'SESSION_TOKEN';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const toast = t => { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 3200); };
+const fmt = iso => iso ? String(iso).slice(0, 16).replace('T', ' ') : '';
+let state = {companies: [], current: null, related: {events: [], applications: []}};
+
+async function api(path, body) {
+  const r = await fetch('/api/' + path, {method: body ? 'POST' : 'GET', headers: {'x-career-token': TOKEN, 'content-type': 'application/json'}, ...(body ? {body: JSON.stringify(body)} : {})});
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { const e = new Error('请先登录'); e.needLogin = true; throw e; }
+  if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+function renderList() {
+  if (!state.companies.length) { $('#company-list').innerHTML = '<div class="empty">还没有公司档案。可以新建，或在对话里调研后点「保存为公司档案」。</div>'; return; }
+  $('#company-list').innerHTML = state.companies.map(c => `<div class="company-item ${state.current?.id === c.id ? 'selected' : ''}" data-company="${esc(c.id)}">
+    <b>${esc(c.name)}</b><div class="meta">${esc([c.industry, c.city].filter(Boolean).join(' · ') || '未填行业')} · ${esc(fmt(c.updatedAt))}</div></div>`).join('');
+  document.querySelectorAll('[data-company]').forEach(el => el.onclick = () => openCompany(el.dataset.company));
+}
+
+async function openCompany(id) {
+  const d = await api('companies/' + id);
+  state.current = d.company;
+  state.related = {events: d.events || [], applications: d.applications || []};
+  renderList();
+  renderDetail();
+}
+
+function renderDetail() {
+  const c = state.current;
+  if (!c) return;
+  $('#company-title').textContent = c.name;
+  const sources = (c.sources || []).map(s => s.url).join('\n');
+  const events = state.related.events.length
+    ? state.related.events.map(e => `<div class="related"><b>${esc(e.title)}</b><div class="when">${esc(fmt(e.startAt))} · ${esc(e.school || '')} ${e.venue ? '· ' + esc(e.venue) : ''}</div></div>`).join('')
+    : '<div class="empty">招聘库里还没有这家公司的活动</div>';
+  const apps = state.related.applications.length
+    ? state.related.applications.map(a => `<div class="related"><b>${esc(a.role || '未填岗位')}</b> · ${esc(a.stage)}<div class="when">更新 ${esc(fmt(a.updatedAt))}</div></div>`).join('')
+    : '<div class="empty">还没有投递记录</div>';
+
+  $('#company-detail').innerHTML = `
+    <form id="company-form" class="stack">
+      <div class="grid2">
+        <label>公司名称<input id="c-name" maxlength="80" value="${esc(c.name)}"></label>
+        <label>官网<input id="c-website" maxlength="300" value="${esc(c.website || '')}"></label>
+        <label>行业<input id="c-industry" maxlength="60" value="${esc(c.industry || '')}"></label>
+        <label>规模<input id="c-size" maxlength="60" value="${esc(c.size || '')}"></label>
+        <label>城市<input id="c-city" maxlength="60" value="${esc(c.city || '')}"></label>
+      </div>
+      <label>公司介绍<textarea id="c-summary" maxlength="6000">${esc(c.summary || '')}</textarea></label>
+      <label>发展前景<textarea id="c-prospects" maxlength="6000">${esc(c.prospects || '')}</textarea></label>
+      <label>公司评价<textarea id="c-reputation" maxlength="6000">${esc(c.reputation || '')}</textarea></label>
+      <label>综合待遇<textarea id="c-compensation" maxlength="6000">${esc(c.compensation || '')}</textarea></label>
+      <label>企业文化<textarea id="c-culture" maxlength="6000">${esc(c.culture || '')}</textarea></label>
+      <label>来源链接（每行一个）<textarea id="c-sources" style="min-height:60px">${esc(sources)}</textarea></label>
+      <label>备注<textarea id="c-notes" maxlength="3000" style="min-height:60px">${esc(c.notes || '')}</textarea></label>
+      <div class="row"><button type="submit" class="primary">保存档案</button><button type="button" id="delete-company" class="danger">删除</button><span class="hint">保存后可被智能体的 company_read 读到。</span></div>
+    </form>
+    <div class="panel" style="margin:16px 0 0;padding:12px"><h2>关联招聘活动</h2>${events}</div>
+    <div class="panel" style="margin:12px 0 0;padding:12px"><h2>关联投递</h2>${apps}</div>`;
+
+  $('#company-form').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const sources = $('#c-sources').value.split('\n').map(s => s.trim()).filter(Boolean).map(url => ({title: '', url}));
+      const d = await api('companies', {
+        id: c.id, name: $('#c-name').value, website: $('#c-website').value,
+        industry: $('#c-industry').value, size: $('#c-size').value, city: $('#c-city').value,
+        summary: $('#c-summary').value, prospects: $('#c-prospects').value,
+        reputation: $('#c-reputation').value, compensation: $('#c-compensation').value,
+        culture: $('#c-culture').value, sources, notes: $('#c-notes').value
+      });
+      state.current = d.company;
+      await loadCompanies();
+      renderDetail();
+      toast('已保存');
+    } catch (err) { toast(err.message); }
+  };
+  $('#delete-company').onclick = async () => {
+    if (!confirm('删除这家公司的档案？')) return;
+    try {
+      await api('companies/' + c.id + '/delete', {});
+      state.current = null;
+      await loadCompanies();
+      $('#company-title').textContent = '选择左侧公司';
+      $('#company-detail').innerHTML = '<div class="empty">已删除</div>';
+      toast('已删除');
+    } catch (err) { toast(err.message); }
+  };
+}
+
+async function loadCompanies() {
+  const d = await api('companies');
+  state.companies = d.companies || [];
+  renderList();
+  if (state.current && !state.companies.some(c => c.id === state.current.id)) state.current = null;
+  if (!state.current && state.companies.length) await openCompany(state.companies[0].id);
+  if (!state.companies.length) $('#company-title').textContent = '选择左侧公司';
+}
+
+async function boot() {
+  try { await api('auth/me'); }
+  catch (e) { if (e.needLogin) { $('#gate').hidden = false; $('#main').style.visibility = 'hidden'; return; } toast(e.message); return; }
+  try {
+    await loadCompanies();
+    const wanted = new URLSearchParams(location.search).get('name');
+    if (wanted && !state.current) {
+      const hit = state.companies.find(c => c.name.includes(wanted) || wanted.includes(c.name));
+      if (hit) await openCompany(hit.id);
+      else { $('#nc-name').value = wanted; document.querySelector('details').open = true; }
+    }
+  } catch (e) { toast(e.message); }
+}
+
+$('#new-company').onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const d = await api('companies', {
+      name: $('#nc-name').value, industry: $('#nc-industry').value,
+      city: $('#nc-city').value, website: $('#nc-website').value
+    });
+    state.current = d.company;
+    await loadCompanies();
+    renderDetail();
+    toast('已创建');
+  } catch (err) { toast(err.message); }
+};
+$('#refresh').onclick = () => loadCompanies().then(() => toast('已刷新')).catch(e => toast(e.message));
+boot();
+</script>
+</body>
+</html>
