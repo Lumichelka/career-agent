@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {findWechatLinks} from '../src/wechat/harvest.mjs';
+import {findWechatLinks, harvestWechat} from '../src/wechat/harvest.mjs';
 import {analyzeArticle} from '../src/wechat/analyze.mjs';
 import {fetchWechatArticle} from '../src/wechat/fetch-article.mjs';
 import {discoverAccounts} from '../src/wechat/attribute.mjs';
@@ -119,4 +119,32 @@ test('订阅同步：9 个空账号都能入库最近文章，重复同步不重
       assert.ok(store.listArticles().every(a => a.hasRecruitment === 'yes'));
     } finally { store.close(); }
   } finally { await rm(dir, {recursive: true, force: true}); }
+});
+
+test('来源页采集：入库文章带摘要，抓取失败给出可粘贴提示', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'zx-harvest-result-'));
+  try {
+    const html = '<a href="https://mp.weixin.qq.com/s/one">一</a><a href="https://mp.weixin.qq.com/s/two">二</a>';
+    let calls = 0;
+    const result = await harvestWechat({
+      text: html, dir, limit: 2,
+      fetchArticle: async link => {
+        calls++;
+        if (link.includes('/two')) return {ok: false, needPaste: true, message: '微信要求验证或正文为空；请把推文正文粘贴进来', link};
+        return {ok: true, title: '某公司双选会', text: '某公司 招聘 数据分析。\n' + '正文'.repeat(80), link, nickname: '就业中心', biz: 'biz1'};
+      }
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.imported, 1);
+    assert.equal(result.skipped, 1);
+    assert.equal(result.articles.length, 1);
+    assert.equal(result.articles[0].title, '某公司双选会');
+    assert.ok(result.articles[0].summary.includes('数据分析'));
+    assert.ok(result.articles[0].summary.length <= 120);
+    assert.equal(result.failures.length, 1);
+    assert.equal(result.failures[0].needPaste, true);
+    assert.match(result.failures[0].link, /\/two$/);
+  } finally {
+    await rm(dir, {recursive: true, force: true});
+  }
 });

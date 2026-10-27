@@ -482,6 +482,11 @@ export class RecruitStore {
     return row ? rowToProject(row) : null;
   }
 
+  sourceName(id) {
+    const row = this.db.prepare('SELECT name FROM sources WHERE id=?').get(id);
+    return row ? row.name || '' : '';
+  }
+
   recordRun(run) {
     this.db.prepare('INSERT INTO runs(id,source_id,started_at,finished_at,status,fetched,created,updated,message) VALUES(?,?,?,?,?,?,?,?,?)')
       .run(run.id, run.sourceId, run.startedAt, run.finishedAt, run.status, run.fetched || 0, run.created || 0, run.updated || 0, run.message || '');

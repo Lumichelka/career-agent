@@ -296,7 +296,12 @@
           if (!d?.project) return;
           projectLoaded = true;
           const p = d.project, e = d.event || {};
-          panel.querySelector('b').insertAdjacentHTML('afterend', '<div style="margin-top:6px"><b style="font-size:12px">' + (p.company || '未填单位') + '</b><div style="color:#5f7568">' + (p.title || '现场招聘') + '</div><div style="font-size:10.5px;color:#7b8b80">' + (e.school || '') + ' · ' + (e.title || '') + '</div></div>');
+          const sourceUrl = p.sourceUrl || e.sourceUrl || '';
+          let host = '';
+          try { host = sourceUrl ? new URL(sourceUrl).hostname : ''; } catch { host = ''; }
+          const sourceLabel = d.sourceName || p.sourceId || host || '未记录来源';
+          const sourceHtml = sourceUrl ? '<a href="' + esc(sourceUrl) + '" target="_blank" rel="noopener">' + esc(sourceLabel) + ' ↗</a>' : esc(sourceLabel);
+          panel.querySelector('b').insertAdjacentHTML('afterend', '<div style="margin-top:6px"><b style="font-size:12px">' + esc(p.company || '未填单位') + '</b><div style="color:#5f7568">' + esc(p.title || '现场招聘') + '</div><div style="font-size:10.5px;color:#7b8b80">' + esc(e.school || '') + (e.title ? ' · ' + esc(e.title) : '') + '</div><div style="margin-top:4px">来源：' + sourceHtml + '</div></div>');
         } catch { if (attempt < 10) setTimeout(() => loadProject(attempt + 1), 1500); }
       };
       loadProject();

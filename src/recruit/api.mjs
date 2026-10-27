@@ -97,7 +97,17 @@ export async function handleRecruit({method, pathname, url, body, dir}) {
       const id = pathname.split('/')[1];
       const data = withStore(dir, store => {
         const project = store.getProject(id);
-        return project ? {project, event: store.getEvent(project.eventId)} : null;
+        if (!project) return null;
+        let sourceName = '';
+        if (project.sourceId.startsWith('wechat:')) {
+          try {
+            const ws = WeChatStore.open(join(dir, 'wechat.db'));
+            try { sourceName = ws.getAccount(project.sourceId.slice('wechat:'.length))?.name || ''; } finally { ws.close(); }
+          } catch { /* 公众号库不存在时用来源 ID */ }
+        } else if (project.sourceId) {
+          sourceName = store.sourceName(project.sourceId);
+        }
+        return {project, event: store.getEvent(project.eventId), sourceName};
       });
       return data ? {json: data} : {status: 404, json: {error: '招聘项目不存在'}};
     }

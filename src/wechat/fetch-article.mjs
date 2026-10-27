@@ -38,7 +38,7 @@ export async function fetchWechatArticle(url) {
     } catch { /* 保留 HTTP 结果 */ }
   }
   if (text.trim().length < 120) {
-    return {ok: false, message: '微信要求验证或正文为空；请把推文正文粘贴进来', title, text: '', link, nickname, biz};
+    return {ok: false, needPaste: true, message: '微信要求验证或正文为空；请把推文正文粘贴进来', title, text: '', link, nickname, biz};
   }
   return {ok: true, title: title || text.split('\n').map(s => s.trim()).find(Boolean) || '公众号文章', text, publishedAt, link, nickname, biz};
 }

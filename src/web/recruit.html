@@ -512,7 +512,10 @@ el('#wx-harvest').onclick=async()=>{
     const resp=await fetch('/api/wechat/harvest',{method:'POST',headers:{'x-career-token':TOKEN,'content-type':'application/json'},body:JSON.stringify({url})});
     const d=await resp.json().catch(()=>({error:'返回格式异常'}));
     if(!resp.ok)throw new Error(d.error||('HTTP '+resp.status));
-    el('#wx-result').innerHTML='发现 '+d.links+' 个链接，入库 '+d.imported+' 篇'+(d.articles?.length?'<br>'+d.articles.map(a=>esc(a.title)+' · '+esc(a.hasRecruitment)+' · '+a.projects+' 项目草稿').join('<br>'):'');
+    const parts=['发现 '+d.links+' 个链接，入库 '+d.imported+' 篇，跳过 '+(d.skipped||0)+' 篇'];
+    if(d.articles?.length)parts.push(d.articles.map(a=>esc(a.title)+' · '+esc(a.hasRecruitment)+' · '+a.projects+' 项目草稿'+(a.summary?'<br><span style="color:#7b8b80">'+esc(a.summary)+'</span>':'')).join('<br>'));
+    if(d.failures?.length)parts.push('需处理：'+d.failures.map(f=>'<a href="'+esc(f.link)+'" target="_blank" rel="noopener">'+esc(f.link)+'</a> '+esc(f.message)).join('<br>'));
+    el('#wx-result').innerHTML=parts.join('<br>');
     el('#wx-status').textContent='';await loadAll();
   }catch(e){el('#wx-status').textContent=e.message;toast(e.message)}
 };

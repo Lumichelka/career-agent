@@ -14,16 +14,21 @@ export function findWechatLinks(text) {
   return [...out];
 }
 
-export async function harvestWechat({text, dir, school = '', limit = 3, onLog = () => {}} = {}) {
+export async function harvestWechat({text, dir, school = '', limit = 3, onLog = () => {}, fetchArticle = fetchWechatArticle} = {}) {
   const links = findWechatLinks(text).slice(0, Math.max(1, Math.min(8, limit)));
-  const result = {links: links.length, imported: 0, skipped: 0, articles: []};
+  const result = {links: links.length, imported: 0, skipped: 0, articles: [], failures: []};
   if (!links.length) return result;
   const store = WeChatStore.open(join(dir, 'wechat.db'));
   try {
     for (const link of links) {
       if (store.hasArticle(link)) { result.skipped++; continue; }
-      const got = await fetchWechatArticle(link);
-      if (!got.ok) { result.skipped++; onLog?.({text: '公众号跳过：' + got.message}); continue; }
+      const got = await fetchArticle(link);
+      if (!got.ok) {
+        result.skipped++;
+        result.failures.push({link, message: got.message, needPaste: got.needPaste === true});
+        onLog?.({text: '公众号跳过：' + got.message});
+        continue;
+      }
       const biz = got.biz || bizOf(link);
       const owner = store.resolveAccount({biz, nickname: got.nickname, title: got.title, text: got.text, school});
       const account = owner || store.addAccount({name: got.nickname || '未归类公众号', school, biz, note: '从来源页发现的文章链接'});
@@ -34,7 +39,7 @@ export async function harvestWechat({text, dir, school = '', limit = 3, onLog = 
       });
       const saved = store.saveAnalysis(article.id, analysis);
       result.imported++;
-      result.articles.push({id: saved.id, title: saved.title, account: account.name, hasRecruitment: saved.hasRecruitment, projects: analysis.projects.length});
+      result.articles.push({id: saved.id, title: saved.title, account: account.name, hasRecruitment: saved.hasRecruitment, projects: analysis.projects.length, summary: got.text.replace(/\s+/g, ' ').trim().slice(0, 120)});
       onLog?.({text: '公众号入库：' + got.title.slice(0, 30) + '（' + saved.hasRecruitment + '，' + analysis.projects.length + ' 项目草稿）'});
     }
     return result;
