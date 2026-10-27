@@ -19,8 +19,9 @@ export default {
   parseList(html, source) { return [{title, startAt, venue, url, ...}]; },
   // json 模式签名：parseList(_html, source, json)
   // 详情页：detail: true + parseDetail(text, item)
-  // 列表需要浏览器渲染：fetchList({source, limit, onLog}) → items | {items, pageCount, pages}
+  // 列表需要浏览器渲染或翻页：fetchList({source, limit, onLog, fetchText}) → items | {items, pageCount, pages}
   //   提供 fetchList 时优先于按 mode 抓取；detailAll: true 表示列表已有地点也要逐条抓详情
+  // 可选：collectLimit 是未显式传 limit 时的默认上限；翻页失败请 throw SourceError，不要吞成半页成功
 };
 ```
 
@@ -38,4 +39,6 @@ export default {
 - 「不直连查询接口」不等于合规：如果页面自身 JS 会 POST robots 禁止的接口（例如 UIBE 的
   /front/zp_query/），默认 `enabled:false` 并在 `note` 标「需人工确认 robots」，不要声称已合规；
 - 抓不到就 `enabled: false` 并写 `note`，不要把"没抓到"显示成"没有活动"；
+- 列表级源（多场共用一个列表页、没有独立详情页）的 `url` 可以留空，但要在 `notes` 标“无详情链接”；
+- 适配器不要自己吞错：翻页/接口失败抛 `SourceError(kind, message)`（kind: blocked / login_required / changed / network / empty / parse），由采集器统一记录；
 - 返回的 `startAt` 必须是带 `+08:00` 的 ISO 时间，否则会被丢弃。

@@ -171,6 +171,27 @@ test('西南石油双选会：走 JSON 列表接口，按 URL 命中', async () 
   assert.equal(r.category, VERIFY_CATEGORY.OK);
 });
 
+test('西南石油双选会：复核翻到第二页仍能找到未来活动，不误判页面变化', async () => {
+  const src = sourceById('swpu-jobfair');
+  const url = 'https://jyzx.swpu.edu.cn/detail/jobfair?id=888';
+  const event = eventFor(src, {sourceUrl: url, kind: '双选会', title: '未来双选会A'});
+  const calls = [];
+  const fetchText = async (u) => {
+    calls.push(u);
+    const start = Number(new URL(u).searchParams.get('start'));
+    const list = start === 1
+      ? Array.from({length: 20}, (_, i) => ({fair_id: 100 + i, title: '过去场次' + i, meet_day: '2026-10-01', meet_time: '09:00:00'}))
+      : [{fair_id: 888, title: event.title, meet_day: '2026-10-26', meet_time: '09:00:00'}];
+    return {ok: true, status: 200, text: JSON.stringify({code: 1, data: {list}})};
+  };
+  const r = await verifyEvent(src, event, {fetchText});
+  assert.equal(r.ok, true);
+  assert.equal(r.category, VERIFY_CATEGORY.OK);
+  assert.equal(calls.length, 2, '应翻到第二页，而不是只看第一页');
+  assert.match(calls[0], /start=1/);
+  assert.match(calls[1], /start=2/);
+});
+
 
 function makeEvent(source, over = {}) {
   return {

@@ -50,7 +50,7 @@ const LIST_VERIFY = {
   },
   'sufe-xjh': {kind: 'list-json'},
   'sicau-xjh': {kind: 'list-json'},
-  'swpu-jobfair': {kind: 'list-json'},
+  'swpu-jobfair': {kind: 'list-json', paginate: true},
   'uestc-xjh': {
     kind: 'list-level',
     build(_source, event) {
@@ -81,6 +81,16 @@ function requestBody(source) {
 
 // 用源自己的 JSON 接口取回当前列表项（对多页源翻页；失败返回 {ok:false}）。
 async function fetchListItems(source, event, spec, fetchText) {
+  // 源自己实现了 fetchList（如西南石油双选会要翻页才看得到第 21 条以后的活动）时，
+  // 复核必须走同一条抓取路径，否则新采集到的活动一复核就必然报「页面已变化」。
+  if (spec.paginate && typeof source.fetchList === 'function') {
+    try {
+      const got = await source.fetchList({source, limit: Number(source.collectLimit) || 2000, fetchText});
+      return {ok: true, items: Array.isArray(got) ? got : (got?.items || [])};
+    } catch (err) {
+      return {ok: false, res: {status: 0, reason: err?.kind || 'network', message: err?.message || String(err)}};
+    }
+  }
   const pages = source.pageUrl && !spec.build ? Math.min(source.maxPages || 1, 5) : 1;
   const items = [];
   for (let p = 1; p <= pages; p++) {
