@@ -33,6 +33,14 @@ test('来源健康工具说明使用七状态词表，不再写旧的 ok 语义'
   assert.doesNotMatch(description, /ok 只在/);
 });
 
+test('规格 #1 的智能体只读工具齐全', () => {
+  for (const name of ['career_recruit_projects', 'career_recruit_project', 'career_source_health', 'career_wechat_articles']) {
+    const tool = getTool(name);
+    assert.ok(tool, name + ' 应已注册');
+    assert.equal(tool.permission, 'read', name + ' 应只读');
+  }
+});
+
 test('模型工具集不暴露权限与处理器', () => {
   const modelTools = toolsForModel();
   assert.equal(modelTools.length, TOOLS.length);
