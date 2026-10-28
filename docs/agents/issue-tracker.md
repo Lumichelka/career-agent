@@ -13,6 +13,21 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## Spec closeout: acceptance → evidence
+
+Closing a spec is a claim that the work is on the long-lived branch, reproducible at the recorded commit, and that every unresolved item has been handled. Closing all implementation tickets is not evidence by itself.
+
+Before closing a spec, write a closeout comment that maps **every acceptance bullet to evidence**:
+
+- One line per acceptance item: `- [x] <criterion> — <evidence>`. Evidence is a commit SHA, a test name and result, a command output, or a file path with the relevant lines.
+- If an acceptance item names a surface, enumerate that surface. For tools, list every required tool name; for routes, list every required path; for docs, list the sections updated.
+- For collection or counting work, record the fixture, the expected count, and the actual count. A happy-path fixture that never reaches the boundary is not evidence.
+- For cross-ticket work, add one combined check: independently green tickets do not prove the shared module is green together.
+- Record the branch, commit SHA, exact commands, and results. Do not write "all tests pass" without the command and the counts.
+- For anything not done, choose one: finish it now, open a new ticket and cite its number, or record the user's explicit decision to skip it. "Later" is not a disposition.
+
+The close comment is what a future reader consumes. If a required tool or route is missing from the implementation, the closeout mapping must show it rather than hide it behind a green summary.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
