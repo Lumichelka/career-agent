@@ -7,9 +7,9 @@ import {fileURLToPath} from 'node:url';
 const SCRIPT = fileURLToPath(new URL('../../scripts/ocr.ps1', import.meta.url));
 
 export async function ocrImage(file, {timeout = 25000} = {}) {
-  if (process.platform !== 'win32') return {ok: false, reason: '当前系统没有可用的本地 OCR'};
   const absolute = resolve(file);
   if (!existsSync(absolute)) return {ok: false, reason: '截图文件不存在'};
+  if (process.platform !== 'win32') return {ok: false, reason: '当前系统没有可用的本地 OCR'};
   if (!existsSync(SCRIPT)) return {ok: false, reason: '缺少 scripts/ocr.ps1'};
   return new Promise(resolvePromise => {
     execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT, absolute], {
